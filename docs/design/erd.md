@@ -318,7 +318,7 @@ erDiagram
 - weekly_reports: SUCCEEDED이면 content 필수, period_end는 period_start+7일.
 - costs/tokens/dwell_time: NULL이 아니면 0 이상.
 - issue_relations: 자기 연결 금지, FOLLOW_UP만 허용, 관계 등록 직렬화 안에서 순환 검사.
-- FK 삭제 동작, 조회 인덱스, JSON 검증은 [데이터 계약](data-contracts.md)을 따른다.
+- FK 삭제 동작, 조회 인덱스, JSON 검증은 [데이터 계약](../policies/data-contracts.md)을 따른다.
 - article_discoveries의 도입, vector(D)의 D, 개별 enum/점수 범위는 구현 전 결정한다.
 - 본문·후보·입력 manifest·전체 버전 이력을 저장하는 테이블은 현 모델에 포함하지 않는다.
 

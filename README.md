@@ -110,7 +110,7 @@ request: IssueSearchRequest
 ```
 
 SDK·e2e·OpenAPI 산출물은 `npm run contracts:all`로 생성합니다. 생성 결과의 세부 규칙과 보정
-범위는 [데이터·응답 계약](docs/design/data-contracts.md)과 [백엔드 구현 컨벤션](docs/design/backend-conventions.md)을
+범위는 [데이터·응답 계약](docs/policies/data-contracts.md)과 [백엔드 구현 컨벤션](docs/conventions/backend-conventions.md)을
 참고하세요.
 
 ## 구조
@@ -142,17 +142,14 @@ core는 feature별로 domain과 repository를 나누고, `common`에는 여러 f
 
 ## 문서
 
-[설계 안내](docs/design/README.md)에서 문서 목록과 확정 범위를 확인하세요.
+[문서 안내](docs/README.md)에서 목적별 분류와 각 영역의 진입 문서를 확인하세요.
 
-| 문서                                                     | 내용                                    |
-| -------------------------------------------------------- | --------------------------------------- |
-| [요구사항](docs/design/requirements.md)                  | 서비스 목표와 기능별 수용 기준          |
-| [ERD](docs/design/erd.md)                                | 테이블·관계·키·제약                     |
-| [이슈 생성 파이프라인](docs/design/issue-pipeline.md)    | 상태 전이·중복 판정·실패 복구           |
-| [데이터·응답 계약](docs/design/data-contracts.md)        | API와 데이터 보존 규칙                  |
-| [구현 계획](docs/design/implementation-plan.md)          | 구현 순서와 완료 기준                   |
-| [백엔드 구현 컨벤션](docs/design/backend-conventions.md) | 패키지·예외·트랜잭션·동시성·인덱스 원칙 |
-| [로깅 설계](docs/design/logging.design.html)             | 구조화 로그와 요청 지연 기록            |
-| [보안 리뷰](docs/reviews/security.review.html)           | 확인된 보안 항목과 잔여 운영 과제       |
+| 영역                                           | 내용                                      |
+| ---------------------------------------------- | ----------------------------------------- |
+| [구현 설계](docs/design/README.md)             | 모듈·데이터·API·실행 흐름을 구현하는 방법 |
+| [구현 컨벤션](docs/conventions/README.md)      | 기능 전반에 반복 적용하는 작성 규칙       |
+| [의사결정 기록](docs/decisions/README.md)      | 선택의 근거와 확정·미확정 상태            |
+| [정책과 계약](docs/policies/README.md)         | 요구사항과 외부 데이터·API 계약           |
+| [보안 리뷰](docs/reviews/security.review.html) | 확인된 보안 항목과 잔여 운영 과제         |
 
 기준: 2026-09-12. 문서 작성은 구현 승인이나 구현 완료를 뜻하지 않습니다.
