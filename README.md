@@ -151,5 +151,3 @@ core는 feature별로 domain과 repository를 나누고, `common`에는 여러 f
 | [의사결정 기록](docs/decisions/README.md)      | 선택의 근거와 확정·미확정 상태            |
 | [정책과 계약](docs/policies/README.md)         | 요구사항과 외부 데이터·API 계약           |
 | [보안 리뷰](docs/reviews/security.review.html) | 확인된 보안 항목과 잔여 운영 과제         |
-
-기준: 2026-09-12. 문서 작성은 구현 승인이나 구현 완료를 뜻하지 않습니다.
