@@ -1,0 +1,1044 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Nestia 마이그레이션 구현 제어</title>
+    <meta
+      name="purpose"
+      content="승인된 Nestia·Typia API 계약 전환의 구현 상태와 검증 증거를 관리"
+    />
+    <meta name="audience" content="백엔드 구현 개발자와 리뷰어" />
+    <meta
+      name="problem"
+      content="컴파일러 전환, 요청·응답 계약, 오류 매핑, 생성 산출물의 실제 구현과 검증을 추적"
+    />
+    <meta
+      name="core-flow"
+      content="승인 기준선 확인 → 빌드 경로 전환 → 파일럿 라우트 검증 → 전체 적용 → 생성물·운영 검증"
+    />
+    <style>
+      body {
+        max-width: 1040px;
+        margin: 36px auto;
+        padding: 0 20px;
+        color: #233349;
+        background: #f5f7fb;
+        font:
+          16px/1.7 system-ui,
+          sans-serif;
+      }
+      header,
+      section,
+      aside {
+        margin: 22px 0;
+        padding: 22px;
+        background: #fff;
+        border: 1px solid #d6dfeb;
+        border-radius: 12px;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      nav {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      a {
+        color: #255bb4;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 9px;
+        border: 1px solid #d6dfeb;
+        text-align: left;
+        vertical-align: top;
+      }
+      aside {
+        border-left: 4px solid #b87920;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>구현 제어 · UUIDv7·파일명 후속 점검 및 견고성 수정 완료 · Compact</p>
+      <h1>Nestia 마이그레이션 구현 제어</h1>
+      <p>
+        승인된 설계를 실제 코드와 실행 증거로 대조한다. 이 문서는 설계 기준선을 바꾸지 않고 구현 중
+        발생한 사실·이슈·검증 결과를 기록한다.
+      </p>
+      <p>
+        작성일: <time datetime="2026-09-12">2026-09-12</time> · 갱신일:
+        <time datetime="2026-09-12">2026-09-12</time> · 기준선 승인:
+        <time datetime="2026-09-12T04:23:49Z">2026-09-12T04:23:49Z</time>
+      </p>
+      <p>
+        저장소: <code>newtine-backend</code> · 브랜치: <code>main</code> · commit range: 없음 ·
+        PR/이슈: 없음
+      </p>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#robustness-review">최신 견고성 점검</a>
+      <a href="#baseline-reference">기준선</a>
+      <a href="#current-implementation">현재 구현</a>
+      <a href="#implementation-status">진행 상태</a>
+      <a href="#boundaries">영향 경계</a>
+      <a href="#issue-register">이슈</a>
+      <a href="#verification-evidence">검증 증거</a>
+      <a href="#review">리뷰</a>
+      <a href="#implementation-control-state">제어 상태</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="robustness-review">
+          <h2>2026-09-12 UUIDv7·파일명 변경 후 견고성 점검</h2>
+          <p>
+            자기 변경 리뷰 · 작성자/리뷰어: Codex · main · 커밋 없음, 전체 신규 작업 트리 기준. 아래
+            재현은 수정 전 점검 기록이다. 사용자의 “개선 ㄱ” 승인 후 ROB-001~004와
+            FOUNDATION-R-001을 해결했다.
+            <a href="foundationRobustness.implementation.html">후속 구현·검증·독립 리뷰 결과</a>가
+            현재 상태다.
+          </p>
+          <h3>범위·의도·실행 흐름</h3>
+          <p>
+            API·batch 실행 골격, UUIDv7 생성, 예외 계약과 요청 추적, DB 설정, transaction adapter,
+            파일명과 생성 계약 참조를 점검했다. uuid.v7() → core 생성기 → Entity 생성자/요청
+            middleware로 연결된다. 업무 엔티티와 repository 매핑은 아직 없으며 DB 영속화 완료를
+            의미하지 않는다.
+          </p>
+          <p>
+            HTTP는 HttpRequestContextMiddleware → body parser → 모듈 middleware → controller 순으로
+            실행된다. parser에서 실패해도 앞 단계에서 만든 request ID가 응답 헤더와 로그에 연결된다.
+            필터는 Nest HttpException 여부로 상태와 로그 분기를 결정한다.
+          </p>
+          <h3>발견 사항</h3>
+          <table>
+            <caption>
+              재현된 결함과 기존 설정 위험
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">ID·상태</th>
+                <th scope="col">근거·실제 동작</th>
+                <th scope="col">영향·수정 방향</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">ROB-001 · fixed · P2</th>
+                <td>수정 전: 110KB JSON이 500으로 오분류됨.</td>
+                <td>parser 경계 정규화로 413 네 필드 응답·계약 테스트 통과.</td>
+              </tr>
+              <tr>
+                <th scope="row">ROB-002 · fixed · P2</th>
+                <td>수정 전: parser 실패에 x-request-id 없음·unknown-request 로그.</td>
+                <td>ID 부여를 parser 앞으로 옮김. 실제 400/413의 헤더·로그 ID 일치 검증.</td>
+              </tr>
+              <tr>
+                <th scope="row">ROB-003 · fixed · P2</th>
+                <td>수정 전: HttpException/DomainException 5xx의 원인·stack 로그 손실.</td>
+                <td>error 수준의 제한된 예외 진단과 cause 기록, payload 제외 검증.</td>
+              </tr>
+              <tr>
+                <th scope="row">ROB-004 · fixed · P2</th>
+                <td>수정 전: 미등록 code와 toString 등 prototype 이름 처리 실패.</td>
+                <td>own-key 조회와 INTERNAL_ERROR 정규화 회귀 테스트 통과.</td>
+              </tr>
+              <tr>
+                <th scope="row">FOUNDATION-R-001 · fixed · P1</th>
+                <td>수정 전: 운영 DB 설정 누락 시 개발 자격증명 fallback.</td>
+                <td>
+                  명시적 development/test에만 기본값. 그 외 필수값·포트 검증. API/batch의 누락 설정
+                  exit1 확인.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>검증 증거·공백</h3>
+          <p>
+            이번 점검에서 unit 13개, integration 1개, contract 2개, generated typecheck, API/batch
+            build, lint, format:check 통과. 기존 generated 산출물을 검사했으며 재생성은 하지 않았다.
+            추가 임시 진단으로 필터 로그/미등록 코드와 빌드된 API의 정상 200·malformed JSON 400·용량
+            초과 500을 재현했다. 생성물·테스트 통과만으로 실패 경계의 정확성을 보장하지 않는다.
+          </p>
+          <p>
+            integration 1개는 설정 객체 검사이며 PostgreSQL 연결 테스트가 아니다. transaction
+            테스트는 mock을 사용한다. UUIDv7 저장·조회 왕복, PK 인덱스, 실제 commit/rollback·요청
+            격리는 미검증이다. UUID 테스트의 same-millisecond 명칭과 달리 시각을 고정하지 않아 동률
+            시각 동작을 보장하는 테스트도 아니다.
+          </p>
+          <h3>잔여 위험·판정</h3>
+          <p>
+            UUID 자체 바이트 생성은 uuid 라이브러리에 위임되어 직접 구현 위험은 제거됐다. 파일
+            참조는 빌드·타입 검사로 확인했다. 단, mikroOrm.transaction-manager.ts와 문서 경로에
+            하이픈 표기가 일부 남아 명명 규칙과 불일치한다. API bootstrap listen 실패 시 명시적인
+            app.close()·exit code 처리는 초기 골격의 blocker가 아닌 후속 운영 하드닝 후보다. 생성
+            계약 drift 검사와 CI 자동화는 추가 확인/보완 대상이다.
+          </p>
+          <p>
+            <strong>후속 리뷰 판단: 승인 범위의 concrete finding 없음.</strong> 재현된 다섯 문제는
+            해결했고 독립 리뷰를 통과했다. DB 운영 견고성은 실제 영속 모델과 통합 테스트를 추가한 뒤
+            판단한다. 세부 검증과 남은 운영 이해 상태는 후속 구현 기록을 따른다.
+          </p>
+        </section>
+        <section id="baseline-reference">
+          <h2>기준선 참조</h2>
+          <p>
+            설계 기준선: <a href="nestia-migration-design.html">Nestia 마이그레이션 설계</a>. 승인
+            범위는 G1-A·G2-B·G3-A·G4-A·G5-A·G6-A·G7-A·G8-B이며, 생성물 module resolution은 후속
+            점검에서 G9-B로 조정했다.
+          </p>
+          <dl>
+            <dt>API 계약</dt>
+            <dd>Nestia·Typia의 Typed request/response, 동일 route의 Zod 중복 검증 없음</dd>
+            <dt>컴파일·개발·테스트 경로</dt>
+            <dd>
+              <code>ttsc</code>·<code>ttsx</code>를 build/dev에 사용하고, TypeScript ESM 테스트는
+              <code>jest.config.mjs</code>·<code>jest.transformer.mjs</code>를 통해 Jest로 실행
+            </dd>
+            <dt>입력 필드</dt>
+            <dd><code>validateEquals</code>로 미허용 필드 거부</dd>
+            <dt>오류 계약</dt>
+            <dd>
+              <code>GlobalExceptionFilter</code>가
+              <code>title</code>·<code>status</code>·<code>detail</code>·<code>code</code> 네 필드로
+              RFC 9457 실패 응답을 정규화한다.
+              <code>type</code>·<code>instance</code>·<code>errors</code>는 이번 보완에서 제거한다.
+            </dd>
+            <dt>생성물</dt>
+            <dd>파일럿부터 SDK·Swagger·e2e 생성 및 드리프트 검증</dd>
+          </dl>
+        </section>
+
+        <section id="current-implementation">
+          <h2>현재 구현</h2>
+          <p>
+            승인 범위의 기존 구현과 리뷰 후속 범위의 수정을 완료했다. 전체 점검에서 발견한 공통
+            예외·생성 계약·smoke 격리 결함도 보정했다. Nest CLI/Rspack 실행 경로와
+            class-validator·class-transformer 직접 의존성을 제거하고 Nestia·Typia 계약과
+            <code>ttsc</code>·<code>ttsx</code> 경로로 전환했다.
+          </p>
+          <p>
+            <code>POST /issues/search</code> 파일럿은 TypedBody·TypedRoute와
+            <code>validateEquals</code>를 사용한다. 유효 요청은 성공 data만 반환하고, 잘못된 요청은
+            GlobalExceptionFilter가 RFC 9457 <code>application/problem+json</code>으로 정규화한다.
+            4xx도 프레임워크의 원문 payload를 그대로 반사하지 않고 승인된 고정 detail을 사용하며,
+            5xx에서는 내부 payload를 버리고 <code>INTERNAL_ERROR</code>와 일반 detail만 반환한다.
+            5xx 로그는 예외 message 원문을 제외한 제한된 진단만 기록한다.
+            <code>generated/api</code>, <code>generated/e2e</code>,
+            <code>generated/openapi.json</code>은 공식 생성 명령으로 생성·검증한다. SDK·e2e는
+            Nestia를 직접 실행하고, <code>scripts/openapi.mjs</code>가 Swagger 생성 직후
+            ProblemDetails 실패 응답의 media type만 <code>application/problem+json</code>으로
+            이동한다. OpenAPI는 상대 서버 URL과 RFC 9457 실패 응답을 포함하고, 생성 TypeScript는
+            Bundler 해석 규칙으로 검사한다. smoke는 자식 API의 IPC 준비 신호와 실제 할당 포트를
+            확인한다.
+          </p>
+          <p>
+            <code>IssueSearchService</code>는 API request/response 타입을 직접 사용하지 않는다.
+            <code>type/issueSearch.mapper.ts</code>가 <code>IssueSearchRequest</code>를 내부
+            <code>IssueSearchInput</code>으로 변환하고 service 결과를
+            <code>IssueSearchResponse</code>로 매핑한다. controller는 변환 함수를 호출해 HTTP 흐름만
+            조합한다. 내부 타입은 <code>issueSearch.input.ts</code>·
+            <code>issueSearch.output.ts</code>에 두며, 현재 응답 JSON과 Nestia 생성 계약에는 변화가
+            없다. <code>TypedException&lt;ProblemDetails&gt;</code>가 API 예외 정의 객체로 상태
+            코드와 응답 schema를 Nestia에 선언한다. <code>ApiException</code>은 에러코드·HTTP
+            상태·title·기본 설명을 한 곳에서 관리하고, 글로벌 필터도 같은 정의를 사용한다.
+            persistence가 연결되기 전까지 service는 가짜 업무 데이터를 만들지 않고 검색 결과를 빈
+            배열로 반환한다.
+          </p>
+          <p>
+            도메인 예외는 <code>DomainException</code>을 직접 생성하지 않는 추상 기반으로 바꾸고, 첫
+            업무 경계에 <code>IssueException</code>과 <code>ISSUE_NOT_FOUND</code> 코드를 추가했다.
+            API adapter의 <code>domainException.mapper.ts</code>가 도메인 코드와
+            <code>ApiException</code>을 연결한다. 필터는 응답에 기존 네 필드만 남기고,
+            <code>exceptionName</code
+            >·<code>domain</code>·<code>domainCode</code>·<code>apiCode</code>·
+            <code>requestId</code>를 구조화 로그로 기록한다. 매핑되지 않은 도메인 코드는 외부에
+            노출하지 않고 <code>INTERNAL_ERROR</code>로 처리한다.
+          </p>
+          <p>
+            <code>typescript</code> 6.0.3은 현재 ESLint 타입 분석기의 peer 범위를 유지하고,
+            <code>ttsc</code>가 요구하는 TypeScript 7.0.2 실행 패키지는 지원 OS·아키텍처별 optional
+            dependency로 lock했다. 현재 macOS arm64와 Linux x64 설치 계획을 확인했다.
+          </p>
+        </section>
+
+        <section id="implementation-status">
+          <h2>구현 상태</h2>
+          <p>
+            현재 상태: 네 필드 실패 응답 보완 구현·검증 완료 · 다음 단계: 배포 소비자 호환성을
+            확인하고, 업무 오류가 추가될 때 동일한 계약을 적용한다.
+          </p>
+          <ol>
+            <li>
+              package script와 tsconfig를 <code>ttsc</code>·<code>ttsx</code> 기준으로 정리했다.
+            </li>
+            <li>업무 JSON 파일럿의 request/response type과 Typed decorator를 추가했다.</li>
+            <li><code>validateEquals</code>와 GlobalExceptionFilter RFC 매핑을 검증했다.</li>
+            <li>
+              <code>@nestia/sdk</code>로 SDK·e2e 산출물을 생성하고 Swagger 생성 스크립트를 추가했다.
+            </li>
+            <li>
+              설정과 <code>TypedException</code> 객체 정의로 상대 서버 URL과 RFC 9457 실패 응답을
+              선언했다.
+            </li>
+            <li>
+              계약 테스트와 Bundler 기반 생성물 typecheck를 추가하고 단위·통합·build·smoke를
+              통과시켰다.
+            </li>
+            <li>5xx RFC 응답에서 내부 오류 payload를 제거하고 회귀 테스트를 추가했다.</li>
+            <li>
+              <code>ProblemDetailsResponses</code>를 제거하고 <code>scripts/openapi.mjs</code>에
+              생성·media type 보정을 결합했다. 보정 대상 외 응답 보존·충돌·멱등성 테스트를 추가했다.
+            </li>
+            <li>
+              <code>ApiException</code> 정의 객체를 추가하고 실제 route별 실패 상태만
+              <code>TypedException&lt;ProblemDetails&gt;</code>로 선언했다.
+            </li>
+            <li>
+              smoke에 자식 프로세스 준비 handshake, ephemeral port 기본값, 요청 timeout을 추가했다.
+            </li>
+            <li>
+              API 계약 타입과 service 내부 타입을 분리하고 controller 변환 경계를 추가했다. API
+              smoke, contracts:check, typecheck, build, lint, format:check가 통과했다.
+            </li>
+            <li>
+              <code>toIssueSearchInput</code>·<code>toIssueSearchResponse</code>를 별도 mapper로
+              이동했다.
+            </li>
+            <li>
+              <code>DomainException</code>을 추상 기반으로 분리하고 <code>IssueException</code>을
+              추가했다. API adapter 매핑과 도메인 식별 structured log를 검증했다.
+            </li>
+          </ol>
+        </section>
+
+        <section id="boundaries">
+          <h2>영향 경계와 상태 전이</h2>
+          <table>
+            <caption>
+              승인된 변경 경계
+            </caption>
+            <thead>
+              <tr>
+                <th>경계</th>
+                <th>소유</th>
+                <th>예상 변경</th>
+                <th>불변식</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>apps/api adapter</td>
+                <td>HTTP type/decorator/filter</td>
+                <td>Nestia·Typia로 request/response 계약 전환</td>
+                <td>성공은 직접 반환, 실패는 RFC 9457</td>
+              </tr>
+              <tr>
+                <td>libs/core</td>
+                <td>feature/domain/entity/vo/repository port</td>
+                <td>행동 변경 없음</td>
+                <td>Nestia·HTTP 의존 금지</td>
+              </tr>
+              <tr>
+                <td>build/dev/test</td>
+                <td>package.json·tsconfig·scripts</td>
+                <td>ttsc·ttsx 실행 경로와 alias/output 조정</td>
+                <td>변환기 우회 실행 금지</td>
+              </tr>
+              <tr>
+                <td>SDK·Swagger·e2e</td>
+                <td>@nestia/sdk 생성 정책</td>
+                <td>파일럿부터 생성·드리프트 검증</td>
+                <td>생성 결과가 API 타입과 같은 계약을 반영</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="design-delta">
+          <h2>설계 차이</h2>
+          <p>
+            리뷰 후 승인된 후속 설계는 세 가지다. G7-A는 생성 OpenAPI의 서버를 상대 경로
+            <code>/</code>로 고정해 호스트·포트를 노출하지 않는다. G8-B는 각 API operation에 RFC
+            9457 <code>ProblemDetails</code> 실패 schema와 400·404·409·500 응답을 생성하되, SDK의
+            기본 <code>HttpError</code> 예외 호출 방식은 유지한다. 생성물은 Nestia가 직접 만들고,
+            source decorator와 <code>SwaggerCustomizer</code>가 실패 media type을 보정한다. G9-B는
+            Nestia가 생성하는 확장자 없는 상대 import를 후처리하지 않고 생성물 전용 Bundler
+            typecheck로 검증한다. 전체 점검 보정은 이 기준선의 동작을 바꾸지 않고 세부 불변식을
+            보강했다. 5xx 응답은 내부 payload를 포함하지 않는다. smoke는 자식 프로세스의 준비
+            handshake와 실제 포트를 사용하고 각 요청에 timeout을 둔다. 이후 생성 단계 보완에서 route
+            customizer는 제거하고 <code>scripts/openapi.mjs</code>가 최종 media type 보정을
+            담당하도록 변경했다.
+          </p>
+        </section>
+
+        <section id="minimal-response-delta">
+          <h2>후속 설계 승인 범위: 네 필드 실패 응답</h2>
+          <p>
+            기준선은
+            <a href="nestia-migration-design.html#problemTypeRevision">네 필드 실패 응답 설계</a>다.
+            사용자가 구현을 승인한 범위는
+            <code>title</code>·<code>status</code>·<code>detail</code>·<code>code</code>만 반환하는
+            실패 계약이다. <code>type</code>·<code>instance</code>·<code>errors</code>와 별도 요청
+            경로 필드는 응답과 OpenAPI에서 제거한다. <code>application/problem+json</code>, 5xx 상세
+            은닉, <code>x-request-id</code> 헤더·로그 추적, 성공 응답의 data 형태는 유지한다.
+          </p>
+          <dl>
+            <dt>소유 경계</dt>
+            <dd>
+              GlobalExceptionFilter, ProblemDetails 타입, api.exception, unit·smoke·contract 테스트,
+              생성 산출물 및 관련 문서
+            </dd>
+            <dt>불변식</dt>
+            <dd>
+              실패 JSON의 키는 네 필드와 선택적 확장 필드가 아니라 정확히 네 필드이며, 검증 오류도
+              errors 목록을 만들지 않는다.
+            </dd>
+            <dt>운영 추적</dt>
+            <dd>
+              본문 instance 대신 기존 <code>x-request-id</code>와 서버 로그의 request ID를 사용한다.
+            </dd>
+            <dt>호환성</dt>
+            <dd>
+              기존 소비자가 제거되는 선택 필드를 필수로 읽으면 영향을 받으므로 생성 SDK와 내부
+              소비자를 함께 갱신한다. 외부 배포 소비자 여부는 미확인이다.
+            </dd>
+          </dl>
+          <p>
+            상태: 구현·검증 완료 · <code>npm run test:unit</code>,
+            <code>npm run contracts:check</code>, <code>npm run typecheck</code>,
+            <code>npm run lint</code>, <code>npm run format:check</code>,
+            <code>npm run build</code>, <code>npm run test:smoke</code>가 통과했다. smoke에서 실제
+            validation 400·missing route 404 응답의 키 집합과 <code>x-request-id</code> 헤더를
+            확인했다.
+          </p>
+        </section>
+
+        <section id="execution-contract">
+          <h2>후속 구현 실행 계약</h2>
+          <dl>
+            <dt>소유 파일</dt>
+            <dd>
+              <code>nestia.config.ts</code>, <code>apps/api/src/issue/issue.controller.ts</code>,
+              <code>apps/api/src/common/filter/globalExceptionFilter.ts</code>,
+              <code>apps/api/src/main.ts</code>,
+              <code>apps/api/src/common/filter/problemDetails.responses.ts</code>,
+              <code>scripts/smoke.mjs</code>, <code>test/contracts/contracts.test.mjs</code>,
+              <code>test/unit/globalExceptionFilter.test.ts</code>, <code>package.json</code>,
+              <code>tsconfig.generated.json</code>와 생성 산출물
+            </dd>
+            <dt>G7 불변식</dt>
+            <dd>
+              OpenAPI <code>servers</code>에는 현재 origin을 의미하는 상대 URL <code>/</code>만 남고
+              공인 host·port는 없다.
+            </dd>
+            <dt>G8 불변식</dt>
+            <dd>
+              런타임 filter의 <code>application/problem+json</code>과 OpenAPI의 실패 media
+              type·schema가 일치한다. SDK는 <code>propagate</code>를 켜지 않아 기존 예외 흐름을
+              유지한다.
+            </dd>
+            <dt>G9 불변식</dt>
+            <dd>
+              생성 SDK·e2e·OpenAPI 주변 TypeScript는 생성물 전용 Bundler module resolution에서
+              검사된다. API runtime build는 기존 <code>ttsc</code> NodeNext 경계를 유지한다.
+            </dd>
+            <dt>실패 시 동작</dt>
+            <dd>
+              Nestia 생성 또는 계약 테스트가 실패하면 명령을 non-zero로 종료하고 산출물을 성공으로
+              보고하지 않는다.
+            </dd>
+            <dt>5xx 응답 불변식</dt>
+            <dd>
+              <code>HttpException</code>이 5xx이면 payload의
+              <code>message</code>·<code>errors</code>를 응답에 복사하지 않고
+              <code>INTERNAL_ERROR</code>와 일반 detail만 반환한다.
+            </dd>
+            <dt>smoke 격리 불변식</dt>
+            <dd>
+              API 자식이 IPC로 준비 신호를 보내고 알려준 실제 포트로 요청한다. 자식이 포트 충돌로
+              먼저 종료하면 smoke는 응답을 재사용하지 않고 실패한다.
+            </dd>
+            <dt>검증 명령</dt>
+            <dd>
+              <code>npm run contracts:check</code>, <code>npm run format:check</code>,
+              <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm run build</code>,
+              <code>npm test</code>, <code>npm run test:smoke</code>
+            </dd>
+          </dl>
+        </section>
+
+        <section id="failure-recovery">
+          <h2>실패와 복구 기록</h2>
+          <p>
+            첫 병렬 ttsc 실행에서는 Nestia source-plugin cache lock이 겹쳤다. 이후 ttsc 명령을 순차
+            실행해 stale lock을 회수하고 build를 통과시켰다. <code>node --watch</code>와
+            <code>ttsc/register</code> 조합은 파일 감시 한도(<code>EMFILE</code>)에 걸려
+            <code>start:dev:api</code>를 <code>ttsx -P apps/api/tsconfig.app.json</code>
+            일회성 실행으로 고정했다. 전체 점검에서 고정 포트의 기존 서버를 smoke가 검증할 수 있음을
+            확인해, API main의 IPC 준비 신호와 ephemeral port 기본값을 사용하도록 보정했다. 포트
+            충돌 재현 시 자식이 준비 전에 종료되고 smoke도 non-zero로 끝나는 것을 확인했다.
+          </p>
+        </section>
+
+        <section id="issue-register">
+          <h2>이슈 등록부</h2>
+          <table>
+            <caption>
+              현재 구현 이슈
+            </caption>
+            <thead>
+              <tr>
+                <th>상태</th>
+                <th>증상·범위</th>
+                <th>조치·검증</th>
+                <th>잔여 위험</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>해결</td>
+                <td>ttsc source-plugin cache lock 경합</td>
+                <td>동일한 ttsc build를 순차 실행해 lock 회수 후 API·batch build 통과</td>
+                <td>병렬 ttsc 실행 시 같은 경고가 재발할 수 있다.</td>
+              </tr>
+              <tr>
+                <td>해결</td>
+                <td><code>node --watch --import ttsc/register</code>의 EMFILE</td>
+                <td>
+                  <code>start:dev:api</code>를 <code>ttsx</code> one-shot으로 변경하고 health 응답
+                  확인
+                </td>
+                <td>자동 reload가 필요하면 별도 watcher를 운영 도구로 선택해야 한다.</td>
+              </tr>
+              <tr>
+                <td>해결</td>
+                <td>5xx HttpException payload 노출 및 오류 코드 오분류</td>
+                <td>
+                  <code>GlobalExceptionFilter</code>가 5xx를 먼저 판정해 내부
+                  <code>message</code>·<code>errors</code>를 제외한다. 내부 sentinel payload 회귀
+                  테스트와 전체 단위 테스트 10개 통과를 확인했다.
+                </td>
+                <td>
+                  애플리케이션 로그에는 예외 원인이 남을 수 있으므로 로그 접근 권한은 별도 운영
+                  정책으로 관리한다.
+                </td>
+              </tr>
+              <tr>
+                <td>해결</td>
+                <td>생성 후처리가 source 계약과 중복되어 ProblemDetails schema를 덮어씀</td>
+                <td>
+                  당시에는 생성 schema와 실패 응답을 source
+                  decorator·<code>SwaggerCustomizer</code>로 생성했다. 후속 보완에서 route
+                  customizer를 제거하고 <code>TypedException</code>과
+                  <code>scripts/openapi.mjs</code>를 분리했으며, <code>test:contracts</code>는 최종
+                  ProblemDetails 네 필드와 각 route의 media type을 검증한다.
+                </td>
+                <td>
+                  새 실패 상태의 문서화는 해당 route의 <code>TypedException</code> 선언과 공통
+                  customizer 정책을 함께 점검해야 한다.
+                </td>
+              </tr>
+              <tr>
+                <td>해결</td>
+                <td>smoke가 기존 서버를 오검증할 수 있는 고정 포트·무준비 대기</td>
+                <td>
+                  API main이 child IPC로 실제 listen 포트를 알리고 smoke는 그 포트만 사용한다. 기본
+                  포트는 <code>0</code>이며 요청 timeout과 자식 조기 종료 감지를 추가했다. 기존
+                  서버가 포트를 점유한 재현에서 smoke가 준비 실패로 종료했다.
+                </td>
+                <td>
+                  로컬 HTTP 권한이 없는 샌드박스에서는 smoke 실행 자체가 제한될 수 있어 승인된 로컬
+                  환경에서 실행해야 한다.
+                </td>
+              </tr>
+              <tr>
+                <td>잔여</td>
+                <td>TypeScript 6 타입 패키지와 TypeScript 7 native 실행 패키지의 분리</td>
+                <td>지원 OS·아키텍처별 optional package를 lock하고 ttsc/typecheck/build 통과</td>
+                <td>
+                  TypeScript 6 타입 API와 TypeScript 7 native compiler를 함께 올릴 때 호환성 검토가
+                  필요하다.
+                </td>
+              </tr>
+              <tr>
+                <td>해결 · 후속</td>
+                <td>
+                  RFC 표준 필드와 프로젝트 식별 필드가 과도하게 중복되고 검증 상세가 노출될 가능성
+                </td>
+                <td>
+                  <code>ProblemDetails</code>를 title/status/detail/code 네 필드로 축소하고,
+                  filter·OpenAPI·unit·smoke를 함께 갱신했다. 생성 계약은 네 필드만 required로
+                  나타내며 smoke에서 실제 400·404 키 집합을 확인했다.
+                </td>
+                <td>
+                  제거된 필드에 의존하는 외부 소비자는 별도 전환이 필요하다. 외부 소비자 배포 여부는
+                  아직 확인하지 않았다.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="verification-evidence">
+          <h2>검증 증거</h2>
+          <table>
+            <caption>
+              구현 전·후 검증 기록
+            </caption>
+            <thead>
+              <tr>
+                <th>명령·관찰</th>
+                <th>상태</th>
+                <th>증거</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>설계 문서 Prettier 검사</td>
+                <td>통과</td>
+                <td>
+                  <code
+                    >npx prettier --check docs/design/nestia-migration-design.html
+                    docs/design/README.md</code
+                  >
+                </td>
+              </tr>
+              <tr>
+                <td>의존성 설치·ttsc build</td>
+                <td>통과</td>
+                <td>
+                  <code>npm install --package-lock-only --ignore-scripts</code>,
+                  <code>npm run build</code>
+                </td>
+              </tr>
+              <tr>
+                <td>OS별 npm 재현성</td>
+                <td>통과</td>
+                <td>
+                  <code>npm ci --dry-run --ignore-scripts --offline --os=linux --cpu=x64</code>
+                </td>
+              </tr>
+              <tr>
+                <td>개발 실행 경로</td>
+                <td>통과</td>
+                <td>
+                  <code>API_PORT=3199 npm run start:dev:api</code>와 <code>/health</code> 응답 확인
+                </td>
+              </tr>
+              <tr>
+                <td>파일럿 유효·무효 body</td>
+                <td>통과</td>
+                <td>
+                  <code>npm run test:smoke</code>에서 child IPC 준비·실제 포트, 200 data와 400 RFC
+                  body의 네 필드·<code>x-request-id</code> 확인
+                </td>
+              </tr>
+              <tr>
+                <td>SDK·Swagger·e2e 계약</td>
+                <td>통과</td>
+                <td>
+                  <code>npm run test:contracts</code>; OpenAPI 3.1, 상대 서버 URL, route별 선언
+                  상태의 ProblemDetails schema·media type, 필수 산출물 확인
+                </td>
+              </tr>
+              <tr>
+                <td>네 필드 실패 계약 회귀</td>
+                <td>통과</td>
+                <td>
+                  <code>npm run test:unit</code>와 <code>npm run test:smoke</code>에서
+                  type·instance·errors 없이 title·status·detail·code만 반환하고,
+                  <code>x-request-id</code> 헤더는 유지하는지 확인
+                </td>
+              </tr>
+              <tr>
+                <td>생성 TypeScript Bundler typecheck</td>
+                <td>통과</td>
+                <td>
+                  <code>npm run typecheck:generated</code>; Nestia SDK·e2e와 API source의 상대
+                  import를 생성물 전용 Bundler 설정으로 해석
+                </td>
+              </tr>
+              <tr>
+                <td>정적 검사·테스트</td>
+                <td>통과</td>
+                <td>
+                  <code>npm run format:check</code>, <code>npm run lint</code>,
+                  <code>npm run typecheck</code>, <code>npm test</code> (unit 19, integration 5)
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="verification-gaps">
+          <h2>검증 공백과 잔여 위험</h2>
+          <ul>
+            <li>
+              <code>@newtine/api/*</code>·<code>@newtine/batch/*</code>·<code>@newtine/core/*</code>
+              path alias는 ttsc build output에서 상대 경로로 변환되고 API smoke에서 실제 모듈
+              로딩을 확인했다.
+            </li>
+            <li>
+              생성 산출물은 현재 저장소에 남기며 <code>contracts:check</code>가 Nestia로 재생성한 뒤
+              계약 테스트와 생성 TypeScript Bundler typecheck를 실행한다. 생성 결과의 의미 기반 diff
+              정책은 CI 구성 시 추가한다.
+            </li>
+            <li>
+              TypeScript 타입 API(6.0.3)와 native compiler(7.0.2)는 별도 패키지다. 둘 중 하나를
+              업그레이드할 때 ttsc·Typia 변환과 ESLint peer 범위를 함께 재검증한다.
+            </li>
+            <li>
+              초기 골격 리뷰에서 식별한 DB 자격증명 fallback은 development/test 외 환경의 명시적
+              필수값 검증으로 해결했다. API bootstrap graceful failure는 프로세스 종료 시 OS가
+              리소스를 회수하므로 초기 골격의 필수 조건이 아니며, 재시작·retry·테스트 재사용이
+              필요해질 때 운영 하드닝으로 추가한다.
+            </li>
+            <li>
+              실제 PostgreSQL commit/rollback과 feature repository adapter의 DB 동작은 아직 확인하지
+              않았다. 현재 업무 entity/repository는 파일럿 범위 밖이다.
+            </li>
+          </ul>
+        </section>
+
+        <section id="review">
+          <h2>코드 리뷰</h2>
+          <p>
+            리뷰 유형: 자기 변경 리뷰. 기준 브랜치 <code>main</code>에 커밋이 없어 비교 범위는 현재
+            신규 파일 전체다. 리뷰어는 승인된 Nestia 마이그레이션 범위의 설계·as-built·실행 결과를
+            대조했고, 발견된 결함은 후속 수정 후 다시 검증했다.
+          </p>
+          <p>
+            리뷰 범위는 <code>apps/api</code>의 Typed route와 예외 필터,
+            <code>nestia.config.ts</code>와 생성 산출물, <code>package.json</code>·tsconfig·계약
+            검증 스크립트다. DB 자격증명 fallback은 현재 코드에서 해결됐고, API 기동 실패 시
+            명시적인 close·exit code 처리는 초기 골격의 필수 계약이 아닌 운영 하드닝 후보로
+            표시한다.
+          </p>
+
+          <figure>
+            <figcaption>리뷰한 실제 수직 흐름</figcaption>
+            <pre><code>HTTP request
+  → HttpRequestContextMiddleware
+  → TypedBody(validateEquals) / IssueSearchService
+  → TypedRoute response stringify
+  → success: application/json direct body
+  → failure: GlobalExceptionFilter → application/problem+json
+
+source types + decorators
+  → contracts:all (sdk → e2e → scripts/openapi.mjs)
+  → generated SDK / e2e / OpenAPI
+  → test:contracts (OpenAPI assertions + required artifacts)
+  → typecheck:generated (Bundler module resolution)</code></pre>
+            <p>
+              입력·응답 런타임과 생성 계약을 각각 확인했다. <code>contracts:check</code>는 Nestia
+              직접 생성 후 계약 테스트와 생성 TypeScript의 Bundler 해석을 함께 검증한다.
+            </p>
+          </figure>
+
+          <table>
+            <caption>
+              영향 경계와 리뷰 불변식
+            </caption>
+            <thead>
+              <tr>
+                <th>경계</th>
+                <th>기대 동작</th>
+                <th>리뷰 결과</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>API 입력·응답</td>
+                <td>성공은 직접 data, 잘못된 입력은 RFC 9457 Problem Details</td>
+                <td>HTTP smoke와 filter 단위 테스트 통과</td>
+              </tr>
+              <tr>
+                <td>생성 계약</td>
+                <td>SDK·Swagger·e2e가 런타임 성공·실패 계약을 소비 가능한 형태로 반영</td>
+                <td>
+                  상대 서버 URL·ProblemDetails 실패 응답·계약 테스트·Bundler typecheck를 포함해 검증
+                </td>
+              </tr>
+              <tr>
+                <td>기동·설정</td>
+                <td>
+                  필수 설정 누락은 명시적으로 실패하고, listen 실패 정리는 필요 시 하드닝한다.
+                </td>
+                <td>
+                  DB 설정 매트릭스 통과. listen 실패의 명시적 close·exit code는 non-blocking risk.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <table>
+            <caption>
+              리뷰 finding register
+            </caption>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>상태·심각도</th>
+                <th>증거와 실제 동작</th>
+                <th>영향·최소 조치</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>NESTIA-R-001</td>
+                <td>해결 · P1 · concrete finding</td>
+                <td>
+                  리뷰 당시 <code>swagger.servers</code>가 없어 생성기의 기본 Nestia GitHub 주소가
+                  들어갔지만, 현재 <code>nestia.config.ts</code>와
+                  <code>generated/openapi.json</code>은 서버를 상대 URL <code>/</code> 하나로
+                  고정한다.
+                </td>
+                <td>
+                  호스트·포트를 문서에 노출하지 않으면서 Swagger UI와 상대 경로 클라이언트가 현재
+                  origin으로 요청한다. <code>contracts:check</code>가 허용된 서버 URL만 남았는지
+                  검사한다.
+                </td>
+              </tr>
+              <tr>
+                <td>NESTIA-R-002</td>
+                <td>해결 · P2 · concrete finding</td>
+                <td>
+                  route의 <code>TypedException</code>이 상태·schema·description을 선언하고,
+                  <code>scripts/openapi.mjs</code>가 생성된 ProblemDetails 실패 응답의 media type만
+                  보정한다. 공통 데코레이터가 모든 route에 상태를 추가하지 않으며, 현재 route별
+                  선언과 네 필드 schema·참조를 확인했다.
+                </td>
+                <td>
+                  <code>test:contracts</code>가 ProblemDetails 네 필드와 route별 선언 상태를
+                  검사한다. 보정 대상 외 응답 보존, media type 이동, 충돌 거부와 멱등성은 normalizer
+                  fixture 테스트로 고정한다.
+                </td>
+              </tr>
+              <tr>
+                <td>NESTIA-R-003</td>
+                <td>해결 · P2 · non-blocking risk</td>
+                <td>
+                  Nestia가 생성하는 확장자 없는 상대 import를 후처리하지 않고, 생성물 전용
+                  <code>tsconfig.generated.json</code>을 Bundler module resolution으로 구성했다.
+                </td>
+                <td>
+                  <code>npm run typecheck:generated</code>와 <code>contracts:check</code>가 Bundler
+                  module resolution으로 생성 SDK·e2e를 검사한다. 생성물은 API runtime build에
+                  포함하지 않고 계약 입력으로만 사용한다.
+                </td>
+              </tr>
+              <tr>
+                <td>NESTIA-R-004</td>
+                <td>open · P2 · non-blocking risk</td>
+                <td>
+                  <code>test/contracts/contracts.test.mjs</code>는 필수 생성 파일과 현재 OpenAPI
+                  계약을 확인한다. 생성 전후의 의미 기반 diff나 저장소 baseline 해시는 아직 비교하지
+                  않는다.
+                </td>
+                <td>
+                  생성물을 커밋하는 정책과 달리 CI가 “생성물이 반드시 저장소에 있어야 한다”를
+                  보장하지 않는다. 최초 생성용 명령과 CI 검증을 분리하거나, CI에서는
+                  baseline/manifest가 없을 때 실패하도록 최소 조건을 추가한다.
+                </td>
+              </tr>
+              <tr>
+                <td>NESTIA-R-005</td>
+                <td>해결 · P1 · blocker</td>
+                <td>
+                  <code>apps/api/src/common/filter/globalExceptionFilter.ts</code>가 5xx를 먼저
+                  판정해 validation payload를 만들지 않는다. 동일한
+                  <code>InternalServerErrorException</code> sentinel을 다시 전달해
+                  <code>INTERNAL_ERROR</code>, 일반 detail, errors 없음의 응답과 회귀 테스트를
+                  확인했다.
+                </td>
+                <td>
+                  내부 오류 원인은 로그에만 남고 RFC 9457 응답에는 노출되지 않는다. 로그 접근 권한은
+                  별도 운영 정책으로 관리한다.
+                </td>
+              </tr>
+              <tr>
+                <td>NESTIA-R-006</td>
+                <td>해결 · P2 · concrete finding</td>
+                <td>
+                  <code>scripts/smoke.mjs</code>가 child IPC의 ready 메시지로 실제 listen 포트를
+                  받은 뒤 요청한다. 기본 포트는 <code>0</code>이고 요청 timeout·자식 조기 종료
+                  감지를 추가했다. 점유 포트 재현에서 준비 실패와 non-zero 종료를 확인했다.
+                </td>
+                <td>
+                  기존 서버의 응답을 smoke 대상으로 삼을 수 있는 경로가 제거됐다. 샌드박스의 로컬
+                  HTTP 권한 제한에서는 승인된 환경에서 실행해야 한다.
+                </td>
+              </tr>
+              <tr>
+                <td>FOUNDATION-R-001</td>
+                <td>해결 · P1 · 기존 baseline</td>
+                <td>
+                  <code>libs/core/src/common/database/database.options.ts:8-20</code>가
+                  development/test에서만 기본값을 허용하고, 그 외 환경에서는 다섯 DB 설정과 포트를
+                  검증한다. 상세 기록은
+                  <a href="nestjs-foundation-implementation.html#review"
+                    >초기 foundation 리뷰 R-001</a
+                  >에 있다.
+                </td>
+                <td>
+                  운영 설정 누락은 설정 예외와 non-zero 초기화 실패로 관찰된다. 실제 PostgreSQL 연결
+                  성공 자체는 별도 검증 범위다.
+                </td>
+              </tr>
+              <tr>
+                <td>FOUNDATION-R-003</td>
+                <td>accepted · P2 · non-blocking risk</td>
+                <td>
+                  <code>apps/api/src/main.ts:10-30</code>는 <code>app.listen()</code> 실패를
+                  명시적인 catch/finally로 정리하지 않는다. Nest가 오류를 기록하고 Promise를
+                  reject하며, 현재 실행 모델에서는 처리되지 않은 rejection으로 프로세스가 종료된다.
+                </td>
+                <td>
+                  프로세스 종료 시 OS가 소켓과 프로세스 리소스를 회수하므로 초기 골격의 포트 누수
+                  blocker는 아니다. 재시작·retry·테스트 재사용 또는 명시적 운영 로그가 필요해질 때
+                  app close와 <code>process.exitCode = 1</code>을 추가한다.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <section>
+            <h3>검증 증거와 공백</h3>
+            <table>
+              <caption>
+                기존 검증 기록 (아래 전체 재점검 증거와 구분)
+              </caption>
+              <thead>
+                <tr>
+                  <th>명령</th>
+                  <th>결과</th>
+                  <th>확인 범위</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>npm run format:check</code>, <code>npm run lint</code></td>
+                  <td>통과</td>
+                  <td>소스 형식·정적 규칙</td>
+                </tr>
+                <tr>
+                  <td><code>npm run typecheck</code>, <code>npm test</code></td>
+                  <td>통과 · unit 10, integration 1</td>
+                  <td>현재 include된 소스의 타입·단위·통합 경로</td>
+                </tr>
+                <tr>
+                  <td><code>npm run build</code></td>
+                  <td>통과</td>
+                  <td>API·batch ttsc 산출물</td>
+                </tr>
+                <tr>
+                  <td><code>npm run contracts:check</code></td>
+                  <td>통과</td>
+                  <td>Nestia 직접 재생성·OpenAPI 계약 테스트·생성 Bundler typecheck·필수 파일</td>
+                </tr>
+                <tr>
+                  <td><code>npm run test:smoke</code></td>
+                  <td>통과 (로컬 포트 권한 허용 후)</td>
+                  <td>
+                    child IPC 준비·실제 포트, health 200, typed search 200, validation 400, missing
+                    404, RFC content type
+                  </td>
+                </tr>
+                <tr>
+                  <td>생성 e2e Bundler compile probe</td>
+                  <td>통과</td>
+                  <td>
+                    <code>tsc --noEmit -p tsconfig.generated.json</code>로 생성 e2e와 SDK를 검사
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              응답 타입 불일치의 실제 Nestia interceptor 경로는 수동 probe에서 500과 일반
+              <code>INTERNAL_ERROR</code>로 숨겨지는 것을 확인했지만, 이를 고정하는 자동 회귀
+              테스트는 없다. PostgreSQL 성공 연결·transaction commit/rollback은 기존 검증 공백으로
+              남는다.
+            </p>
+          </section>
+
+          <section id="overall-review">
+            <h3>2026-09-12 전체 재점검</h3>
+            <p>
+              범위: API 요청·응답·공통 필터, service/API 타입 경계, core DB 설정·트랜잭션 경계,
+              batch 실행·종료, Nestia Nestia 생성·계약 테스트 경로. 커밋 기준점이 없어 현재 신규
+              트리와 승인 설계를 대조했다. 점검에서 발견한 세 결함은 승인된 실패 계약·생성물 검증
+              기준을 유지하는 범위에서 수정했다. 추가로 <code>IssueSearchService</code>의 API 계약
+              타입 의존을 제거하고 controller 변환 경계를 고정했다.
+            </p>
+            <p>
+              Fresh verification: format:check, lint, typecheck, build, typecheck:generated, unit
+              19개·integration 5개, test:contracts와 contracts:check 모두 통과. TypedException이
+              route별 네 필드 ProblemDetails를 생성하고, <code>scripts/openapi.mjs</code>가 실패
+              media type만 보정하는 것을 확인했다. 필터 회귀 테스트로 5xx payload와 validation
+              errors 제거를 확인했고, 로컬 포트 권한 허용 후 child IPC smoke도 통과했다. API
+              request/response와 service 내부 타입의 매핑은 typecheck·smoke로 확인했다.
+            </p>
+            <p>
+              검증 공백: 실제 PostgreSQL commit/rollback·요청 간 격리, feature repository adapter의
+              DB 동작은 확인하지 않았다. 현재 실제 업무 entity/repository는 미구현 상태다. 생성
+              baseline이 없는 최초 실행을 허용하는 NESTIA-R-004도 남아 있다.
+            </p>
+            <p>
+              <strong>리뷰 판단(네 필드 후속 포함): blocker 없음.</strong>
+              NESTIA-R-001·R-002·R-003·R-005·R-006과 네 필드 실패 계약 후속은 해결했다. 생성
+              baseline 누락 허용, API bootstrap 명시적 close·exit code, 외부 소비자 호환성 확인은
+              잔여 위험 또는 후속 운영 하드닝으로 남는다.
+            </p>
+          </section>
+        </section>
+
+        <section id="decision-trail">
+          <h2>구현 결정 기록</h2>
+          <p>
+            승인된 설계 밖의 행동·계약·실패 처리 변경이 필요하면 이 문서에 기록하기 전에 설계 문서를
+            재승인 상태로 되돌린다.
+          </p>
+        </section>
+
+        <section id="implementation-control-state">
+          <h2>구현 제어 상태</h2>
+          <dl>
+            <dt>기술 상태</dt>
+            <dd>
+              네 필드 실패 응답과 생성 단계 media type 보정 구현·검증 완료 · Nestia/Typia 계약,
+              ttsc/ttsx, Jest unit·integration·contract tests, RFC 9457, contracts:all·OpenAPI
+              contract tests·Bundler typecheck 통과 · service/API 타입 경계 분리 완료
+            </dd>
+            <dt>이슈 상태</dt>
+            <dd>
+              migration review open 1건(NESTIA-R-004) · foundation 운영 하드닝 후보 1건
+              (FOUNDATION-R-003) · TypeScript native package 잔여 위험 1건 · 외부 소비자 호환성 확인
+              미실시
+            </dd>
+            <dt>리뷰 상태</dt>
+            <dd>
+              최신 견고성 수정: ROB-001~004 및 FOUNDATION-R-001 해결 · 독립 리뷰 concrete finding
+              없음 · 세부 내용은 foundationRobustness.implementation.html 참조
+            </dd>
+            <dt>개발자 운영 이해</dt>
+            <dd>
+              확인 필요 · build/start-dev/contracts/smoke/typecheck:generated 명령과 실패 복구
+              경로는 기록했으며 실제 운영자 확인은 다음 리뷰에서 수행
+            </dd>
+          </dl>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NestJS 기본 틀 구현 제어</title>
+    <meta name="purpose" content="NEWTINE NestJS 초기 개발 구조 확정" />
+    <meta name="audience" content="백엔드 구현 개발자" />
+    <meta name="problem" content="승인된 api batch core 골격을 구현하고 검증" />
+    <meta
+      name="core-flow"
+      content="패키지 설정 → core 포트·어댑터 → api·batch 실행부 → 빌드·스모크 검증"
+    />
+    <style>
+      body {
+        font:
+          16px/1.7 system-ui,
+          sans-serif;
+        max-width: 1000px;
+        margin: 36px auto;
+        padding: 0 22px;
+        color: #233349;
+        background: #f5f7fb;
+      }
+      section {
+        background: #fff;
+        border: 1px solid #d6dfeb;
+        border-radius: 12px;
+        padding: 22px;
+        margin: 22px 0;
+      }
+      h1,
+      h2 {
+        line-height: 1.35;
+      }
+      a {
+        color: #255bb4;
+      }
+      pre {
+        background: #edf2f9;
+        padding: 16px;
+        overflow: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        border: 1px solid #d6dfeb;
+        padding: 9px;
+        text-align: left;
+      }
+      aside {
+        border-left: 4px solid #b87920;
+        padding: 10px 16px;
+      }
+      label {
+        display: block;
+        padding: 12px;
+        margin: 10px 0;
+        border: 1px solid #d6dfeb;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button {
+        font: inherit;
+        padding: 10px 18px;
+        margin: 8px 8px 8px 0;
+        border-radius: 8px;
+        border: 1px solid #7187a5;
+        background: #edf3ff;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.4;
+      }
+      fieldset {
+        border: 0;
+        padding: 0;
+      }
+      legend {
+        font-weight: 650;
+        font-size: 19px;
+      }
+      .result {
+        background: #edf5ef;
+        padding: 16px;
+        border-radius: 8px;
+      }
+      output {
+        display: block;
+      }
+      body.enhanced .quizSlide[hidden],
+      [hidden] {
+        display: none !important;
+      }
+      :focus-visible {
+        outline: 3px solid #246bd2;
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>구현 제어 · 운영 제어 보류 · Standard</p>
+      <p>리뷰 · 변경 요청 · 자기 변경</p>
+      <h1>NestJS 기본 틀 구현 제어</h1>
+      <p>승인된 설계의 as-built 상태와 검증 증거를 기록한다.</p>
+      <aside>
+        이 문서는 Nestia 전환 전 초기 골격의 역사적 기록이다. 현재 코드·실행 명령·검증 결과는
+        <a href="nestia-migration-implementation.html">Nestia 마이그레이션 구현 제어</a>를 기준으로
+        확인한다.
+      </aside>
+      <p>
+        범위: 승인된 초기 api·batch·core 실행 골격 · 작성일:
+        <time datetime="2026-09-12">2026-09-12</time> · 갱신일:
+        <time datetime="2026-09-12">2026-09-12</time> · 작업 참조: 구현 연속 대화
+      </p>
+    </header>
+    <nav aria-label="문서 탐색">
+      <a href="#baseline-reference">기준</a> · <a href="#current-implementation">구현</a> ·
+      <a href="#implementation-status">상태</a> · <a href="#verification-evidence">검증</a> ·
+      <a href="#issue-register">이슈</a> · <a href="#review">리뷰</a> ·
+      <a href="#implementation-control-state">이해 점검</a>
+    </nav>
+    <main>
+      <article>
+        <section id="baseline-reference">
+          <h2>기준 설계</h2>
+          <p>
+            <a href="nestjs-foundation-design.html">nestjs-foundation-design.html</a>의 설계 승인됨
+            상태를 기준으로 한다. G1-A부터 G11-A, G10-S-A를 포함한 초기 실행 골격만 구현한다.
+          </p>
+          <dl>
+            <dt>Goal</dt>
+            <dd>
+              api, batch, core의 Nest CLI 모노레포와 MikroORM/PostgreSQL 기반 경계를 빌드·실행
+              가능한 상태로 만든다.
+            </dd>
+            <dt>Scope</dt>
+            <dd>
+              루트 설정, apps/api, apps/batch, libs/core의 포트·어댑터·transaction·예외 경계,
+              health와 databaseCheck, 검증 설정.
+            </dd>
+            <dt>Forbidden</dt>
+            <dd>
+              실제 19개 테이블 업무 구현, 운영 데이터 변경, schema 자동 동기화, 큐·스케줄러·자동
+              재시도, 승인 없는 계약 변경.
+            </dd>
+          </dl>
+        </section>
+        <section id="current-implementation">
+          <h2>현재 구현(as-built)</h2>
+          <p>
+            루트 package.json, package-lock.json, Nest CLI workspace, TypeScript·ESLint·Prettier
+            설정을 추가했다. ESM 프로젝트의 Nest 12 빌드는 webpack 대신 Rspack 2.2.3을 사용한다.
+          </p>
+          <ul>
+            <li>
+              core: feature-first 업무 경계(<code>issue/domain</code>·<code>issue/repository</code>와
+              <code>article/domain</code>·<code>article/repository</code>), 여러 feature가 공유하는
+              <code>common</code> 기반 타입과 UUIDv7 ID 생성기, HTTP 독립 추상
+              <code>DomainException</code>과
+              도메인별 <code>IssueException</code>·코드, TransactionManager 계약과 MikroORM
+              adapter(중첩 호출 거부 포함), PostgreSQL 옵션 및 CoreModule.
+            </li>
+            <li>
+              api: 서버 생성 요청 UUID middleware, RFC 9457 GlobalExceptionFilter, Nestia·Typia
+              입력 검증, 단순 health controller, CoreModule 조립. 도메인 예외는 API 정의로 매핑하고,
+              처리된 오류 로그에는 exceptionName·domain·domainCode·apiCode·requestId를 남긴다.
+            </li>
+            <li>
+              batch: 명시적 databaseCheck 작업, 작업별 RequestContext, 성공 0·실패 1 반환,
+              application context finally 종료.
+            </li>
+            <li>
+              test: BatchRunner·TransactionManager·ProblemDetails 단위 테스트, database options 계약
+              테스트, API health/404 smoke script.
+            </li>
+          </ul>
+          <p>실제 업무 entity·VO·repository 구현은 승인 범위 밖이라 빈 scaffold로 남겼다.</p>
+          <figure>
+            <pre>
+API request → HttpRequestContextMiddleware → Controller/Filter → CoreModule
+                                           ↓
+                              TransactionManager / MikroORM → PostgreSQL
+
+batch job → RequestContext → databaseCheck → 성공 0 / 실패 1 → finally close</pre
+            >
+            <figcaption>
+              구현된 두 실행 흐름이다. API 오류는 request UUID와 도메인 예외 식별자로 로그에서
+              추적하고, batch는 DB 작업 결과와 자원 정리를 종료 코드로 전달한다.
+            </figcaption>
+          </figure>
+        </section>
+        <section id="implementation-status">
+          <h2>구현 상태</h2>
+          <p>
+            현재: 운영 제어 보류. 승인 범위의 기술 구현과 집중 검증은 완료했지만 PostgreSQL 연결
+            성공 경로와 실제 업무 repository는 후속 범위이며, 개발자 운영 이해 점검은 미실시다.
+          </p>
+          <table>
+            <caption>
+              승인 계약
+            </caption>
+            <thead>
+              <tr>
+                <th>경계</th>
+                <th>불변식</th>
+                <th>검증 결과</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>api·batch → core</td>
+                <td>앱 간 import와 core의 앱 import 금지</td>
+                <td>typecheck/build 통과, 소스 구조 확인</td>
+              </tr>
+              <tr>
+                <td>service → repository port</td>
+                <td>구체 MikroORM adapter 직접 import 금지</td>
+                <td>현재 업무 service 없음; scaffold 규칙 기록</td>
+              </tr>
+              <tr>
+                <td>TransactionManager</td>
+                <td>
+                  성공 transactional 경로와 예외 전파, 중첩 호출 거부, repository 독립 flush 금지
+                </td>
+                <td>단위 테스트 3건 통과</td>
+              </tr>
+              <tr>
+                <td>HTTP 오류</td>
+                <td>application/problem+json, RFC 필드와 code, 내부 정보 비노출</td>
+                <td>API smoke health 200·missing 404 통과; DomainException 단위 테스트 통과</td>
+              </tr>
+              <tr>
+                <td>batch</td>
+                <td>컨텍스트 분리, 성공 0·실패 1, finally 정리, 재시도 없음</td>
+                <td>정상 job·잘못된 job·DB 연결 실패 모두 코드 0/1 경로 확인</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="design-delta">
+          <h2>설계 delta</h2>
+          <p>
+            Rspack 빌더 추가는 ESM 프로젝트에서 Nest 12 빌드를 가능하게 하는 도구 설정 보정으로, API
+            계약·상태·실패 처리 변경은 없다. <code>build</code>는 api와 batch를 순서대로 빌드하고
+            <code>deleteOutDir: false</code>로 한 앱이 다른 앱 산출물을 지우지 않게 했다. MikroORM
+            v7의 no-entity 기본 검증을 명시적으로 비활성화하고 <code>ensureDatabase: false</code>를
+            설정한 것은 업무 schema 자동 변경을 막기 위한 승인 범위 내 구체화다. 그 외 material
+            delta 없음.
+          </p>
+        </section>
+        <section id="verification-evidence">
+          <h2>검증 증거</h2>
+          <p>Node v24.18.0, npm 11.16.0 확인. 의존성 설치 후 다음 명령이 통과했다.</p>
+          <pre><code>npm run format:check
+npm run lint
+npm run typecheck
+npm run build:api
+npm run build:batch
+npm test
+npm run test:unit
+npm run test:integration
+npm run test:smoke</code></pre>
+          <p>
+            위 명령의 실제 결과는 아래에 기록했다. DB가 없는 환경에서는 PostgreSQL 성공 경로와
+            commit/rollback 검증을 별도 공백으로 구분한다.
+          </p>
+          <p>
+            실제 결과: format·lint·typecheck·api build·batch build 및 전체 build 통과,
+            <code>npm test</code>(단위 8건·integration 설정 테스트 1건) 통과, API smoke(health 200
+            및 RFC 9457 404) 통과. 전체 build 후 api와 batch 산출물이 모두 남는 것을 확인했다.
+            Docker daemon socket은 샌드박스에서 접근 거부되어 PostgreSQL 성공 연결은 미실행이다.
+            로컬 PostgreSQL이 없는 상태에서 databaseCheck는 의도대로 오류 로그와 종료 코드 1을
+            반환했다. npm install은 5 high severity audit 항목을 보고했으며 자동 audit fix는
+            실행하지 않았다.
+          </p>
+        </section>
+        <section id="verification-gaps">
+          <h2>검증 공백</h2>
+          <ul>
+            <li>
+              격리된 PostgreSQL이 없어 실제 MikroORM 연결 성공과 transaction adapter의 DB
+              commit/rollback은 미검증이다.
+            </li>
+            <li>실제 업무 entity·repository가 없으므로 다중 repository 원자성은 후속 범위다.</li>
+            <li>batch 업무의 멱등성·중복 실행 방지·재시도는 후속 업무 설계다.</li>
+          </ul>
+        </section>
+        <section id="issue-register">
+          <h2>이슈 기록</h2>
+          <table>
+            <caption>
+              구현 이슈
+            </caption>
+            <thead>
+              <tr>
+                <th>상태</th>
+                <th>증상·원인</th>
+                <th>조치·증거</th>
+                <th>잔여 위험</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>해결됨</td>
+                <td>Rspack 초기 빌드가 ESM에서 webpack을 거부함</td>
+                <td>Rspack builder와 peer 플러그인 설치 후 두 앱 build 통과</td>
+                <td>없음</td>
+              </tr>
+              <tr>
+                <td>해결됨</td>
+                <td>BatchRunner가 Injectable이 아니어서 job 주입값이 undefined</td>
+                <td><code>@Injectable()</code> 추가 후 batch 실행 및 단위 테스트 통과</td>
+                <td>없음</td>
+              </tr>
+              <tr>
+                <td>해결됨</td>
+                <td>전체 <code>nest build</code>가 기본 API만 만들고 batch 산출물을 제거함</td>
+                <td>
+                  build를 두 앱 순차 빌드로 바꾸고 <code>deleteOutDir: false</code> 설정 후 두
+                  산출물 확인
+                </td>
+                <td>없음</td>
+              </tr>
+              <tr>
+                <td>보류</td>
+                <td>Docker daemon 및 PostgreSQL이 현재 환경에서 접근 불가</td>
+                <td>databaseCheck 실패 경로와 종료 코드 1 확인</td>
+                <td>DB 성공·rollback 실동작 미검증; 격리 DB 확보 후 재실행</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="residual-risks">
+          <h2>잔여 위험</h2>
+          <aside>
+            현재 Node/Nest/MikroORM 빌드 호환성과 HTTP·batch 골격은 확인했지만 PostgreSQL 성공 연결,
+            실제 ORM entity metadata, 다중 repository 원자성, 업무 batch 멱등성은 확인하지 않았다.
+            npm audit가 보고한 5 high severity 항목도 의존성 업데이트 전에 영향 범위를 검토해야
+            한다.
+          </aside>
+        </section>
+        <section id="review">
+          <h2>코드 리뷰</h2>
+          <p>
+            유형: 자기 변경 리뷰. 기준 브랜치에는 커밋이 없어 비교 범위는 현재 신규 파일 전체다.
+            리뷰어는 구현 제어 기록을 바탕으로 입력·상태·부작용·관찰 경로를 읽기 전용으로 점검했다.
+          </p>
+          <table>
+            <caption>
+              열린 finding
+            </caption>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>상태·심각도</th>
+                <th>증거와 실제 동작</th>
+                <th>영향과 최소 조치</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>R-001</td>
+                <td>open · P1</td>
+                <td>
+                  <code>libs/core/src/common/database/database.options.ts:7-11</code>이 DB 사용자와
+                  비밀번호를 <code>postgres</code>로 자동 대체한다. 설계 계약은 DB 자격증명을
+                  환경변수로만 받는 것이다.
+                </td>
+                <td>
+                  환경 누락이 조용히 공용 기본 자격증명 시도로 바뀐다. 비밀번호 fallback을 제거하고
+                  필수 환경값을 기동 전에 검증하며, 개발 기본값이 필요하면 명시적인 development 전용
+                  설정으로 제한한다.
+                </td>
+              </tr>
+              <tr>
+                <td>R-002</td>
+                <td>fixed · P1</td>
+                <td>
+                  <code
+                    >libs/core/src/common/transaction/mikroOrm/mikroOrm.transactionManager.ts:11-18</code
+                  >가 <code>isInTransaction()</code>을 확인하고 중첩 호출에서
+                  <code>NestedTransactionException</code>을 반환한다.
+                </td>
+                <td>
+                  승인 계약의 중첩 트랜잭션 명시적 거부로 동작이 맞춰졌다. savepoint를 열지 않고
+                  내부 work도 실행하지 않는 단위 테스트가 통과했다.
+                </td>
+              </tr>
+              <tr>
+                <td>R-003</td>
+                <td>open · P2</td>
+                <td>
+                  <code>apps/api/src/main.ts:8-23</code>은 <code>app.listen()</code> 실패를
+                  catch/finally로 감싸지 않는다.
+                  <code>API_PORT=invalid node dist/apps/api/main.js</code>는 앱 초기화 로그 뒤
+                  <code>ERR_SOCKET_BAD_PORT</code>의 처리되지 않은 예외로 종료됐다.
+                </td>
+                <td>
+                  포트 충돌·잘못된 설정·후속 모듈 초기화 실패에서 graceful close와 통제된 실패
+                  로그가 보장되지 않는다. app 참조를 유지하고 catch에서 오류를 기록한 뒤 finally에서
+                  <code>app.close()</code>, 실패 시 <code>process.exitCode = 1</code>을 설정한다.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            위 finding 외에 승인 범위 안의 코드·타입·빌드·HTTP smoke에서 추가 concrete finding은
+            확인하지 못했다. PostgreSQL 성공 연결과 실제 업무 entity/repository 원자성은 기존 검증
+            공백으로 남는다.
+          </p>
+          <details>
+            <summary>리뷰 검증 증거</summary>
+            <ul>
+              <li>
+                <code>npm run format:check</code>, <code>npm run lint</code>,
+                <code>npm run typecheck</code> 통과
+              </li>
+              <li><code>npm run build</code> 통과; API·batch 산출물 모두 생성</li>
+              <li><code>npm test</code> 통과: 단위 8건, integration 1건</li>
+              <li><code>npm run test:smoke</code> 통과: health 200, RFC 9457 404</li>
+              <li>기준 커밋 없음: 현재 브랜치 <code>main</code>에 비교할 commit이 없다.</li>
+            </ul>
+          </details>
+          <p>
+            <strong>리뷰 판단:</strong> blocker 있음. R-001은 승인된 보안 계약을 직접 위반하고
+            R-003은 기동 실패 정리를 보장하지 않는다. R-002는 수정 및 회귀 검증으로 해결됐다.
+          </p>
+        </section>
+        <section id="implementation-control-state">
+          <h2>구현 이해 점검</h2>
+          <p>
+            상태: 미실시. 아래 질문은 실제 코드와 실행 증거를 바탕으로 포트 의존, 트랜잭션 실패,
+            batch 종료, RFC 오류 추적, 검증 공백의 운영 판단을 확인한다. 결과는 이 브라우저 안에서만
+            유지되며 Codex에 자동 전달되지 않는다. 이 상태는 기술 구현을 자동으로 승인하거나 막지
+            않는다.
+          </p>
+          <p id="implementation-progress" aria-live="polite">전체 6문항 · 선택 0 · 제출 0</p>
+          <noscript
+            >JavaScript가 꺼져 있어 모든 문항을 표시한다. 결과 제출 기능은 JavaScript를 켜야 사용할
+            수 있다.</noscript
+          >
+          <div class="quizSlide" id="I1">
+            <fieldset>
+              <legend>
+                I1 · 업무 service가 issue repository를 사용할 때 올바른 의존성 경계는?
+              </legend>
+              <p>실제 코드: apps가 core의 port를 사용하고, adapter는 DI 조립부에서 연결된다.</p>
+              <label for="I1_0"
+                ><input type="radio" id="I1_0" name="I1" value="0" /> service는 repository 계약을
+                import하고, CoreModule이 MikroORM adapter를 바인딩한다.</label
+              ><label for="I1_1"
+                ><input type="radio" id="I1_1" name="I1" value="1" /> service가
+                MikroOrmIssueRepository를 직접 import해도 된다.</label
+              >
+            </fieldset>
+            <button type="button" data-submit="0">답 제출</button>
+            <div class="result" id="implementation-result0" hidden>
+              <p><strong>상태:</strong> <span class="state"></span></p>
+              <p><strong>설명:</strong> <span class="explain"></span></p>
+              <p><strong>다음 행동:</strong> <span class="nextAction"></span></p>
+            </div>
+          </div>
+          <div class="quizSlide" id="I2">
+            <fieldset>
+              <legend>
+                I2 · 이미 transaction 안에서 두 번째 TransactionManager.execute()를 호출하면?
+              </legend>
+              <p>실제 코드: MikroOrmTransactionManager가 활성 transaction을 먼저 검사한다.</p>
+              <label for="I2_0"
+                ><input type="radio" id="I2_0" name="I2" value="0" /> MikroORM 기본값에 따라
+                savepoint를 만들고 내부 작업을 실행한다.</label
+              ><label for="I2_1"
+                ><input type="radio" id="I2_1" name="I2" value="1" /> NestedTransactionException을
+                반환하고 내부 work를 실행하지 않는다.</label
+              >
+            </fieldset>
+            <button type="button" data-submit="1">답 제출</button>
+            <div class="result" id="implementation-result1" hidden>
+              <p><strong>상태:</strong> <span class="state"></span></p>
+              <p><strong>설명:</strong> <span class="explain"></span></p>
+              <p><strong>다음 행동:</strong> <span class="nextAction"></span></p>
+            </div>
+          </div>
+          <div class="quizSlide" id="I3">
+            <fieldset>
+              <legend>I3 · PostgreSQL이 없을 때 databaseCheck 실행 결과와 운영 조치는?</legend>
+              <p>실제 증거: 연결 실패 경로는 로그와 종료 코드 1로 확인했다.</p>
+              <label for="I3_0"
+                ><input type="radio" id="I3_0" name="I3" value="0" /> 무한 재시도하고 프로세스를
+                계속 살려 둔다.</label
+              ><label for="I3_1"
+                ><input type="radio" id="I3_1" name="I3" value="1" /> 실패를 기록하고 finally에서
+                application context를 닫은 뒤 종료 코드 1로 끝낸다.</label
+              >
+            </fieldset>
+            <button type="button" data-submit="2">답 제출</button>
+            <div class="result" id="implementation-result2" hidden>
+              <p><strong>상태:</strong> <span class="state"></span></p>
+              <p><strong>설명:</strong> <span class="explain"></span></p>
+              <p><strong>다음 행동:</strong> <span class="nextAction"></span></p>
+            </div>
+          </div>
+          <div class="quizSlide" id="I4">
+            <fieldset>
+              <legend>I4 · API 404를 로그와 연결할 때 어떤 식별자를 확인하는가?</legend>
+              <p>
+                실제 코드: middleware가 요청별 UUID를 만들고 응답 헤더와 구조화 로그에 같은 값을
+                남긴다. 도메인 예외는 예외 이름과 domainCode로 구분한다.
+              </p>
+              <label for="I4_0"
+                ><input type="radio" id="I4_0" name="I4" value="0" /> response의 x-request-id와
+                로그의 requestId를 확인한다. API code는 NOT_FOUND이며, 도메인 예외라면 domainCode도
+                함께 확인한다.</label
+              ><label for="I4_1"
+                ><input type="radio" id="I4_1" name="I4" value="1" /> 클라이언트가 보낸 임의 ID와
+                오류 메시지만 확인하면 된다.</label
+              >
+            </fieldset>
+            <button type="button" data-submit="3">답 제출</button>
+            <div class="result" id="implementation-result3" hidden>
+              <p><strong>상태:</strong> <span class="state"></span></p>
+              <p><strong>설명:</strong> <span class="explain"></span></p>
+              <p><strong>다음 행동:</strong> <span class="nextAction"></span></p>
+            </div>
+          </div>
+          <div class="quizSlide" id="I5">
+            <fieldset>
+              <legend>I5 · 현재 검증이 통과했다는 사실만으로 보장되지 않는 것은?</legend>
+              <p>
+                실제 증거: DB 없는 환경에서 API smoke와 실패 경로는 통과했지만 성공 연결은 공백이다.
+              </p>
+              <label for="I5_0"
+                ><input type="radio" id="I5_0" name="I5" value="0" /> 실제 업무 entity와 다중
+                repository의 원자성까지 이미 검증되었다.</label
+              ><label for="I5_1"
+                ><input type="radio" id="I5_1" name="I5" value="1" /> PostgreSQL 성공 연결, entity
+                metadata, commit/rollback, 업무 멱등성은 후속 검증이다.</label
+              >
+            </fieldset>
+            <button type="button" data-submit="4">답 제출</button>
+            <div class="result" id="implementation-result4" hidden>
+              <p><strong>상태:</strong> <span class="state"></span></p>
+              <p><strong>설명:</strong> <span class="explain"></span></p>
+              <p><strong>다음 행동:</strong> <span class="nextAction"></span></p>
+            </div>
+          </div>
+          <div class="quizSlide" id="I6">
+            <fieldset>
+              <legend>I6 · PostgreSQL 성공 경로를 검증할 수 있게 되면 첫 실행 순서는?</legend>
+              <p>운영 복구: 현재 보류 이슈를 안전하게 닫는 방법을 고른다.</p>
+              <label for="I6_0"
+                ><input type="radio" id="I6_0" name="I6" value="0" /> 격리된 PostgreSQL을 준비하고
+                databaseCheck를 실행한 뒤 transaction commit/rollback을 통합 검증한다.</label
+              ><label for="I6_1"
+                ><input type="radio" id="I6_1" name="I6" value="1" /> 운영 DB에 바로 연결해 schema
+                자동 동기화를 켠다.</label
+              >
+            </fieldset>
+            <button type="button" data-submit="5">답 제출</button>
+            <div class="result" id="implementation-result5" hidden>
+              <p><strong>상태:</strong> <span class="state"></span></p>
+              <p><strong>설명:</strong> <span class="explain"></span></p>
+              <p><strong>다음 행동:</strong> <span class="nextAction"></span></p>
+            </div>
+          </div>
+          <div>
+            <button type="button" id="implementation-previous">이전</button
+            ><button type="button" id="implementation-next">다음</button>
+          </div>
+          <output id="implementation-overall" aria-live="polite">아직 제출된 답이 없습니다.</output>
+        </section>
+      </article>
+    </main>
+    <script>
+      const implementationQuestions = [
+        {
+          id: 'I1',
+          correct: 0,
+          explain: 'service는 repository 계약에만 의존하고 CoreModule이 구체 adapter를 연결한다.',
+          next: '실제 feature service 추가 시 직접 adapter import가 없는지 확인한다.',
+        },
+        {
+          id: 'I2',
+          correct: 1,
+          explain: '활성 transaction 안의 재진입은 savepoint를 만들지 않고 명시적으로 거부한다.',
+          next: '실제 entity 추가 후 최상위 service 하나가 transaction 경계를 소유하는지 확인한다.',
+        },
+        {
+          id: 'I3',
+          correct: 1,
+          explain:
+            'BatchRunner는 실패를 1로 변환하고 main의 finally가 application context를 닫는다.',
+          next: '스케줄러에서 종료 코드 1을 실패로 수집하는지 연결한다.',
+        },
+        {
+          id: 'I4',
+          correct: 0,
+          explain:
+            '서버 생성 UUID가 x-request-id와 로그의 requestId에 함께 쓰여 한 요청을 추적한다.',
+          next: '실제 오류 로그에서 requestId와 domainCode를 함께 검색할 수 있는지 확인한다.',
+        },
+        {
+          id: 'I5',
+          correct: 1,
+          explain: '현재 증거는 골격·HTTP·실패 경로에 한정되며 DB 성공과 업무 원자성은 보류다.',
+          next: '격리 DB와 실제 entity를 준비한 후 보류 항목을 다시 검증한다.',
+        },
+        {
+          id: 'I6',
+          correct: 0,
+          explain: '운영 DB 변경 없이 격리 환경에서 연결과 transaction 증거를 먼저 만든다.',
+          next: '성공·rollback 로그와 실행 시각을 구현 제어 문서에 기록한다.',
+        },
+      ];
+      let implementationCurrent = 0;
+      const implementationSubmitted = new Map();
+      const implementationSlides = [...document.querySelectorAll('.quizSlide')];
+      document.body.classList.add('enhanced');
+      function implementationSelected(i) {
+        return document.querySelector(
+          'input[name="' + implementationQuestions[i].id + '"]:checked',
+        );
+      }
+      function renderImplementationQuiz() {
+        implementationSlides.forEach((slide, i) => (slide.hidden = i !== implementationCurrent));
+        document.getElementById('implementation-previous').disabled = implementationCurrent === 0;
+        document.getElementById('implementation-next').disabled =
+          implementationCurrent === implementationQuestions.length - 1;
+        const answered = implementationQuestions.filter((_, i) => implementationSelected(i)).length;
+        document.getElementById('implementation-progress').textContent =
+          implementationCurrent +
+          1 +
+          ' / ' +
+          implementationQuestions.length +
+          '문항 · 선택 ' +
+          answered +
+          ' · 제출 ' +
+          implementationSubmitted.size;
+        document.getElementById('implementation-overall').textContent =
+          implementationSubmitted.size === 0
+            ? '아직 제출된 답이 없습니다.'
+            : implementationSubmitted.size < implementationQuestions.length
+              ? '점검 진행 중. 아직 제출하지 않은 문항이 있습니다.'
+              : [...implementationSubmitted.values()].every(Boolean)
+                ? '확립: 제출된 모든 항목에서 as-built 동작과 일치하는 답을 확인했습니다. 결과는 이 브라우저에만 있습니다.'
+                : '보류: 각 문항의 설명과 다음 행동을 확인해 주세요.';
+      }
+      document.getElementById('implementation-previous').addEventListener('click', () => {
+        if (implementationCurrent > 0) implementationCurrent--;
+        renderImplementationQuiz();
+      });
+      document.getElementById('implementation-next').addEventListener('click', () => {
+        if (implementationCurrent < implementationQuestions.length - 1) implementationCurrent++;
+        renderImplementationQuiz();
+      });
+      document.querySelectorAll('[data-submit]').forEach((button) =>
+        button.addEventListener('click', () => {
+          const i = Number(button.dataset.submit);
+          const value = implementationSelected(i);
+          const result = document.getElementById('implementation-result' + i);
+          result.hidden = false;
+          if (!value) {
+            result.querySelector('.state').textContent = '미실시';
+            result.querySelector('.explain').textContent = '아직 답을 선택하지 않았습니다.';
+            result.querySelector('.nextAction').textContent = '답을 선택한 뒤 제출하세요.';
+            return;
+          }
+          const ok = Number(value.value) === implementationQuestions[i].correct;
+          implementationSubmitted.set(i, ok);
+          result.querySelector('.state').textContent = ok ? '확립' : '보류';
+          result.querySelector('.explain').textContent = implementationQuestions[i].explain;
+          result.querySelector('.nextAction').textContent = implementationQuestions[i].next;
+          renderImplementationQuiz();
+        }),
+      );
+      document.querySelectorAll('input[type=radio]').forEach((radio) =>
+        radio.addEventListener('change', () => {
+          const i = implementationQuestions.findIndex((question) => question.id === radio.name);
+          if (i < 0) return;
+          implementationSubmitted.delete(i);
+          document.getElementById('implementation-result' + i).hidden = true;
+          renderImplementationQuiz();
+        }),
+      );
+      renderImplementationQuiz();
+    </script>
+  </body>
+</html>

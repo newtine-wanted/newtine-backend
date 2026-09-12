@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>실행 골격 견고성 보완 구현</title>
+    <style>
+      body {
+        max-width: 960px;
+        margin: 40px auto;
+        padding: 0 24px;
+        font: 16px/1.7 system-ui;
+        color: #182333;
+      }
+      section {
+        margin: 32px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>실행 골격 견고성 보완 구현</h1>
+      <p>2026-09-12 · Compact · 구현 완료 · 기술 검증·독립 리뷰 통과 · 운영 이해 미확인</p>
+      <dl>
+        <dt>목적</dt>
+        <dd>초기 API·batch 실행 골격의 실패 처리와 설정 검증 보완</dd>
+        <dt>사용자</dt>
+        <dd>백엔드 구현·운영 개발자</dd>
+        <dt>문제</dt>
+        <dd>ROB-001~004 및 FOUNDATION-R-001</dd>
+        <dt>핵심 흐름</dt>
+        <dd>설정 검증 → 요청 ID → parser → 공통 응답·로그</dd>
+      </dl>
+    </header>
+    <nav>
+      <a href="foundationRobustness.design.html">승인 설계</a><a href="#issue-register">이슈</a
+      ><a href="#verification-evidence">검증</a>
+    </nav>
+    <main>
+      <article>
+        <section id="baseline-reference">
+          <h2>실행 계약</h2>
+          <p>
+            승인: “개선 ㄱ”. 범위: API main/module/parser middleware/filter/exception 정의, core DB
+            options와 ORM 초기화, 단위·HTTP·계약 테스트와 관련 문서. 기존 네 필드 응답·UUIDv7·단일
+            transaction 정책을 유지한다. 명령: npm test, npm run contracts:check, npm run typecheck,
+            npm run build, npm run lint, npm run format:check, npm run test:smoke.
+          </p>
+        </section>
+        <section id="current-implementation">
+          <h2>현재 구현</h2>
+          <p>
+            API main에서 자동 parser를 끄고 HttpRequestContextMiddleware → json/urlencoded parser →
+            parser exception middleware 순으로 등록했다. entity.parse.failed/400과
+            entity.too.large/413 조합을 Nest HTTP 예외로 정규화한다. HttpRequestContextMiddleware는
+            모듈에서 중복 등록하지 않는다. API 응답·OpenAPI에 413과 네 필드 ProblemDetails를
+            반영했다.
+          </p>
+          <p>
+            GlobalExceptionFilter는 최종 HTTP 상태가 5xx이면 error 수준으로 예외
+            name/message/stack/cause를 기록한다. cause 순환과 5단계 이상 깊이는 절단하고 request
+            body·response 객체·임의 enumerable 속성은 직렬화하지 않는다. 도메인 정의는 own-key만
+            허용하고 미등록 코드는 INTERNAL_ERROR로 정규화한다. 정의 테이블의 필수 코드 완전성은
+            TypeScript로 검사한다.
+          </p>
+          <p>
+            DB 설정은 NODE_ENV=development/test에만 기본값을 허용한다. 다른 환경은 다섯 필수값과
+            포트 범위를 검증한다. forRootAsync 초기화로 옮겨 계약 생성·빌드는 DB 값 없이 가능하다.
+            README와 .env.example에 실행법을 반영했다. 남은 소스 하이픈은 동작 변경 없이
+            mikroOrm.transactionManager.ts로 정리했다.
+          </p>
+        </section>
+        <section id="implementation-status">
+          <h2>상태</h2>
+          <p>
+            승인 범위 구현 및 자동 검증 완료. 독립 읽기 전용 리뷰: concrete finding 없음. 리뷰 전후
+            소스·테스트·scripts SHA-256이 동일하여 리뷰 중 해당 파일의 무변경을 확인했다. 실제 DB
+            통합 검증은 별도 범위다.
+          </p>
+        </section>
+        <section id="issue-register">
+          <h2>이슈</h2>
+          <table>
+            <caption>
+              기존 문제 해결 기록
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">상태·근거</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">ROB-001</th>
+                <td>
+                  해결됨: 실제 110KB JSON 요청에서 413/HTTP_413, 일반 detail과 정확히 네 필드 응답
+                  확인.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">ROB-002</th>
+                <td>
+                  해결됨: malformed JSON·크기 초과 요청에 서로 다른 UUIDv7 헤더가 있고 동일 ID가
+                  로그에도 존재. unknown-request와 본문 sentinel 미출력 확인.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">ROB-003</th>
+                <td>
+                  해결됨: HttpException·DomainException 5xx를 error 로그로 기록. cause/stack 존재,
+                  임의 속성과 response payload 제외, cause 순환 안정성 테스트 통과.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">ROB-004</th>
+                <td>
+                  해결됨: NEW_BUSINESS_CODE/toString/constructor/__proto__ 모두 정상적인
+                  INTERNAL_ERROR 500 응답으로 정규화.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">FOUNDATION-R-001</th>
+                <td>
+                  해결됨: 환경·필수값·포트 매트릭스 통과. 빌드된 API와 batch에서 production
+                  DB_PASSWORD 누락 시 초기화 실패와 exit 1을 재현.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            기존 재현 결과는
+            <a href="nestia-migration-implementation.html#robustness-review">점검 기록</a>에
+            보존한다.
+          </p>
+        </section>
+        <section id="verification-evidence">
+          <h2>검증 증거</h2>
+          <p>
+            npm test: unit 19개 + 설정 integration 5개 통과. contracts:check: 재생성·contract
+            2개·generated typecheck 통과. typecheck, API/batch build, lint, format:check 통과. 이름
+            변경은 빌드와 참조 검사로 확인했다.
+          </p>
+          <p>
+            npm run test:smoke: 실제 health/search/validation/404 및 malformed JSON400·용량 초과413,
+            네 필드·media type·UUIDv7 헤더와 로그 일치 통과. 추가 child-process 진단에서 API/batch가
+            운영 비밀번호 누락 시 초기화 실패(exit1)하고 키 이름만 포함한 설정 오류를 출력했다.
+          </p>
+        </section>
+        <section id="verification-gaps">
+          <h2>검증 공백</h2>
+          <p>실제 PostgreSQL 저장·조회·rollback·동시 요청 격리와 인덱스 성능은 이번 범위 밖.</p>
+        </section>
+        <section id="residual-risks">
+          <h2>잔여 위험</h2>
+          <p>
+            생성 계약 drift/CI 자동화와 실제 업무 엔티티·repository 매핑은 후속 범위다. API listen
+            실패 시 명시적인 app.close()·exit code 처리는 초기 골격의 blocker가 아닌 운영 하드닝
+            후보다. 예외 message/stack은 진단 로그에 남으므로 코드에서 비밀값·요청 원문을 예외
+            메시지에 넣지 않아야 한다. 기존 범용 UUID 테스트는 시각을 고정하지 않아 밀리초 동률 전용
+            테스트를 대체하지 않는다.
+          </p>
+        </section>
+        <section id="implementation-control-state">
+          <h2>구현 이해 상태 · 미실시</h2>
+          <p>
+            실행·검증 통과만으로 운영자의 이해가 확립되었다고 간주하지 않는다. 다음 구현 이해 점검은
+            로컬 확인용이며 결과를 자동으로 관찰하지 않는다.
+          </p>
+          <form id="operation-check">
+            <fieldset>
+              <legend>
+                운영에서 DB_PASSWORD 누락과 JSON 크기 초과가 발생했다면 어떻게 구분하는가?
+              </legend>
+              <label
+                ><input type="radio" required name="q" value="yes" />설정 누락은 초기화 실패(exit1),
+                큰 요청은 413과 x-request-id로 로그를 조회한다.</label
+              ><br /><label
+                ><input type="radio" name="q" value="no" />두 경우 모두 HTTP500이므로 동일하게
+                재시도한다.</label
+              >
+            </fieldset>
+            <button type="submit">결과 확인</button>
+          </form>
+          <aside id="operation-result" hidden aria-live="polite">
+            <p id="operation-status"></p>
+            <p>
+              설명: 설정 오류는 기동 전에 차단되고 요청 오류는 HTTP 경계에서 정규화된다. 상세 원인은
+              응답이 아닌 제한된 진단 로그에서 확인한다.
+            </p>
+            <p>
+              다음 행동: 필수 환경변수를 설정하거나 본문을 줄이고, HTTP 실패 요청은 x-request-id로
+              조회한다.
+            </p>
+          </aside>
+        </section>
+      </article>
+    </main>
+    <script>
+      document.getElementById('operation-check').addEventListener('submit', function (e) {
+        e.preventDefault();
+        document.getElementById('operation-status').textContent =
+          new FormData(this).get('q') === 'yes' ? '상태: 동작 경계 확인' : '상태: 설명 재확인 필요';
+        document.getElementById('operation-result').hidden = false;
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>실행 골격 견고성 보완 설계</title>
+    <style>
+      body {
+        max-width: 960px;
+        margin: 40px auto;
+        padding: 0 24px;
+        font: 16px/1.7 system-ui;
+        color: #182333;
+      }
+      section {
+        margin: 32px 0;
+      }
+      nav a {
+        margin-right: 16px;
+      }
+      code {
+        background: #eef2f6;
+        padding: 2px 5px;
+      }
+      label {
+        display: block;
+      }
+      aside {
+        border-left: 4px solid #bd832c;
+        padding: 12px;
+      }
+      button {
+        padding: 8px 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>실행 골격 견고성 보완 설계</h1>
+      <p>
+        Compact · 설계 승인됨 · 2026-09-12 · 사용자 승인: 점검 결과와 수정 방향에 대한 “개선 ㄱ”
+      </p>
+      <dl>
+        <dt>purpose · 목적</dt>
+        <dd>초기 API·batch 실행 골격의 실패 처리와 설정 검증 보완</dd>
+        <dt>audience · 사용자</dt>
+        <dd>백엔드 구현·운영 개발자</dd>
+        <dt>problem · 문제</dt>
+        <dd>parser 상태 왜곡·요청 추적 누락·5xx 진단 손실·미등록 코드 실패·운영 DB 기본값</dd>
+        <dt>core-flow · 핵심 흐름</dt>
+        <dd>설정 검증 → 요청 ID → body parser → HTTP 정규화 → 공통 응답·진단 로그</dd>
+      </dl>
+      <p>
+        기존 Nestia 전환 문서와 목적 범위가 달라 별도 설계로 기록한다.
+        <a href="foundationRobustness.implementation.html">구현 기록</a> ·
+        <a href="nestia-migration-implementation.html#robustness-review">승인 근거 리뷰</a>
+      </p>
+    </header>
+    <nav>
+      <a href="#goal">범위</a><a href="#change-model">변경</a
+      ><a href="#design-control-state">이해 점검</a>
+    </nav>
+    <main>
+      <article>
+        <section id="goal">
+          <h2>승인 범위</h2>
+          <p>
+            ROB-001~004와 FOUNDATION-R-001을 해결한다. 실제 업무 엔티티·DB 마이그레이션·PostgreSQL
+            성능 검증은 이번 범위 밖이다. 함께 영향을 받는 413 OpenAPI 계약과 실패 회귀 테스트를
+            갱신한다.
+          </p>
+        </section>
+        <section id="change-model">
+          <h2>동작 계약</h2>
+          <ol>
+            <li>서버가 UUIDv7 요청 ID를 parser 앞에서 발급한다. 전달받은 ID로 덮어쓰지 않는다.</li>
+            <li>
+              parser 경계에서 잘못된 JSON은 안전한 400, 크기 초과는 413으로 변환한다. 신뢰된 parser
+              오류의 type/status 조합만 변환한다.
+            </li>
+            <li>
+              실패 응답은 title/status/detail/code 네 필드와 application/problem+json. 5xx 본문
+              상세는 은닉한다.
+            </li>
+            <li>
+              5xx 로그에는 요청 ID와 예외 name/message/stack 및 제한된 cause 경로를 기록한다.
+              request body, HttpException response 객체, 임의 enumerable 속성은 직렬화하지 않는다.
+            </li>
+            <li>도메인 정의는 own-key로 조회하고 미등록 코드는 INTERNAL_ERROR로 정규화한다.</li>
+            <li>
+              NODE_ENV=development 또는 test에만 개발 DB 기본값을 허용한다. 그 외에는
+              DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD가 필요하다. 모든 환경에서 빈 값과 잘못된
+              포트는 거절하며 값 자체는 오류에 출력하지 않는다. 설정 검증은 ORM 초기화 시 수행한다.
+            </li>
+          </ol>
+          <figure>
+            <figcaption>요청 처리 순서</figcaption>
+            <p>
+              요청 → requestId → parser → 오류 정규화 → GlobalExceptionFilter → 네 필드 응답 + 동일
+              ID 로그
+            </p>
+          </figure>
+        </section>
+        <section id="key-risk">
+          <h2>불변식·경계</h2>
+          <p>
+            임의 예외의 status를 신뢰하지 않는다. 외부 입력은 로그 payload로 남기지 않는다.
+            라이브러리 UUIDv7 생성과 단일 트랜잭션 정책은 유지한다. 진단용 예외 message/stack은 운영
+            로그 접근 통제 대상이며 애플리케이션 코드가 비밀값을 예외 메시지에 넣지 않아야 한다.
+          </p>
+        </section>
+        <section id="verification-plan">
+          <h2>검증</h2>
+          <p>
+            필터 단위 테스트(5xx 로그·cause·미등록 코드), 설정 매트릭스, 실제 HTTP
+            smoke(정상/validation/JSON 오류/413와 ID·로그 일치), contracts:check, typecheck, test,
+            build, lint, format:check. DB 없는 실행 골격 검증을 실제 저장·rollback 검증이라고 부르지
+            않는다.
+          </p>
+        </section>
+        <section id="design-control-state">
+          <h2>설계 이해 점검 · 미실시</h2>
+          <p>
+            핵심 실패 경계와 운영 설정을 아래 두 질문으로 확인한다. 값 선택은 설계 승인과 별개이며
+            로컬 결과를 Codex가 관찰했다고 간주하지 않는다. UUID·DB 영속성은 변경 범위가 아니므로
+            추가 퀴즈를 생략한다.
+          </p>
+          <form id="check">
+            <fieldset>
+              <legend>잘못된 JSON이 middleware 전에 추적을 잃던 문제를 어떻게 해결하는가?</legend>
+              <label
+                ><input required type="radio" name="q1" value="yes" />parser 전에 ID를 발급하여 오류
+                응답과 로그에 같은 ID를 남긴다.</label
+              ><label
+                ><input type="radio" name="q1" value="no" />필터에서 요청마다 서로 다른 ID를
+                만든다.</label
+              >
+            </fieldset>
+            <fieldset>
+              <legend>NODE_ENV가 없고 DB_PASSWORD가 누락되면?</legend>
+              <label
+                ><input required type="radio" name="q2" value="yes" />ORM 초기화 시 설정 오류로
+                시작에 실패한다.</label
+              ><label
+                ><input type="radio" name="q2" value="no" />postgres 기본 비밀번호를
+                사용한다.</label
+              >
+            </fieldset>
+            <button type="submit">확인</button>
+          </form>
+          <aside id="result" hidden aria-live="polite">
+            <p id="status"></p>
+            <p>
+              설명: parser보다 앞선 ID 부여와 명시적인 개발 환경 기본값으로 실패 추적·운영 설정
+              경계를 보완한다.
+            </p>
+            <p>다음 행동: 실제 운영 설정을 준비하고 실패 응답의 x-request-id로 로그를 조회한다.</p>
+          </aside>
+        </section>
+        <section id="approval-state">
+          <h2>승인 기록</h2>
+          <p>
+            사용자의 “개선 ㄱ”는 제시된 다섯 문제의 수정 방향에 대한 명시적 실행 요청이다. 승인된
+            범위의 구현으로 진행하며 추가 설계 선택은 필요하지 않다. 이해 점검 결과는 미관찰이다.
+          </p>
+        </section>
+      </article>
+    </main>
+    <script>
+      document.getElementById('check').addEventListener('submit', function (event) {
+        event.preventDefault();
+        const data = new FormData(this);
+        document.getElementById('status').textContent =
+          data.get('q1') === 'yes' && data.get('q2') === 'yes'
+            ? '상태: 두 경계 확인'
+            : '상태: 설명 재확인 필요';
+        document.getElementById('result').hidden = false;
+      });
+    </script>
+  </body>
+</html>

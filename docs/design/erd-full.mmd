@@ -1,0 +1,183 @@
+erDiagram
+ publishers ||--o{ articles : publishes
+ articles ||--o{ article_discoveries : discovered_as
+ issue_categories ||--o{ issues : category
+ issues ||--o| issue_details : detail
+ issues ||--o{ issue_articles : evidence
+ articles ||--o{ issue_articles : source
+ issues ||--o{ issue_entities : mentions
+ entities ||--o{ issue_entities : identifies
+ issues ||--o| issue_embeddings : vector
+ issues ||--o{ issue_relations : previous
+ issues ||--o{ issue_relations : following
+ users ||--o{ refresh_sessions : sessions
+ users ||--o{ user_category_preferences : prefers
+ issue_categories ||--o{ user_category_preferences : category
+ users ||--o{ user_entity_preferences : prefers
+ entities ||--o{ user_entity_preferences : entity
+ users ||--o{ user_interaction_events : actions
+ issues ||--o{ user_interaction_events : target
+ users ||--o{ weekly_reports : reports
+ issues ||--o{ issue_content_jobs : builds
+ issue_content_jobs |o--o{ ai_usage_records : calls
+ publishers {
+  uuid id PK "NOT NULL"
+  text name "NOT NULL"
+  text url "NULL"
+ }
+ articles {
+  uuid id PK "NOT NULL"
+  uuid publisher_id FK "NOT NULL"
+  text article_url UK "NOT NULL"
+  text title "NOT NULL"
+  text description "NULL"
+  text reporter "NULL"
+  timestamptz published_at "NULL"
+  timestamptz fetched_at "NOT NULL"
+  text source_status "NOT NULL"
+  timestamptz created_at "NOT NULL"
+ }
+ article_discoveries {
+  uuid id PK "NOT NULL"
+  uuid article_id FK "NOT NULL"
+  text provider "NOT NULL"
+  text provider_url "NOT NULL"
+  timestamptz created_at "NOT NULL"
+ }
+ issues {
+  uuid id PK "NOT NULL"
+  varchar(40) title "NOT NULL"
+  timestamptz event_at "NULL"
+  uuid category_id FK "NOT NULL"
+  text sub_category "NULL"
+  text publication_status "NOT NULL"
+  numeric freshness_score "NOT NULL"
+  numeric importance_score "NOT NULL"
+  timestamptz published_at "NULL"
+  timestamptz created_at "NOT NULL"
+  timestamptz updated_at "NOT NULL"
+ }
+ issue_details {
+  uuid issue_id PK,FK "NOT NULL"
+  text integrated_summary "NOT NULL"
+  jsonb summary_lines "NOT NULL"
+  jsonb viewpoints "NULL"
+  jsonb glossary "NOT NULL"
+  timestamptz created_at "NOT NULL"
+ }
+ issue_articles {
+  uuid issue_id PK,FK "NOT NULL"
+  uuid article_id PK,FK "NOT NULL"
+  int sort_order "NULL"
+ }
+ entities {
+  uuid id PK "NOT NULL"
+  text name "NOT NULL"
+  text type "NOT NULL"
+  text subtitle "NULL"
+  text[] aliases "NOT NULL"
+  boolean is_active "NOT NULL"
+  timestamptz created_at "NOT NULL"
+ }
+ issue_entities {
+  uuid issue_entities_id PK "NOT NULL"
+  uuid issue_id FK "NOT NULL"
+  uuid entity_id FK "NOT NULL"
+ }
+ issue_categories {
+  uuid id PK "NOT NULL"
+  text name "NOT NULL"
+ }
+ issue_embeddings {
+  uuid issue_embedding_id PK "NOT NULL"
+  uuid issue_id FK "NOT NULL"
+  vector_D embedding "NOT NULL"
+  text input_version "NOT NULL"
+  text input_hash "NOT NULL"
+  timestamptz embedded_at "NOT NULL"
+ }
+ issue_relations {
+  uuid from_issue_id PK,FK "NOT NULL"
+  uuid to_issue_id PK,FK "NOT NULL"
+  text relation_type PK "NOT NULL"
+  text reason "NOT NULL"
+  jsonb evidence_refs "NOT NULL"
+  timestamptz verified_at "NOT NULL"
+ }
+ users {
+  uuid id PK "NOT NULL"
+  text kakao_id UK "NOT NULL"
+  text email "NULL"
+  text onboarding_status "NOT NULL"
+  timestamptz onboarding_completed_at "NULL"
+  timestamptz created_at "NOT NULL"
+ }
+ refresh_sessions {
+  uuid id PK "NOT NULL"
+  uuid user_id FK "NOT NULL"
+  text token_hash UK "NOT NULL"
+  timestamptz expires_at "NOT NULL"
+  timestamptz used_at "NULL"
+  timestamptz revoked_at "NULL"
+  timestamptz created_at "NOT NULL"
+ }
+ user_category_preferences {
+  uuid user_category_preferences_id PK "NOT NULL"
+  uuid user_id FK "NOT NULL"
+  uuid category_id FK "NOT NULL"
+  numeric weight "NOT NULL"
+ }
+ user_entity_preferences {
+  uuid user_entity_preference_id PK "NOT NULL"
+  uuid user_id FK "NOT NULL"
+  uuid entity_id FK "NOT NULL"
+  numeric weight "NOT NULL"
+ }
+ user_interaction_events {
+  uuid id PK "NOT NULL"
+  uuid user_id FK "NOT NULL"
+  uuid issue_id FK "NOT NULL"
+  uuid session_id "NOT NULL"
+  text event_type "NOT NULL"
+  int dwell_time "NULL"
+  text previous_action "NULL"
+  timestamptz created_at "NOT NULL"
+ }
+ weekly_reports {
+  uuid id PK "NOT NULL"
+  uuid user_id FK "NOT NULL"
+  date period_start "NOT NULL"
+  date period_end "NOT NULL"
+  text status "NOT NULL"
+  jsonb content "NULL"
+  text model "NULL"
+  text prompt_version "NULL"
+  timestamptz created_at "NOT NULL"
+  timestamptz updated_at "NOT NULL"
+ }
+ issue_content_jobs {
+  uuid id PK "NOT NULL"
+  uuid issue_id FK "NOT NULL"
+  text stage "NOT NULL"
+  text status "NOT NULL"
+  text prompt_version "NOT NULL"
+  timestamptz started_at "NULL"
+  timestamptz finished_at "NULL"
+  text last_error "NULL"
+  timestamptz created_at "NOT NULL"
+ }
+ ai_usage_records {
+  uuid id PK "NOT NULL"
+  uuid issue_content_job_id FK "NULL"
+  text operation "NOT NULL"
+  text provider "NOT NULL"
+  text status "NOT NULL"
+  text model "NULL"
+  numeric actual_cost "NULL"
+  int input_tokens "NULL"
+  int output_tokens "NULL"
+  text error_code "NULL"
+  timestamptz started_at "NOT NULL"
+  timestamptz finished_at "NULL"
+  timestamptz created_at "NOT NULL"
+ }

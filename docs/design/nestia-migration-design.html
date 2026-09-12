@@ -1,0 +1,1354 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Nestia 마이그레이션 설계</title>
+    <meta name="purpose" content="NestJS API의 요청·응답 타입 계약을 Nestia와 Typia로 전환" />
+    <meta name="audience" content="백엔드 구현 개발자" />
+    <meta
+      name="problem"
+      content="class-validator·class-transformer 의존성과 타입·빌드 계약을 Nestia 방식으로 전환"
+    />
+    <meta
+      name="core-flow"
+      content="전환 범위와 컴파일러 선택 → 단일 라우트 검증 → RFC 9457 매핑 → 전체 라우트 전환과 기존 의존성 제거"
+    />
+    <style>
+      body {
+        max-width: 1040px;
+        margin: 36px auto;
+        padding: 0 20px;
+        color: #233349;
+        background: #f5f7fb;
+        font:
+          16px/1.7 system-ui,
+          sans-serif;
+      }
+      header,
+      section,
+      aside {
+        margin: 22px 0;
+        padding: 22px;
+        background: #fff;
+        border: 1px solid #d6dfeb;
+        border-radius: 12px;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      nav {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      a {
+        color: #255bb4;
+      }
+      pre {
+        overflow: auto;
+        padding: 16px;
+        background: #edf2f9;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 9px;
+        border: 1px solid #d6dfeb;
+        text-align: left;
+        vertical-align: top;
+      }
+      aside {
+        border-left: 4px solid #b87920;
+      }
+      .control-slide label {
+        display: block;
+        margin: 12px 0;
+      }
+      .control-slide nav,
+      #design-control-form > nav {
+        margin-top: 16px;
+      }
+      button {
+        margin: 4px 8px 4px 0;
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .control-result {
+        margin-top: 16px;
+        padding: 12px;
+        background: #eef7ef;
+        border-left: 4px solid #3c8c4a;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>설계 · 설계 승인됨(네 필드 실패 응답) · 이번 보완 Compact</p>
+      <h1>Nestia 마이그레이션 설계</h1>
+      <p>
+        TypeScript 타입을 API의 런타임 요청·응답 계약으로 사용하고 기존 class 기반 검증을 제거한다.
+      </p>
+      <p>
+        작성일: <time datetime="2026-09-12">2026-09-12</time> · 갱신일:
+        <time datetime="2026-09-12">2026-09-12</time> · 작업 참조: Nestia 전환 요청
+      </p>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#goal">목표</a>
+      <a href="#evidence">확인 근거</a>
+      <a href="#flow">실행 흐름</a>
+      <a href="#decisions">결정</a>
+      <a href="#domain-exception-revision">도메인 예외</a>
+      <a href="#problemTypeRevision">네 필드 실패 응답</a>
+      <a href="#grilling-state">Grilling</a>
+      <a href="#risks">위험과 검증</a>
+      <a href="#approval-state">승인</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="openapi-generation-revision">
+          <h2>OpenAPI 생성 단계 보완 — 2026-09-12</h2>
+          <p>
+            <strong>설계 승인됨 · Compact.</strong> 이번 절은 기존 실패 응답 생성 방식에 대한 후속
+            보완안이다. 아래 과거 승인 기록은 기존 범위에만 적용한다. 사용자는 생성 단계 보정 방향과
+            설계 보완을 확인했고, 2026-09-12에 “설계대로 구현”으로 이 범위의 구현을 승인했다.
+          </p>
+          <p>
+            목적은 컨트롤러의 실패 명세 중복을 줄이면서 Nestia 타입 분석과 실제 HTTP 실패 계약을
+            일치시키는 것이다. 기존 Nestia 계약 전환 설계의 동일 목적 후속 변경으로 이 문서를
+            갱신한다. 의사결정 상태: 생성 단계 보정으로 합의, 추가 선택 질문 없음.
+          </p>
+          <h3>변경 모델</h3>
+          <ul>
+            <li>
+              API 계층의 공통 예외 정의 객체에 code, status, title, description을 둔다. 글로벌
+              필터와 명세가 이를 재사용하고 core의 ErrorCode에는 HTTP 의존성을 추가하지 않는다.
+              description은 기본 detail이며 기존 안전한 상세 메시지 정책을 유지한다.
+            </li>
+            <li>
+              컨트롤러는 원본 Nestia 객체 overload를 사용한다:
+              <code>@TypedException&lt;ProblemDetails&gt;(ApiException.InvalidArgument)</code>. 변환
+              함수나 자체 TypedException 래퍼를 추가하지 않는다.
+            </li>
+            <li>
+              <code>ProblemDetailsResponses</code> 데코레이터와 공통 상태·설명 자동 추가를 제거한다.
+              각 route에 실제 발생 가능한 실패만 선언한다. 같은 HTTP 상태의 복수 업무 코드가
+              필요해지면 별도 examples 병합 설계를 추가한다.
+            </li>
+            <li>
+              <code>scripts/openapi.mjs</code>가 로컬 Nestia Swagger 생성 실행, JSON 읽기, media
+              type 보정, 최종 저장을 순서대로 담당한다. 서버를 실행하거나 Swagger UI를 공개하지
+              않는다.
+            </li>
+          </ul>
+          <figure>
+            <figcaption>공식 생성 경로와 검증 경계</figcaption>
+            <pre><code>TypedException + 공통 예외 정의
+  → npm run contracts:swagger
+  → scripts/openapi.mjs → Nestia Swagger 생성
+  → ProblemDetails 실패 응답의 media type 보정
+  → generated/openapi.json → test:contracts
+
+실제 HTTP 요청 → GlobalExceptionFilter → application/problem+json</code></pre>
+          </figure>
+          <h3>생성 명령</h3>
+          <pre><code>"contracts:swagger": "node scripts/openapi.mjs"
+"contracts:all": "npm run contracts:sdk &amp;&amp; npm run contracts:e2e &amp;&amp; npm run contracts:swagger"
+"contracts:check": "npm run contracts:all &amp;&amp; npm run test:contracts &amp;&amp; npm run typecheck:generated"</code></pre>
+          <p>
+            <code>nestia swagger</code>·<code>nestia all</code> 직접 실행 결과는 보정 전 원본이므로
+            최종 산출물로 사용하지 않는다. README의 공식 생성 안내와 package script도 구현 범위에
+            포함한다. 생성 스크립트 재도입은 승인된 변경 방향이며, 응답 schema를 수작업으로
+            재정의하는 과거 방식은 도입하지 않는다.
+          </p>
+          <h3>보정 불변식과 실패 처리</h3>
+          <ul>
+            <li>
+              HTTP operation의 400–599 및 4XX·5XX 실패 응답 중 application/json schema가
+              <code>#/components/schemas/ProblemDetails</code>를 직접 참조하는 항목만 처리한다. 다른
+              schema, 성공 응답, default 응답은 변경하지 않는다.
+            </li>
+            <li>
+              기존 media object 전체를 application/problem+json으로 이동한다. schema, example,
+              examples, encoding 및 응답 description·headers 등 다른 속성은 보존한다. 상태 코드나
+              schema를 추가하지 않는다.
+            </li>
+            <li>
+              이미 보정된 항목은 유지한다. 두 media type이 함께 있으면 동일한 내용일 때만 JSON 키를
+              제거하고, 서로 다르면 오류로 종료하여 충돌을 숨기지 않는다.
+            </li>
+            <li>
+              Nestia 실행 실패 시 이전 파일을 읽어 성공으로 처리하지 않는다. JSON 해석·보정·저장
+              실패도 비정상 종료한다. 실패한 생성 결과는 배포·공유하지 않고 원인을 수정한 뒤 공식
+              명령을 다시 실행한다.
+            </li>
+            <li>
+              현재 직접 참조 형태를 지원 범위로 둔다. 향후 schema 이름이나 참조 구조가 바뀌어 보정이
+              누락되면 최종 계약 테스트가 실패해야 한다.
+            </li>
+          </ul>
+          <h3>검증 계획</h3>
+          <p>
+            공식 생성 경로로 생성한 결과에서 route별 정확한 실패 상태, 예외 정의의 설명, 네 필드
+            schema와 application/problem+json을 확인한다. 선언하지 않은 상태의 자동 추가가 없어야
+            한다. fixture 기반 검사로 대상 외 응답·schema·예시 보존, 재보정의 동일 결과, 충돌 감지를
+            확인한다. 생성 실패가 성공으로 처리되지 않는지도 검증한다.
+          </p>
+          <p>
+            구현 후 실행: <code>npm run contracts:check</code>, <code>npm run typecheck</code>,
+            <code>npm run lint</code>, <code>npm run format:check</code>, 글로벌 필터 단위 테스트,
+            <code>npm run build:api</code>와 <code>npm run test:smoke</code>. 이 문서는 계획이며
+            통과 기록이 아니다.
+          </p>
+          <h3>설계 이해 점검</h3>
+          <p>
+            design-control-state: 미실시. 아래 결과는 브라우저 로컬 표시이며 구현 승인과 별개다.
+            점검 축: 공식 생성 경로와 실패 감지. schema 보존·멱등성은 기술 검증으로 확인하고, 실행
+            시 응답 계약은 기존 정책을 유지하므로 추가 질문은 생략한다.
+          </p>
+          <form id="openapi-generation-check">
+            <fieldset>
+              <legend>
+                1 / 1 — nestia swagger를 직접 실행한 파일에 application/json이 남아 있다면?
+              </legend>
+              <label
+                ><input type="radio" name="openapi-path" value="direct" /> 그대로 최종 산출물로
+                사용한다.</label
+              >
+              <label
+                ><input type="radio" name="openapi-path" value="official" /> 공식 contracts:check로
+                생성·보정·검증을 다시 수행한다.</label
+              >
+            </fieldset>
+            <button type="submit">결과 확인</button>
+            <div id="openapi-generation-result" hidden>
+              <p>상태: <output id="openapi-generation-status" aria-live="polite"></output></p>
+              <p id="openapi-generation-explanation"></p>
+              <p>다음 행동: 설계 수정이 필요하면 알리고, 구현 시작은 별도로 승인한다.</p>
+            </div>
+          </form>
+          <p>
+            구현 기록: <a href="nestia-migration-implementation.html">기존 구현 문서</a>. 이 문서는
+            승인된 설계 기준선이며 실제 결과·검증 증거는 연결된 구현 제어 문서에 기록한다.
+          </p>
+        </section>
+        <section id="domain-exception-revision">
+          <h2>도메인별 예외 분리 — 2026-09-12</h2>
+          <p>
+            <strong>설계 승인됨.</strong> <code>DomainException</code> 하나에 도메인 문자열만
+            추가하는 방식은 선택하지 않는다. <code>DomainException</code>은 직접 생성하지 않는 추상
+            기반 예외로 두고, 업무 경계마다
+            <code>IssueException</code>·<code>UserException</code>처럼 구체 타입을 만든다. 현재
+            구현에는 첫 업무 경계인 <code>IssueException</code>을 추가한다.
+          </p>
+          <ul>
+            <li>
+              도메인 예외 파일은
+              <code>libs/core/src/&lt;feature&gt;/domain/&lt;feature&gt;.exception.ts</code>에 둔다.
+              각 예외 타입은 도메인 코드와 도메인 이름을 소유하며 core는 HTTP를 모른다.
+            </li>
+            <li>
+              <code>ApiException</code>은 HTTP 상태·title·description·외부 응답 code만 관리한다.
+              도메인 예외와 API 정의를 연결하는 매핑은 <code>apps/api</code>의 adapter에 둔다.
+            </li>
+            <li>
+              <code>GlobalExceptionFilter</code>는 공통 기반 타입으로 도메인 예외를 받고 매핑된
+              <code>ApiException</code>으로 네 필드 응답을 만든다. 매핑되지 않은 도메인 코드는
+              <code>INTERNAL_ERROR</code>로 숨긴다.
+            </li>
+            <li>
+              로그에는 <code>exceptionName</code>, <code>domain</code>, <code>domainCode</code>,
+              <code>apiCode</code>, <code>requestId</code>, HTTP method·URL을 남긴다. 응답 계약에는
+              도메인 내부 코드를 추가하지 않는다.
+            </li>
+          </ul>
+          <figure>
+            <figcaption>도메인 예외의 API adapter 처리</figcaption>
+            <pre><code>IssueException(ISSUE_NOT_FOUND)
+  → domainException.mapper.ts
+  → ApiException.NotFound
+  → GlobalExceptionFilter
+  → { title, status, detail, code: "NOT_FOUND" }
+  + log { exceptionName, domain, domainCode, apiCode, requestId }</code></pre>
+          </figure>
+        </section>
+        <section id="goal">
+          <h2>목표와 범위</h2>
+          <p>
+            API의 request/response 타입을 <code>apps/api</code>의 기능별 <code>type</code>에 두고,
+            컨트롤러에서는 Nestia의 <code>@TypedBody</code>, <code>@TypedQuery</code>,
+            <code>@TypedParam</code>, <code>@TypedRoute</code>를 사용한다. 성공 응답은 기존처럼
+            <code>data</code> 래퍼 없이 직접 반환하고, 실패 응답은
+            <code>GlobalExceptionFilter</code>가 RFC 9457 Problem Details로 변환한다.
+          </p>
+          <p>
+            사용자와 외부 시스템의 body·query·path·header·cookie·file·batch 인자는 입력 어댑터
+            경계에서 항상 Typia로 런타임 검증한다. TypeScript 타입이나 mapper만으로 검증을 대신하지
+            않으며, 검증 실패는 <code>INVALID_ARGUMENT</code>으로 정규화한다. 이번 전환의 산출물은
+            검증·직렬화 경로, 컴파일러 실행 경로, 오류 매핑, 마이그레이션 규칙이다. 실제 업무
+            라우트가 없으므로 첫 라우트에 대한 파일럿을 전환 검증으로 사용한다.
+          </p>
+        </section>
+
+        <section id="evidence">
+          <h2>확인된 근거</h2>
+          <p>
+            아래 항목 중 검증 도구와 실행 경로는 전환 전 조사 기록이다. 현재 적용된 기준은
+            <a href="backend-conventions.md">백엔드 구현 컨벤션</a>과 이 문서의 확정 결정 및
+            연결된 구현 제어 문서를 따른다.
+          </p>
+          <ul>
+            <li>
+              전환 전 API는 전역
+              <code
+                >ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true
+                })</code
+              >를 사용했다. 현재 API는 Nestia·Typia의 입력 decorator 검증으로 전환했다.
+            </li>
+            <li>
+              전환 전 빌드는 Nest CLI의 Rspack builder이며, TypeScript는 5.9.3이고 테스트 실행은
+              <code>tsx</code>였다. 현재 빌드·개발·타입 검증은 <code>ttsc</code>·<code>ttsx</code>,
+              테스트는 Jest를 사용한다.
+            </li>
+            <li>
+              Nestia는 Typia 위의 NestJS 통합 계층으로, TypeScript 인터페이스에서 요청 검증과 응답
+              직렬화 코드를 생성한다.
+            </li>
+            <li>
+              최신 공식 설정 경로는 TypeScript 7과 <code>ttsc</code>이며, 일반
+              <code>tsc</code>/<code>tsx</code>는 Typia 변환을 실행하지 않는다. 현재는
+              <code>ttsc</code>·<code>ttsx</code> 경로를 사용하므로 별도 Rspack transformer를
+              추가하지 않는다.
+            </li>
+            <li>
+              <code>@TypedBody</code> 검증 실패는 <code>BadRequestException</code>으로 전달되고,
+              <code>errors: [{ path, expected, value }]</code> 입력 payload가 오더라도 전역 필터가
+              응답에 복사하지 않는다.
+            </li>
+          </ul>
+          <p>
+            참고: <a href="https://typia.io/docs/utilization/nestjs/">NestJS에서 Typia 활용</a> ·
+            <a href="https://nestia.io/docs/setup/">Nestia 설정</a> ·
+            <a href="https://typia.io/docs/setup/">Typia 설정</a> ·
+            <a href="https://nestia.io/docs/core/TypedBody/">TypedBody</a>
+          </p>
+        </section>
+
+        <section id="flow">
+          <h2>전환 흐름</h2>
+          <figure>
+            <figcaption>컴파일 시 타입 변환과 요청·응답 처리의 경계</figcaption>
+            <pre><code>apps/api type ──ttsc──▶ 생성된 Typia 검증·직렬화 코드
+       │                                             │
+       └─ @TypedBody / @TypedQuery / @TypedRoute ────┘
+                         │
+                  Nest handler 실행
+                         │
+       실패 ── BadRequestException ──▶ GlobalExceptionFilter ──▶ RFC 9457
+       성공 ───────────────────────────▶ 직접 data 반환</code></pre>
+          </figure>
+        </section>
+
+        <section id="decisions">
+          <h2>확정할 설계 규칙</h2>
+          <dl>
+            <dt>레이어 경계</dt>
+            <dd>
+              Nestia 데코레이터는 <code>apps/api</code> adapter에만 둔다. <code>libs/core</code>의
+              feature/domain/entity/vo와 feature/repository port는 Nestia·HTTP에 의존하지 않는다.
+            </dd>
+            <dt>타입 소유권</dt>
+            <dd>
+              request/response 타입은 기능별 API <code>type</code>에 두며 ORM entity를 직접 응답
+              계약으로 사용하지 않는다.
+            </dd>
+            <dt>오류 계약</dt>
+            <dd>
+              Nestia가 생성한 검증 오류를 원문으로 노출하지 않고
+              <code>GlobalExceptionFilter</code>에서 프로젝트의 <code>INVALID_ARGUMENT</code>와 일반
+              detail로 정규화한다. 프레임워크 4xx payload와 요청 URL도 고정 문구로 정규화하며,
+              현재 실패 본문은 title/status/detail/code 네 필드다.
+            </dd>
+            <dt>Problem type 식별자 — 최신 보완에서 생략</dt>
+            <dd>
+              현재 범용 실패에는 type을 보내지 않는다. RFC의 기본값은 <code>about:blank</code>이며,
+              세부 오류 구분은 프로젝트 확장 필드 <code>code</code>가 담당한다. 별도 업무 처리가
+              필요한 도메인 오류가 생기면 안정적인 type URI를 별도 설계한다.
+            </dd>
+            <dt>스키마 도구</dt>
+            <dd>
+              API의 request/response 검증과 직렬화는 Nestia·Typia를 단일 계약으로 사용한다. 같은
+              라우트에 Zod 스키마를 중복 적용하지 않는다. 다만 환경 변수·설정이나 외부 시스템의 동적
+              JSON처럼 API 타입 계약과 다른 경계에는 Zod를 선택적으로 사용할 수 있다.
+            </dd>
+            <dt>추가 필드</dt>
+            <dd>
+              현재의 <code>whitelist + forbidNonWhitelisted</code> 의미를 보존하기 위해 Nestia의
+              <code>validateEquals</code>를 기본 정책으로 사용한다. <code>validatePrune</code>는
+              제거 후 처리하므로 선택하지 않는다.
+            </dd>
+            <dt>컴파일러·산출물</dt>
+            <dd>
+              Nest CLI/Rspack 빌드 경로 대신 <code>ttsc</code>·<code>ttsx</code> 기반 실행 경로를
+              채택하고, <code>@nestia/sdk</code>의 SDK·Swagger·e2e 생성을 이번 전환 범위에 포함한다.
+              생성 파일의 소유 위치와 커밋 여부는 구현 계약에서 고정한다.
+            </dd>
+            <dt>예외 라우트</dt>
+            <dd>
+              health, stream, redirect, binary처럼 일반 JSON 계약이 아닌 라우트는 표준 Nest
+              decorator를 유지할 수 있다.
+            </dd>
+          </dl>
+        </section>
+
+        <section id="grilling-state">
+          <h2>설계 의사결정 질문(grilling)</h2>
+          <p>
+            진행 상태: 완료 · G10 후속 합의: 실패 본문은 title/status/detail/code 네 필드만
+            유지한다. 구현 승인 대기. 기존 G1–G9 기록은 유지한다.
+          </p>
+          <p>
+            결정 트리: G1이 전환 순서를 정하고, G2가 빌드 경로를 연다. G3가 컨트롤러 적용 범위를
+            정한 뒤 G4의 입력 필드 정책과 G5의 오류 매핑을 고정한다. G6은 SDK/Swagger/e2e 산출물
+            범위를 결정했다. 후속 리뷰에서 G7은 Swagger 서버 URL 노출 정책, G8은 RFC 9457 실패
+            계약의 생성 범위, G9는 생성 e2e의 module resolution과 검증 경계를 결정한다.
+          </p>
+          <p>
+            이미 확정된 경계: Nestia는 <code>apps/api</code> adapter에만 두고 core domain/repository
+            port는 순수하게 유지한다. 해결된 결정: G1-A·G2-B·G3-A·G4-A·G5-A·G6-A·G7-A·G8-B·G9-B.
+            주요 가정: 현재 업무 라우트와 DTO 클래스가 없어 첫 기능 라우트가 파일럿 대상이 된다.
+          </p>
+          <table>
+            <caption>
+              이번 라운드에서 결정할 항목
+            </caption>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>결정</th>
+                <th>선택지</th>
+                <th>권고</th>
+                <th>상태</th>
+                <th>결정이 여는 작업</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>G1</td>
+                <td>전환 순서</td>
+                <td>A 파일럿 후 전체 / B 일괄</td>
+                <td>A</td>
+                <td>해결: A</td>
+                <td>실패 시 되돌릴 경계</td>
+              </tr>
+              <tr>
+                <td>G2</td>
+                <td>컴파일러·Rspack</td>
+                <td>A Rspack+transformer / B ttsc / C legacy</td>
+                <td>A</td>
+                <td>해결: B</td>
+                <td>build/test script와 tsconfig</td>
+              </tr>
+              <tr>
+                <td>G3</td>
+                <td>Typed decorator 범위</td>
+                <td>A 입력·출력 / B 입력만 / C health 포함 전체</td>
+                <td>A</td>
+                <td>해결: A</td>
+                <td>컨트롤러 규칙</td>
+              </tr>
+              <tr>
+                <td>G4</td>
+                <td>추가 필드</td>
+                <td>A validateEquals / B validatePrune / C validate</td>
+                <td>A</td>
+                <td>해결: A</td>
+                <td>기존 입력 계약 보존</td>
+              </tr>
+              <tr>
+                <td>G5</td>
+                <td>검증 오류 응답</td>
+                <td>A RFC 정규화 / B Nestia 원문 / C 상세 제거</td>
+                <td>A</td>
+                <td>해결: A</td>
+                <td>오류 mapper와 테스트</td>
+              </tr>
+              <tr>
+                <td>G6</td>
+                <td>SDK/Swagger/e2e 생성</td>
+                <td>A 지금 생성 / B 안정화 후 / C 사용 안 함</td>
+                <td>A</td>
+                <td>해결: A</td>
+                <td>nestia CLI와 산출물 정책</td>
+              </tr>
+              <tr>
+                <td>G7</td>
+                <td>Swagger 서버 URL</td>
+                <td>A 상대 경로 <code>/</code> / B servers 제거 후처리 / C 호스트·포트 명시</td>
+                <td>A</td>
+                <td>해결: A</td>
+                <td>주소 노출과 Try it out 기준</td>
+              </tr>
+              <tr>
+                <td>G8</td>
+                <td>RFC 9457 실패 계약 생성 범위</td>
+                <td>A OpenAPI + SDK 전파형 / B OpenAPI만, SDK는 예외 유지 / C 후처리만</td>
+                <td>B</td>
+                <td>해결: B</td>
+                <td>TypedException, ProblemDetails schema, SDK 호출 방식</td>
+              </tr>
+              <tr>
+                <td>G9</td>
+                <td>생성 e2e 모듈 해석</td>
+                <td>A 상대 import를 <code>.js</code>로 정규화 / B Bundler 전용 tsconfig</td>
+                <td>B</td>
+                <td>해결: B</td>
+                <td>생성물 typecheck와 실행 경계</td>
+              </tr>
+            </tbody>
+          </table>
+          <aside>
+            이번 결정으로 G2-B는 컴파일러와 개발·테스트 실행 경로를 바꾸는 작업을 연다. G4-A는
+            기존의 미허용 필드 거부 의미를 유지한다. G6-A는 파일럿부터 SDK·Swagger·e2e 생성과 산출물
+            검증을 함께 포함한다. G7-A는 주소가 정해지지 않은 동안 현재 origin을 기준으로 Swagger
+            요청을 보낸다. G8은 현재 <code>@nestia/fetcher</code>의 전파 경로가
+            <code>application/json</code>만 자동 JSON 파싱하고
+            <code>application/problem+json</code>은 문자열로 남기는 제약을 함께 고려해야 한다.
+            따라서 권고 B는 RFC 미디어 타입과 기존 SDK의 예외 호출 방식을 보존하면서 OpenAPI에 실패
+            스키마·응답을 생성한다. A를 선택하면 별도 fetcher/adapter를 추가해 상태별 ProblemDetails
+            전파와 JSON 파싱까지 함께 구현해야 한다. G9-B는 Nestia 생성물의 확장자 없는 상대
+            import를 후처리하지 않고 생성물 전용 Bundler typecheck로 검증한다. runtime API build의
+            ttsc NodeNext 경계와 생성물 검증 경계를 분리한다. 세 항목은 G7-A·G8-B·G9-B로 결정되었고,
+            사용자 승인 후 구현 단계로 전환했다.
+          </aside>
+        </section>
+
+        <section id="problemTypeRevision">
+          <h2>실패 응답 간소화 — 네 필드 계약</h2>
+          <p>
+            최신 결정: 2026-09-12 사용자가 “ㅇㅇ 저렇게만 하자”로 네 필드 설계를 선택하고 구현을
+            승인했다. 현재 상태는 설계 승인됨이다. 강도: Compact.
+          </p>
+          <pre><code>{
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "요청 값이 올바르지 않습니다.",
+  "code": "INVALID_ARGUMENT"
+}</code></pre>
+          <p>
+            type, instance, errors를 본문과 선언·생성 계약에서 제거한다. requestPath나 다른 본문
+            필드는 추가하지 않는다. 검증 실패도 같은 네 필드로 반환하며 필드별 오류 목록은 제공하지
+            않는다. application/problem+json, HTTP 상태와 title/code 매핑, 5xx 상세 은닉은 유지한다.
+            type 생략은 RFC에서 about:blank로 해석되며 code는 프로젝트 확장 계약이다. 알 수 없는
+            code는 HTTP 상태로 처리하고 detail을 파싱하지 않는다.
+          </p>
+          <p>
+            확인된 운영 경계: HttpRequestContextMiddleware는 서버에서 UUID를 만들고 x-request-id
+            응답 헤더를 설정한다. 본문 instance 삭제와 무관하게 이 헤더와 로그의 요청 ID 연결은
+            유지한다. core 예외와 트랜잭션, 성공 응답, DB 동작은 변경하지 않는다.
+          </p>
+          <h3>구현 범위와 검증</h3>
+          <p>
+            GlobalExceptionFilter, ProblemDetails, exceptionDefinition의 URI 매핑을 정리하고
+            사용되지 않는 검증 상세 변환을 제거한다. 단, 검증 예외의 code/status 판정은 유지한다.
+            단위·smoke·계약 테스트는 네 필드의 정확한 키 집합, 5xx 은닉, x-request-id와 로그 연결을
+            검사한다. Nestia로 SDK/OpenAPI/e2e를 재생성하고 관련 README·설계 및 구현 기록을 맞춘다.
+          </p>
+          <p>
+            검증 계획: npm run test:unit, npm run contracts:check, npm run typecheck, npm run lint,
+            npm run format:check, npm run build:api, npm run test:smoke. 필수 type/instance 또는
+            errors에 의존하는 기존 소비자에는 호환성 영향이 있다. 외부 소비자 배포 여부는 미확인으로
+            남기며 이번 작업에 배포는 포함하지 않는다.
+          </p>
+          <section id="minimalResponseControl">
+            <h3>이번 보완의 설계 이해 점검</h3>
+            <p>상태: 미실시. 아래 결과는 브라우저 안에서만 표시되며 구현 승인이 아니다.</p>
+            <p>
+              범위·결정·실패 불변식은 MC1, 운영 추적은 MC2, 소비자 경계·호환성·검증은 MC3으로
+              확인한다. 상태 변경·데이터 복구·외부 권한은 이번 변경에 없어 별도 질문을 생략한다.
+            </p>
+            <output id="minimalProgress" aria-live="polite"></output>
+            <div
+              class="minimalQuestion"
+              data-answer="A"
+              data-explanation="검증 실패도 네 필드만 반환한다. type 생략은 about:blank이며 code는 프로젝트 계약이다. 5xx 내부 상세는 계속 숨긴다."
+            >
+              <fieldset>
+                <legend>MC1. 입력값 두 개가 잘못되면 어떤 본문을 받는가?</legend>
+                <label
+                  ><input type="radio" name="MC1" value="A" />title/status/detail/code만
+                  받는다.</label
+                >
+                <label
+                  ><input type="radio" name="MC1" value="B" />네 필드와 errors 목록을 받는다.</label
+                >
+              </fieldset>
+              <button type="button" class="minimalSubmit">답변 제출</button>
+              <div class="minimalResult" hidden>
+                <strong></strong>
+                <p class="explanation"></p>
+                <p class="nextAction"></p>
+              </div>
+            </div>
+            <div
+              class="minimalQuestion"
+              data-answer="B"
+              data-explanation="본문 instance는 없어도 기존 x-request-id 헤더와 로그의 동일 ID를 통해 요청을 추적한다."
+            >
+              <fieldset>
+                <legend>MC2. 동일 경로에서 실패한 요청 두 건을 어떻게 구별하는가?</legend>
+                <label
+                  ><input type="radio" name="MC2" value="A" />본문 instance에서 UUID를
+                  읽는다.</label
+                >
+                <label
+                  ><input type="radio" name="MC2" value="B" />x-request-id 응답 헤더를 로그 ID와
+                  연결한다.</label
+                >
+              </fieldset>
+              <button type="button" class="minimalSubmit">답변 제출</button>
+              <div class="minimalResult" hidden>
+                <strong></strong>
+                <p class="explanation"></p>
+                <p class="nextAction"></p>
+              </div>
+            </div>
+            <div
+              class="minimalQuestion"
+              data-answer="A"
+              data-explanation="기존 소비자는 삭제 필드 의존을 제거해야 한다. 재생성된 계약도 네 필드인지 검사하고 알 수 없는 code는 HTTP 상태로 처리한다."
+            >
+              <fieldset>
+                <legend>MC3. 기존 SDK가 instance를 필수로 읽고 있다면?</legend>
+                <label
+                  ><input type="radio" name="MC3" value="A" />소비자를 갱신해야 하며 본문 축소를
+                  무조건 호환 변경으로 볼 수 없다.</label
+                >
+                <label
+                  ><input type="radio" name="MC3" value="B" />RFC 선택 필드이므로 기존 SDK도 수정
+                  없이 안전하다.</label
+                >
+              </fieldset>
+              <button type="button" class="minimalSubmit">답변 제출</button>
+              <div class="minimalResult" hidden>
+                <strong></strong>
+                <p class="explanation"></p>
+                <p class="nextAction"></p>
+              </div>
+            </div>
+            <nav aria-label="이번 보완 이해 점검 이동">
+              <button type="button" id="minimalPrev">이전</button
+              ><button type="button" id="minimalNext">다음</button>
+            </nav>
+            <output id="minimalResultSummary" aria-live="polite"></output>
+          </section>
+          <details>
+            <summary>이전 type 단독 생략 제안 이력 — 최신 결정으로 대체됨</summary>
+            <p>
+              목적: 현재 오류 계약을 간소화하면서 RFC 해석과 클라이언트 동작을 명시한다. 사용자:
+              백엔드 개발자와 API 소비자. 문제: 범용 코드마다 URI를 중복 관리하고 있다. 핵심 흐름:
+              예외 → 전역 필터 → 오류 본문 → 클라이언트 처리. 기존 실패 계약의 보완으로 이 문서를
+              갱신한다.
+            </p>
+            <p>
+              확인된 코드: ProblemDetails.type은 필수 string이고, api.exception.ts는 네 코드의 URI를
+              별도 매핑한다. 필터의 세 응답 경로와 unit·smoke가 이 URI에 의존한다. 현재 구현은
+              변경하지 않았다. 외부 소비자의 배포·사용 여부는 이 저장소만으로 확인되지 않았다.
+            </p>
+            <p>
+              <a href="https://www.rfc-editor.org/rfc/rfc9457.html#name-type">RFC 9457 §3.1.1</a>에
+              따라 type 생략은 about:blank으로 해석된다.
+              <a href="https://www.rfc-editor.org/rfc/rfc9457.html#name-aboutblank">§4.2.1</a>의
+              의미는 HTTP 상태 이상의 별도 문제 타입 의미가 없다는 것이다. 문서가 없다는 뜻이
+              아니다.
+            </p>
+            <table>
+              <caption>
+                G10 — 현재 오류 응답에 type을 보낼 것인가
+              </caption>
+              <thead>
+                <tr>
+                  <th>안</th>
+                  <th>효과</th>
+                  <th>비용과 제한</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>A 생략 — 권고</td>
+                  <td>기본 타입 해석을 사용하고 URI 매핑을 제거</td>
+                  <td>범용 RFC 소비자는 프로젝트 code의 의미를 알지 못함</td>
+                </tr>
+                <tr>
+                  <td>B about:blank 명시</td>
+                  <td>A와 같은 RFC 의미를 본문에 명시</td>
+                  <td>고정 필드를 계속 전송하고 관리</td>
+                </tr>
+                <tr>
+                  <td>C 에러별 URI 유지</td>
+                  <td>RFC type으로 종류를 구분</td>
+                  <td>안정적인 식별자·의미·문서를 정하고 변경 호환성을 관리</td>
+                </tr>
+              </tbody>
+            </table>
+            <p>
+              권고 A의 적용 범위는 현재 범용 오류다. HTTP 상태를 기본 처리 기준으로 사용하고,
+              code·errors는 우리 클라이언트가 이해하는 문서화된 확장으로 유지한다. code가 RFC의 주
+              식별자인 type을 대체한다고 설명하지 않는다. 알 수 없는 code는 HTTP 상태에 따라 일반
+              오류로 처리하고 detail 문구를 파싱해서 분기하지 않는다.
+            </p>
+            <pre><code>{
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "요청 값이 올바르지 않습니다.",
+  "instance": "urn:uuid:8f75c728-6591-4370-9aec-75813f5158ca",
+  "code": "INVALID_ARGUMENT"
+}</code></pre>
+            <p>
+              검증 상세가 있으면 errors를 추가한다. Content-Type은 application/problem+json을
+              유지한다. 요청 endpoint를 담으려는 요구는 type과 별개이며 이번 범위에 응답 필드를
+              추가하지 않는다.
+            </p>
+            <h3>승인 후 변경 범위와 불변식</h3>
+            <ol>
+              <li>필터의 모든 응답에서 type을 생략하고 ProblemDetails 선언에서도 제거한다.</li>
+              <li>
+                PROBLEM_TYPE_BY_CODE, problemTypeForCode, 예외 정의의 type만 제거한다. HTTP
+                상태·title 매핑은 유지한다.
+              </li>
+              <li>
+                Nestia로 재생성해 OpenAPI의 type 속성과 required 항목을 함께 제거한다. 생성 파일은
+                직접 수정하지 않는다.
+              </li>
+              <li>
+                unit·smoke에서 type이 실제로 없음을 검사한다. status/code, 5xx 상세 은닉, instance,
+                media type은 유지한다.
+              </li>
+            </ol>
+            <p>
+              검증 명령: npm run test:unit, npm run contracts:check, npm run typecheck, npm run
+              lint, npm run format:check, npm run build:api, npm run test:smoke. 현재 계약 테스트는
+              type 필수 여부를 검사하지 않으므로 해당 회귀 검사를 보강한다.
+            </p>
+            <h3>호환성과 재검토 조건</h3>
+            <p>
+              현재 required 필드의 삭제는 기존 클라이언트에 영향을 줄 수 있다. 배포된 소비자가
+              있다면 먼저 type 누락을 허용하도록 소비자를 전환한 후 서버를 변경한다. 아직 내부
+              골격이면 서버·SDK·테스트를 함께 갱신한다.
+            </p>
+            <p>
+              나중에 같은 HTTP 상태라도 서로 다른 업무 처리가 필요한 도메인 오류를 외부 계약으로
+              제공하거나, RFC type을 사용하는 도구와 연동한다면 구체적인 type을 다시 설계한다.
+              도메인이 생겼다는 이유만으로 자동 전환하지 않는다. about:blank에서 구체적인 URI로
+              바꾸는 것은 문제 식별자의 변경이며, 단순 필드 추가처럼 무조건 호환된다고 보지 않는다.
+            </p>
+            <p>
+              결정 트리: G10 표현 선택 → 소비자 호환성 확인 → 필터·타입·생성 계약 동시 변경. 현재
+              G10은 제안 상태다. URI 도메인·문서 서버는 보류하며 이번 범위에 만들지 않는다.
+            </p>
+            <p>
+              이해 점검: 미실시. G10 결정과 공유 이해 확인 후, type 누락의 RFC 의미와 알 수 없는
+              code의 처리, 기존 소비자의 required 필드 삭제 영향을 별도 점검한다. 설계 선택은 구현
+              승인이 아니다.
+            </p>
+          </details>
+        </section>
+
+        <section id="risks">
+          <h2>위험과 검증 계획</h2>
+          <table>
+            <caption>
+              구현 전 확인할 위험
+            </caption>
+            <thead>
+              <tr>
+                <th>위험</th>
+                <th>탐지 방법</th>
+                <th>통과 기준</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Rspack이 Typia 변환을 누락</td>
+                <td>파일럿에서 생성 validator 실행과 no-transform 오류 확인</td>
+                <td>build 후 유효·무효 body가 예상 응답을 반환</td>
+              </tr>
+              <tr>
+                <td>검증 오류의 내부 구조가 응답에 노출됨</td>
+                <td>잘못된 body 응답의 키 집합과 5xx 상세 은닉 검사</td>
+                <td><code>application/problem+json</code>과 title/status/detail/code만 반환</td>
+              </tr>
+              <tr>
+                <td>응답 타입과 실제 JSON 불일치</td>
+                <td><code>@TypedRoute</code> 응답 실패 테스트</td>
+                <td>잘못된 응답은 handler 경계에서 500으로 처리되고 내부 정보는 노출하지 않음</td>
+              </tr>
+              <tr>
+                <td>개발·테스트 실행 경로가 변환을 우회</td>
+                <td>build, unit, integration, smoke를 각각 같은 transformer 정책으로 실행</td>
+                <td>모든 명령에서 Typia setup 검증 통과</td>
+              </tr>
+              <tr>
+                <td>Swagger가 알 수 없는 host를 기본 서버로 사용</td>
+                <td>
+                  <code>test:contracts</code>에서 <code>servers</code>와 생성 OpenAPI 결과 확인
+                </td>
+                <td>서버 목록은 상대 URL <code>/</code> 하나이며 공인 host·port가 없음</td>
+              </tr>
+              <tr>
+                <td>실패 응답이 생성 계약에서 누락되거나 media type이 달라짐</td>
+                <td>각 operation의 400·404·409·500 response와 ProblemDetails ref 검사</td>
+                <td><code>application/problem+json</code>과 공통 schema가 런타임 filter와 일치</td>
+              </tr>
+              <tr>
+                <td>생성 e2e의 확장자 없는 상대 import</td>
+                <td><code>typecheck:generated</code>와 생성 계약 테스트</td>
+                <td>Bundler에서 생성 SDK·e2e가 오류 없이 typecheck</td>
+              </tr>
+            </tbody>
+          </table>
+          <aside>
+            G7-A·G8-B·G9-B의 통과 기준은 구현 제어 문서의 실행 계약과
+            <code>contracts:check</code>에 반영되었다. 현재 설계 승인을 기록했으며 검증 실패 시
+            생성물을 성공 상태로 보고하지 않는다.
+          </aside>
+        </section>
+
+        <section id="design-control-state">
+          <p>
+            이번 네 필드 보완의 상태: 미실시 · MC1–MC3 열림.
+            <a href="#minimalResponseControl">이번 보완 이해 점검</a>에서 범위·운영 추적·호환성을
+            확인한다. 아래는 이전 범위의 점검 이력이며 이번 보완의 이해 증거가 아니다.
+          </p>
+          <h2>설계 이해·통제 점검</h2>
+          <p>
+            상태: 확인 필요 · phase: design-control · 구현 승인과 분리 · 후속 grilling(G7–G9) 결정은
+            반영되었고 구현은 승인되었다. 활성 관심사: 적용 범위·컴파일 경계·실패 매핑·생성물 운영 ·
+            질문 ID: DC-1–DC-11 · 상태: 운영 확인 필요
+          </p>
+          <p>
+            목적: 이미 선택한 설계를 이해하고 있는지 확인한다. 이 질문은 Nestia·Zod 중 무엇을
+            선택할지 다시 결정하는 grilling이 아니다.
+          </p>
+          <table>
+            <caption>
+              설계 이해·통제 점검 coverage ledger
+            </caption>
+            <thead>
+              <tr>
+                <th>검토 축</th>
+                <th>왜 필요한가</th>
+                <th>질문 ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>목표·범위</td>
+                <td>업무 JSON과 health의 적용 경계를 예측해야 한다.</td>
+                <td>DC-1</td>
+              </tr>
+              <tr>
+                <td>주요 결정·불변식</td>
+                <td>ttsc/ttsx, validateEquals, RFC 매핑의 선택 결과를 보존해야 한다.</td>
+                <td>DC-2, DC-3, DC-4</td>
+              </tr>
+              <tr>
+                <td>경계·상태 전이</td>
+                <td>adapter와 core의 의존 방향, 컴파일·런타임 경계를 지켜야 한다.</td>
+                <td>DC-1, DC-5, DC-6</td>
+              </tr>
+              <tr>
+                <td>실패·복구</td>
+                <td>검증 실패와 응답 타입 불일치의 외부 결과를 예측해야 한다.</td>
+                <td>DC-4, DC-7</td>
+              </tr>
+              <tr>
+                <td>외부 계약·운영</td>
+                <td>SDK·Swagger·e2e 생성과 변환기 우회 시 진단 지점을 고정해야 한다.</td>
+                <td>DC-3, DC-8, DC-9, DC-10, DC-11</td>
+              </tr>
+              <tr>
+                <td>검증·잔여 위험</td>
+                <td>파일럿 통과 기준과 생성물 드리프트 검증을 확인해야 한다.</td>
+                <td>DC-8</td>
+              </tr>
+            </tbody>
+          </table>
+          <form id="design-control-form">
+            <p id="control-progress" aria-live="polite">질문 1/11 · 답변 0/11</p>
+
+            <section class="control-slide" data-question="DC-1">
+              <fieldset>
+                <legend>DC-1. 업무 JSON 라우트와 health 라우트에 적용할 decorator 조합은?</legend>
+                <label
+                  ><input type="radio" name="DC-1" value="A" /> 업무 JSON은
+                  <code>@TypedBody</code>/<code>@TypedRoute</code>, health는 일반 Nest decorator를
+                  유지한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-1" value="B" /> 모든 라우트는 반드시
+                  <code>@TypedRoute</code>로 바꾼다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-1" value="C" /> 입력만 Typed decorator로 바꾸고 업무
+                  JSON 응답은 자유 형식으로 둔다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-2" hidden>
+              <fieldset>
+                <legend>DC-2. validateEquals가 적용된 요청에 모르는 필드가 들어오면?</legend>
+                <label
+                  ><input type="radio" name="DC-2" value="A" /> 모르는 필드를 조용히 제거하고
+                  handler를 실행한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-2" value="B" /> 요청 검증이 실패하고 filter가 RFC
+                  9457의 <code>INVALID_ARGUMENT</code> 응답으로 변환한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-2" value="C" /> 검증을 건너뛰고 domain에서만
+                  판단한다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-3" hidden>
+              <fieldset>
+                <legend>DC-3. Typia 변환이 필요한 테스트를 실행할 때 기준 경로는?</legend>
+                <label
+                  ><input type="radio" name="DC-3" value="A" /> stock <code>tsc</code>와
+                  <code>tsx</code>를 사용해도 transformer가 자동으로 적용된다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-3" value="B" />
+                  <code>ttsc</code>·<code>ttsx</code>를 사용하고, script가 변환기를 우회하지 않는지
+                  확인한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-3" value="C" /> 빌드만 변환기를 사용하고 dev/test는
+                  실행 속도를 위해 stock 도구를 사용한다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-4" hidden>
+              <fieldset>
+                <legend>DC-4. Nestia 요청 검증 실패의 외부 응답 흐름은?</legend>
+                <label
+                  ><input type="radio" name="DC-4" value="A" /> Nestia 원문을 그대로 반환해 RFC
+                  응답과 별개로 둔다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-4" value="B" /> 성공과 실패 모두
+                  <code>data</code> 래퍼로 감싼다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-4" value="C" /> <code>BadRequestException</code>이
+                  filter에 도달하고 RFC 9457 + <code>INVALID_ARGUMENT</code>로 정규화된다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-5" hidden>
+              <fieldset>
+                <legend>DC-5. Nestia decorator의 소유 위치로 맞는 것은?</legend>
+                <label
+                  ><input type="radio" name="DC-5" value="A" /> <code>libs/core</code>의 domain과
+                  repository port가 Nestia decorator를 직접 사용한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-5" value="B" /> HTTP adapter인
+                  <code>apps/api</code>에서만 사용하고 core는 framework-free로 유지한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-5" value="C" /> 생성된 SDK가 core port를 대체하므로
+                  repository에 decorator를 둔다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-6" hidden>
+              <fieldset>
+                <legend>DC-6. API route와 Zod의 관계로 맞는 운영 규칙은?</legend>
+                <label
+                  ><input type="radio" name="DC-6" value="A" /> 같은 route에서 Nestia와 Zod를 모두
+                  검증기로 사용해 이중 안전성을 확보한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-6" value="B" /> API route는 Nestia·Typia를 단일
+                  계약으로 쓰고, Zod는 설정·외부 동적 payload 같은 별도 경계에만 선택적으로
+                  둔다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-6" value="C" /> Zod가 없으면 Typia 타입 검증도
+                  동작하지 않는다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-7" hidden>
+              <fieldset>
+                <legend>DC-7. <code>@TypedRoute</code> 응답이 선언한 타입과 다르면?</legend>
+                <label
+                  ><input type="radio" name="DC-7" value="A" /> 변환기가 선언 타입에 맞춰 값을 자동
+                  수정한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-7" value="B" /> 성공 응답으로 반환되며 테스트에서만
+                  확인한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-7" value="C" /> handler 경계에서 500 계열 실패가
+                  나므로 응답 계약 테스트로 탐지한다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-8" hidden>
+              <fieldset>
+                <legend>DC-8. G6-A의 파일럿 통과 기준에 포함되는 것은?</legend>
+                <label
+                  ><input type="radio" name="DC-8" value="A" /> SDK·Swagger·e2e 생성을 나중으로
+                  미루고 route 응답만 확인한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-8" value="B" /> 파일럿부터 생성과 산출물 검증을
+                  포함하고, 생성 경로·커밋·CI 드리프트 정책을 구현 계약으로 고정한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-8" value="C" /> 생성물은 개발자 로컬에서만 만들고
+                  검증하지 않는다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-9" hidden>
+              <fieldset>
+                <legend>DC-9. 아직 공개 호스트가 없는 Swagger의 서버 URL은?</legend>
+                <label
+                  ><input type="radio" name="DC-9" value="A" /> <code>servers</code>에 상대 경로
+                  <code>/</code>만 두어 현재 origin을 사용한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-9" value="B" /> 임시 공인 호스트와 포트를 문서에
+                  고정한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-9" value="C" /> 생성기가 넣은 기본 GitHub 주소를
+                  그대로 둔다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-10" hidden>
+              <fieldset>
+                <legend>DC-10. G8-B를 선택한 이유는?</legend>
+                <label
+                  ><input type="radio" name="DC-10" value="A" /> OpenAPI에는 RFC 9457 실패 schema와
+                  응답을 생성하되, <code>application/problem+json</code>을 파싱하지 못하는 현재
+                  SDK의 전파 경로와 호출 방식은 바꾸지 않는다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-10" value="B" /> <code>propagate</code>를 켜면
+                  <code>application/problem+json</code>도 자동으로 객체가 되므로 추가 작업이
+                  없다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-10" value="C" /> 실패 응답은 문서화하지 않고 성공
+                  응답만 SDK에 남긴다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <section class="control-slide" data-question="DC-11" hidden>
+              <fieldset>
+                <legend>DC-11. 생성 e2e의 module resolution을 검증하는 방식은?</legend>
+                <label
+                  ><input type="radio" name="DC-11" value="A" /> 생성 후 모든 상대 import를
+                  <code>.js</code>로 정규화하고 NodeNext typecheck를 계약 게이트에 넣는다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-11" value="B" /> 생성물 전용 Bundler
+                  moduleResolution으로 typecheck하고, API runtime의 NodeNext 경계와 분리한다.</label
+                >
+                <label
+                  ><input type="radio" name="DC-11" value="C" /> 생성 e2e는 계속 만들되 어떤
+                  컴파일도 수행하지 않는다.</label
+                >
+              </fieldset>
+              <button type="button" class="submit-control">이 답변 제출</button>
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next-action"></p>
+              </div>
+            </section>
+
+            <nav aria-label="설계 이해·통제 질문 이동">
+              <button type="button" id="control-prev">이전</button>
+              <button type="button" id="control-next">다음</button>
+            </nav>
+            <output id="control-overall-result" aria-live="polite"></output>
+          </form>
+        </section>
+
+        <section id="approval-state">
+          <h2>승인 상태</h2>
+          <p>
+            이번 네 필드 보완안: 설계 승인됨. 사용자가 2026-09-12 구현을 승인했다.
+            title/status/detail/code만 남기고 type/instance/errors를 제거하며, 기존 요청 ID
+            헤더·로그 추적과 생성 계약·검증·문서 동시 갱신을 유지한다. 아래 승인 기록은 기존 범위의
+            이력이다.
+          </p>
+          <p>
+            설계 승인됨. 기존 G1–G6 결정에 리뷰 후속 G7-A·G8-B·G9-B를 추가해 2026-09-12T04:23:49Z에
+            구현을 승인했다. G7은 Swagger에 상대 서버 URL <code>/</code>만 사용하고, G8은
+            <code>@TypedException&lt;ProblemDetails&gt;</code> 기반 OpenAPI 실패 계약을 생성하되
+            SDK의 기존 <code>HttpError</code> 예외 방식을 유지한다. G9는 생성물 전용 Bundler
+            typecheck를 계약 게이트로 두고 API runtime의 NodeNext 경계와 분리한다. 기존 범위인
+            Nestia·Typia 기반 API request/response 계약, ttsc·ttsx 컴파일 경로, validateEquals, RFC
+            9457 오류 매핑, health 예외 라우트, 파일럿부터 SDK·Swagger·e2e 생성은 유지한다. Zod는
+            동일 API route에 도입하지 않으며 별도 경계의 선택 사항으로 남긴다. 구현 후 점검에서 기존
+            G9-A(NodeNext import 후처리)는 G9-B(생성물 전용 Bundler typecheck)로 조정하고, 생성
+            후처리 래퍼와 해시 검사는 제거했다.
+          </p>
+          <p>
+            구현 제어는
+            <a href="nestia-migration-implementation.html">Nestia 마이그레이션 구현 제어</a>에서
+            별도로 기록한다.
+          </p>
+        </section>
+      </article>
+    </main>
+    <script>
+      (() => {
+        const cards = [...document.querySelectorAll('.minimalQuestion')];
+        let index = 0;
+        const render = () => {
+          cards.forEach((card, i) => {
+            card.hidden = i !== index;
+          });
+          const answered = cards.filter((card) => card.querySelector('input:checked')).length;
+          document.querySelector('#minimalProgress').textContent =
+            `질문 ${index + 1}/${cards.length} · 답변 ${answered}/${cards.length}`;
+          document.querySelector('#minimalPrev').disabled = index === 0;
+          document.querySelector('#minimalNext').disabled = index === cards.length - 1;
+        };
+        cards.forEach((card) => {
+          card.querySelector('.minimalSubmit').addEventListener('click', () => {
+            const selected = card.querySelector('input:checked');
+            const result = card.querySelector('.minimalResult');
+            result.hidden = false;
+            const correct = selected?.value === card.dataset.answer;
+            result.querySelector('strong').textContent = !selected
+              ? '미실시'
+              : correct
+                ? '확립'
+                : '보류';
+            result.querySelector('.explanation').textContent = selected
+              ? card.dataset.explanation
+              : '답변이 선택되지 않았다.';
+            result.querySelector('.nextAction').textContent = correct
+              ? '다음 항목을 확인한다. 구현 승인은 별도다.'
+              : '본문을 확인하고 다시 선택한다.';
+            document.querySelector('#minimalResultSummary').textContent =
+              '결과는 이 브라우저에만 표시된다. 구현 승인과 별개다.';
+            render();
+          });
+        });
+        document.querySelector('#minimalPrev').addEventListener('click', () => {
+          index--;
+          render();
+        });
+        document.querySelector('#minimalNext').addEventListener('click', () => {
+          index++;
+          render();
+        });
+        render();
+      })();
+      (() => {
+        const slides = [...document.querySelectorAll('.control-slide')];
+        const answerKey = {
+          'DC-1': 'A',
+          'DC-2': 'B',
+          'DC-3': 'B',
+          'DC-4': 'C',
+          'DC-5': 'B',
+          'DC-6': 'B',
+          'DC-7': 'C',
+          'DC-8': 'B',
+          'DC-9': 'A',
+          'DC-10': 'A',
+          'DC-11': 'B',
+        };
+        const explanations = {
+          'DC-1': '업무 JSON만 타입 계약을 강화하고 예외 라우트인 health는 단순성을 유지한다.',
+          'DC-2':
+            'validateEquals는 알려지지 않은 필드를 허용하지 않으며 filter가 공통 오류 계약으로 변환한다.',
+          'DC-3':
+            'Typia 변환은 일반 tsc/tsx에서 보장되지 않으므로 ttsc/ttsx 경로를 기준으로 삼는다.',
+          'DC-4':
+            'Nestia 검증 실패는 BadRequestException으로 전달되고 GlobalExceptionFilter가 RFC 9457로 정규화한다.',
+          'DC-5':
+            'Nestia는 HTTP adapter의 기술이며 core domain과 port의 framework-free 경계를 보존한다.',
+          'DC-6':
+            '한 route의 계약을 두 도구가 동시에 소유하면 드리프트가 생기므로 별도 경계에서만 Zod를 허용한다.',
+          'DC-7': 'TypedRoute는 응답 계약을 실행 시 확인하며 불일치는 서버 오류로 탐지해야 한다.',
+          'DC-8':
+            'G6-A는 생성물을 늦추지 않고 파일럿의 계약 검증에 포함하며 운영 정책은 구현 계약에서 고정한다.',
+          'DC-9':
+            '상대 서버 URL은 호스트·포트를 노출하지 않고 Swagger의 요청 기준을 현재 origin으로 둔다.',
+          'DC-10':
+            '현재 @nestia/fetcher 전파 경로는 application/problem+json을 자동 객체로 파싱하지 않으므로 SDK 호출 의미를 유지하고 OpenAPI 실패 계약부터 생성한다.',
+          'DC-11':
+            'Nestia 생성물은 확장자 없는 상대 import를 포함하므로 Bundler typecheck로 검증하고 API runtime의 NodeNext 경계와 분리한다.',
+        };
+        let current = 0;
+
+        const render = () => {
+          slides.forEach((slide, index) => {
+            slide.hidden = index !== current;
+          });
+          const answered = slides.filter((slide) =>
+            slide.querySelector('input[type="radio"]:checked'),
+          ).length;
+          document.querySelector('#control-progress').textContent =
+            `질문 ${current + 1}/${slides.length} · 답변 ${answered}/${slides.length}`;
+          document.querySelector('#control-prev').disabled = current === 0;
+          document.querySelector('#control-next').disabled = current === slides.length - 1;
+        };
+
+        slides.forEach((slide) => {
+          slide.querySelector('.submit-control').addEventListener('click', () => {
+            const id = slide.dataset.question;
+            const selected = slide.querySelector(`input[name="${id}"]:checked`);
+            const result = slide.querySelector('.control-result');
+            const status = slide.querySelector('.result-status');
+            const explanation = slide.querySelector('.result-explanation');
+            const nextAction = slide.querySelector('.result-next-action');
+            result.hidden = false;
+            if (!selected) {
+              status.textContent = '미실시';
+              explanation.textContent = '선택한 답변이 없어 결과를 판정하지 않았다.';
+              nextAction.textContent = '선택 후 다시 제출한다.';
+            } else if (selected.value === answerKey[id]) {
+              status.textContent = '확립';
+              explanation.textContent = explanations[id];
+              nextAction.textContent = '다음 질문으로 이동한다.';
+            } else {
+              status.textContent = '보류';
+              explanation.textContent =
+                '선택한 답변이 현재 설계의 동작과 다르다. 본문 결정을 다시 확인한다.';
+              nextAction.textContent =
+                '설계를 수정할 필요가 있으면 구현 승인 전에 대화에서 알린다.';
+            }
+            render();
+            const results = slides.map((item) => item.querySelector('.result-status')?.textContent);
+            const complete = results.every((value) => value === '확립');
+            document.querySelector('#control-overall-result').textContent = complete
+              ? '전체 점검: 확립 · 구현 승인은 별도로 요청한다.'
+              : '전체 점검: 진행 중 · 모든 질문을 제출하면 상태를 확인할 수 있다.';
+          });
+        });
+
+        document.querySelector('#control-prev').addEventListener('click', () => {
+          current = Math.max(0, current - 1);
+          render();
+        });
+        document.querySelector('#control-next').addEventListener('click', () => {
+          current = Math.min(slides.length - 1, current + 1);
+          render();
+        });
+        render();
+      })();
+    </script>
+    <script>
+      document.querySelector('#openapi-generation-check').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const answer = document.querySelector('input[name="openapi-path"]:checked');
+        document.querySelector('#openapi-generation-result').hidden = false;
+        document.querySelector('#openapi-generation-status').textContent = !answer
+          ? '미실시'
+          : answer.value === 'official'
+            ? '확립'
+            : '보류';
+        document.querySelector('#openapi-generation-explanation').textContent =
+          '직접 Nestia 실행은 보정을 거치지 않는다. 공식 contracts:check는 생성·보정 후 최종 media type을 검사하며, 실패 시 산출물을 공유하지 않는다.';
+      });
+    </script>
+  </body>
+</html>

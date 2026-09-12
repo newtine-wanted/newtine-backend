@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="초기 백엔드의 보안 경계와 정보 노출 위험 점검" />
+    <meta name="audience" content="백엔드 개발자와 운영 담당자" />
+    <meta name="problem" content="입력·예외·로그·DB 설정의 보안 위험과 검증 공백 식별" />
+    <meta name="core-flow" content="로컬 코드 추적 → 합성 값 재현 → 영향 분류 → 보완 판단" />
+    <title>초기 백엔드 보안 리뷰</title>
+    <style>body{max-width:1000px;margin:40px auto;padding:0 20px;font:16px/1.7 system-ui;color:#233349}nav{display:flex;gap:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd5df;padding:12px;text-align:left;vertical-align:top}pre,aside{padding:16px;background:#f2f5f8}section{margin:32px 0}</style>
+  </head>
+  <body>
+    <header>
+      <h1>초기 백엔드 보안 리뷰</h1>
+      <p>자기 변경 리뷰 · 작성·리뷰: Codex · newtine-backend / main · 2026-09-12</p>
+      <p>상태: 검토 완료 · 판단: non-blocking risk만 있음 · commit range 없음(전체 미추적 초기 작업 트리) · PR/이슈 없음</p>
+    </header>
+    <nav aria-label="문서 탐색"><a href="#scope">범위</a><a href="#findings">발견 사항</a><a href="#verification">검증</a></nav>
+    <main><article>
+      <section id="scope">
+        <h2>범위와 실행 경계</h2>
+        <p>API·batch·core의 현재 소스, 설정, 의존성 구현과 단위 테스트를 검토하고 SEC-001·SEC-002를 보완한 뒤 재검증했다. 운영 서버 침투 테스트나 저장소 전체 이력의 비밀 탐지는 수행하지 않았다.</p>
+        <figure><figcaption>HTTP 실행 경로</figcaption><pre>요청 context → body parser → Nestia·Typia → controller → mapper → service
+실패 → GlobalExceptionFilter → 네 필드 응답 + Pino 로그</pre></figure>
+        <p>유지할 불변식은 서비스 진입 전 입력 검증, 내부 진단의 응답 은닉, 입력 원문·비밀값의 로그 노출 방지다. 현재 업무 검색은 빈 결과를 반환하며 사용자별 데이터·인증 기능은 없다.</p>
+      </section>
+      <section id="findings">
+        <h2>발견 사항</h2>
+        <table><caption>재현된 정보 노출 경로</caption><thead><tr><th scope="col">ID / 상태</th><th scope="col">증거와 영향</th><th scope="col">최소 보완 방향</th></tr></thead><tbody>
+          <tr><th scope="row">SEC-001 · P2 · fixed</th><td><code>exceptionDiagnostic</code>을 <code>libs/core/src/common/logging/exceptionDiagnostic.ts</code>로 통합했다. 예외 message는 기록하지 않고 stack의 첫 줄을 제거하며, cause는 이름·stack frame만 깊이 제한으로 기록한다. 알려진 secret·token·authorization·query 패턴도 보정한다. API·batch bootstrap과 BatchRunner·GlobalExceptionFilter가 공통 함수를 사용한다.</td><td>단위 테스트에서 예외 message와 응답 payload가 로그에 나타나지 않는지 확인했다. stack 패턴별 마스킹은 초기 골격의 핵심 계약에서 제외했으며, 새로운 외부 예외 형식이 추가되면 민감정보 패턴과 회귀 테스트를 함께 검토한다.</td></tr>
+          <tr><th scope="row">SEC-002 · P2 · fixed</th><td><code>GlobalExceptionFilter.toSafeDetail</code>이 프레임워크 4xx payload를 그대로 반환하지 않는다. 400·413의 승인된 parser 문구와 404의 고정 문구 외에는 일반 문구를 사용하므로 <code>/missing?token=synthetic-query-sentinel</code>의 query가 detail에 재노출되지 않는다.</td><td>404 query를 포함한 단위 테스트와 실제 smoke 요청으로 응답·로그 양쪽에 query가 없는 것을 검증했다. 도메인 예외 message는 기능 구현 시 사용자 노출 문구로 별도 검토한다.</td></tr>
+        </tbody></table>
+      </section>
+      <section id="verification">
+        <h2>검증 증거와 공백</h2>
+        <ul>
+          <li><code>npm run test:unit</code>: 7 suites / 26 tests 통과.</li>
+          <li><code>npm run build:api</code>: 통과. 해당 산출물의 실제 필터와 Pino에 합성 문자열을 넣어 직접 검증했다. 실제 HTTP 연결을 통한 재현은 수행하지 않았다.</li>
+          <li>수정 후 404 query 응답 포함: false. 5xx 비밀값 응답 포함: false. 5xx 비밀값 Pino 로그 포함: false.</li>
+          <li>운영 DB 필수값 검사, 본문 크기 제한, Typia validateEquals, 5xx 본문 은닉, 비정상 HttpException status의 500 정규화가 구현돼 있다. 입력 오류 원문 억제에 관한 단위 테스트가 통과했다.</li>
+          <li>npm audit은 sandbox DNS 실패 후 외부 조회 승격을 요청했으나, 의존성 메타데이터의 공개 registry 전송을 이유로 자동 승인 검토가 거절했다. 취약점 유무는 확인되지 않았다.</li>
+        </ul>
+      </section>
+      <section>
+        <h2>운영 조건에 따라 확인할 위험</h2>
+        <p><code>common/database/database.options.ts:23</code>에는 TLS 설정이 없다. 설치된 pg는 PGSSLMODE 등 외부 설정이 없으면 ssl=false다. 원격 DB 사용 시 인증서 검증을 포함한 TLS 정책을 확인해야 한다. 실제 배포망이나 DB 서버 설정은 확인하지 않았으며, 평문 연결을 실측한 것은 아니다.</p>
+        <p>앱 코드에 rate limit이 없고 모든 4xx를 warn으로 남긴다. 외부 공개 시 gateway 제한 없이 반복 요청을 받으면 CPU·로그 저장 비용이 증가할 수 있다. gateway/WAF 존재 여부와 제한 정책은 미확인이다.</p>
+        <p>현재 공개 health·빈 검색 파일럿에 인증이 없다는 사실만으로 권한 취약점으로 판정하지 않는다. 사용자별 조회·변경 기능의 인증·객체 권한 검사는 해당 기능 구현과 함께 검증해야 한다.</p>
+        <aside>판단: non-blocking risk만 있음. 재현된 정보 노출 경로 두 건은 수정·재검증했다. DB TLS·rate limit·인증/권한은 운영 조건과 다음 기능 범위에서 확인해야 한다. 현재 코드에서 인증 우회·SQL injection·RCE는 확인하지 못했으며, 이 결과는 운영 배포 승인이나 전체 취약점 부재의 증명이 아니다.</aside>
+      </section>
+    </article></main>
+  </body>
+</html>

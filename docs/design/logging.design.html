@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API·batch 구조화 로그 적용 설계</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+        color: #203047;
+        background: #f3f5f8;
+      }
+      body {
+        max-width: 1020px;
+        margin: auto;
+        padding: 32px 20px;
+        line-height: 1.75;
+      }
+      header,
+      section {
+        background: white;
+        border: 1px solid #dce2ea;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 18px;
+      }
+      h1,
+      h2 {
+        line-height: 1.35;
+      }
+      h2 {
+        font-size: 1.25rem;
+      }
+      nav {
+        padding: 12px 0 24px;
+      }
+      nav a {
+        margin-right: 16px;
+      }
+      a {
+        color: #215abb;
+      }
+      dt {
+        font-weight: 650;
+      }
+      dd {
+        margin: 0 0 10px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        text-align: left;
+        border-bottom: 1px solid #dce2ea;
+        padding: 10px;
+        vertical-align: top;
+      }
+      code,
+      pre {
+        background: #f1f4f8;
+      }
+      pre {
+        padding: 16px;
+        overflow: auto;
+      }
+      aside {
+        border-left: 4px solid #c68b25;
+        padding: 10px 16px;
+        background: #fff7e8;
+      }
+      .badge {
+        color: #875a10;
+        font-weight: bold;
+      }
+      figcaption {
+        color: #52627a;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="badge">설계 승인됨 · 지연 관측 보완 반영 · 2차 메트릭 보류</p>
+      <h1>API·batch 구조화 로그 적용 설계</h1>
+      <p>같은 요청·배치 실행의 로그를 연결하고, JSON 출력과 진단 정책을 일관되게 적용한다.</p>
+      <dl>
+        <dt>purpose · 목적</dt>
+        <dd>API·batch 실행 로그의 수집 및 장애 추적 기반 확립</dd>
+        <dt>audience · 사용자</dt>
+        <dd>백엔드 구현·운영 개발자</dd>
+        <dt>problem · 문제</dt>
+        <dd>텍스트와 JSON 문자열 혼재, 서비스 요청 컨텍스트 누락, 배치 실행 추적 부재</dd>
+        <dt>core-flow · 핵심 흐름</dt>
+        <dd>실행 컨텍스트 생성 → 로그 필드 결합 → 업무 이벤트·예외 기록 → stdout 수집</dd>
+        <dt>범위·강도</dt>
+        <dd>
+          API·batch 로깅, 요청·작업 컨텍스트, 지연 관측 정책, 공통 설정, 종료와 검증 · Standard
+        </dd>
+        <dt>생성·수정</dt>
+        <dd><time datetime="2026-09-12">2026-09-12</time></dd>
+        <dt>추적 참조</dt>
+        <dd>사용자 요청: “적용 설계 ㄱㄱ” · 기존 foundation 설계와 목적이 달라 별도 문서 생성</dd>
+      </dl>
+    </header>
+    <nav aria-label="설계 탐색">
+      <a href="#change-model">적용 모델</a><a href="#grilling-state">결정할 사항</a
+      ><a href="#verification-plan">검증</a><a href="#approval-state">승인 상태</a>
+    </nav>
+    <main>
+      <article>
+        <section id="goal">
+          <h2>목표와 현재 근거</h2>
+          <p>
+            현재 API 필터는 Nest Logger에 JSON.stringify 결과를 넘기고, batch는 Nest Logger와
+            console.error를 함께 사용한다. HttpRequestContextMiddleware는 requestId 생성·응답 헤더만
+            담당하며 서비스 로그의 자동 컨텍스트 전파는 없다.
+          </p>
+          <p>
+            성공 기준: 운영 로그 각 줄이 JSON으로 해석되고, 병렬 HTTP 요청·배치 실행의 식별자가
+            섞이지 않으며, parser 실패와 5xx 원인도 동일한 실행으로 조회할 수 있다.
+          </p>
+        </section>
+        <section id="change-model">
+          <h2>적용 모델</h2>
+          <p>
+            Pino + nestjs-pino를 사용한다. 개발에서만 pino-pretty를 사용하고 운영은 stdout JSON으로
+            출력한다. 로그 변환용 자체 Logger 인터페이스·메서드 래퍼는 만들지 않는다.
+          </p>
+          <table>
+            <caption>
+              책임과 파일 경계
+            </caption>
+            <thead>
+              <tr>
+                <th>위치</th>
+                <th>역할</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>libs/core/src/common/logging/logging.options.ts</td>
+                <td>
+                  출력 형식, level, service(api/batch), 허용 필드·redaction 공통 설정. core의 인프라
+                  영역이며 domain은 import하지 않는다.
+                </td>
+              </tr>
+              <tr>
+                <td>api.module.ts / batch.module.ts</td>
+                <td>
+                  각 실행 앱 루트에서 LoggerModule을 한 번만 등록. 별도 libs 패키지는 추가하지
+                  않는다.
+                </td>
+              </tr>
+              <tr>
+                <td>API main / httpRequestContext.middleware.ts</td>
+                <td>
+                  서버 UUIDv7 한 번 생성, x-request-id 설정. Pino의 요청 식별자와 동일한 값을
+                  사용하고 parser 앞에서 로그 컨텍스트 확립.
+                </td>
+              </tr>
+              <tr>
+                <td>globalExceptionFilter.ts</td>
+                <td>
+                  HTTP 응답 매핑과 한 번의 예외 진단 로그. 객체를 직접 로깅하고 JSON.stringify 제거.
+                </td>
+              </tr>
+              <tr>
+                <td>batch.runner.ts</td>
+                <td>
+                  실행마다 UUIDv7 executionId 생성. jobName과 함께 비동기 실행 범위에 바인딩.
+                  시작·완료·실패와 소요 시간 기록.
+                </td>
+              </tr>
+              <tr>
+                <td>API / batch main</td>
+                <td>
+                  Nest 내부 로그도 Pino로 연결. bootstrap 실패 진단 및 정상 종료 시 로그 flush 책임.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            일반 서비스는 Nest Logger 사용을 유지한다. 컨텍스트 생성·바인딩이 필요한 진입점에서만
+            PinoLogger의 공개 API를 사용한다. 도메인은 예외를 발생시키고 호출 경계에서 기록한다.
+          </p>
+        </section>
+        <section id="system-model">
+          <h2>실행 순서</h2>
+          <figure>
+            <pre><code>HTTP 진입
+  → HttpRequestContextMiddleware: UUIDv7 생성, 응답 헤더
+  → Pino 요청 로거 + 비동기 컨텍스트
+  → JSON / urlencoded parser + 기존 parser 예외 정규화
+  → controller → service → repository
+  → 예외 시 GlobalExceptionFilter: 진단 + 기존 네 필드 응답
+  → 중요한 업무 결과: 서비스가 명시적으로 이벤트 기록
+  → 응답 finish: 전체 완료 요청 지연 메트릭 1회 관측 (2차 적용)
+  → 정상 응답 완료: 기준 미만 로그 없음 / 기준 이상 http.slow 1회
+  → 연결 중단: 중단 감지 로그 (예외 진단과 중복 억제)
+
+batch 진입 → 실행 컨텍스트(jobName, executionId)
+  → 시작 로그 → job → 완료 또는 실패 로그
+  → 자원 close → 로그 flush → exitCode 설정</code></pre>
+            <figcaption>
+              하나의 HTTP 요청 또는 배치 실행 범위 안에서만 로그 필드가 전파된다. 요청 간 전역 가변
+              객체로 식별자를 공유하지 않는다.
+            </figcaption>
+          </figure>
+          <aside>
+            현재 app.useBodyParser 등록은 모듈 미들웨어보다 빠르다. 구현 시 parser를 로깅 다음의
+            명시적 미들웨어 순서로 옮기고 등록 순서를 검증한다. nestjs-pino 내부 storage나 deep
+            import로 우회하지 않는다. 공개 API로 순서를 보장할 수 없다면 구현을 멈추고 설계를
+            보완한다.
+          </aside>
+        </section>
+        <section id="decisions">
+          <h2>로그 필드와 출력 정책</h2>
+          <ul>
+            <li>공통: time(UTC), level, service(api/batch), context(클래스), event, msg.</li>
+            <li>
+              HTTP 컨텍스트: requestId, method, path. path는 query를 제외한다. 서비스 이벤트와 예외
+              로그가 같은 식별자를 갖는다. 실패에는 status, 진단용 durationMs를 기록하며 연결 중단
+              시 실제 전송되지 않은 status를 확정 응답처럼 기록하지 않는다.
+            </li>
+            <li>
+              예외: exceptionName, domain, domainCode, apiCode. 4xx는 warn, 5xx는 error. 5xx는
+              `exceptionDiagnostic`으로 message 원문과 stack 첫 줄을 제외하고 cause 이름·stack frame만
+              깊이 제한으로 기록한다.
+            </li>
+            <li>
+              batch: jobName, executionId, durationMs. HTTP requestId는 붙이지 않는다. 공개
+              runInContext 지원 버전 확인 후 사용하고 자체 AsyncLocalStorage 중복 구현은 피한다.
+            </li>
+            <li>
+              LOG_LEVEL: 운영 기본 info, 명시적 development 기본 debug. 허용값 검증. pretty는
+              development에서만 사용한다.
+            </li>
+            <li>
+              허용한 필드만 기록. body·query·headers·응답 본문·원본 request/response 객체는 기본
+              제외. redaction은 알려진 비밀 필드에 대한 추가 방어다.
+            </li>
+            <li>
+              예외 메시지 속 문자열은 필드 redaction으로 자동 보호되지 않는다. 메시지에 토큰·요청
+              원문을 넣지 않는 기존 규칙 유지.
+            </li>
+            <li>
+              health를 포함한 모든 HTTP 요청에서 자동 시작·완료 로그를 끈다(autoLogging: false).
+              컨텍스트는 계속 생성한다. 중요한 업무 결과는 서비스가 info 이벤트로 명시적으로
+              기록한다. 예외적으로 느린 정상 요청은 완료 시 http.slow를 기록한다. 현재 파일럿에
+              임의의 비즈니스 이벤트를 추가하지 않는다.
+            </li>
+          </ul>
+          <p>
+            실패는 필터에서 warn/error 진단 한 번만 기록하고 HTTP 실패 요약은 추가하지 않는다. 연결
+            중단은 자동 로깅을 끄면 별도 감지가 필요하다. 요청별 기록 상태로 parser의 중단 예외와
+            응답 close 이벤트 간 중복을 억제한다. 정상 응답 뒤 close는 중단이 아니다. 먼저 예외
+            진단을 기록한 요청은 중단 로그를 추가하지 않으며, 중단이 먼저 관측되어도 이후 예상 밖
+            5xx의 제한된 stack/cause 진단은 숨기지 않는다. 서로 다른 중단·5xx 사건은 최대 한 번씩 기록하고 같은
+            requestId로 연결한다.
+          </p>
+        </section>
+        <section id="latency-observation">
+          <h2>지연 관측 · 전체 분포는 메트릭, 개별 진단은 느린 요청 로그</h2>
+          <p>
+            사용자 합의: 모든 요청의 지연 분포와 느린 요청 추적을 함께 설계한다. 일반 정상 요청을
+            전부 로깅하지 않는 정책은 유지한다. 메트릭은 집계 데이터이며 requestId별 기록 저장소가
+            아니다.
+          </p>
+          <table>
+            <caption>
+              결과별 관측 규칙
+            </caption>
+            <thead>
+              <tr>
+                <th>결과</th>
+                <th>로그</th>
+                <th>메트릭</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>정상·기준 미만</td>
+                <td>자동 로그 없음</td>
+                <td>완료 지연·요청 수·상태 집계</td>
+              </tr>
+              <tr>
+                <td>정상·기준 이상</td>
+                <td>http.slow warn 1회</td>
+                <td>완료 지연·요청 수·상태 집계</td>
+              </tr>
+              <tr>
+                <td>예외 응답</td>
+                <td>기존 예외 진단에 durationMs 포함. http.slow 추가 안 함</td>
+                <td>응답 finish 시 실제 상태·완료 지연 집계</td>
+              </tr>
+              <tr>
+                <td>연결 중단</td>
+                <td>기존 중단 감지·중복 억제 정책 적용. http.slow 없음</td>
+                <td>중단 건수 별도 집계. 완료 지연 분포와 분리</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            측정 시작은 parser 앞의 HTTP 진입 미들웨어다. 단조 시계(process.hrtime.bigint 등)로
+            측정하고 응답 finish에서 완료 시간을 확정한다. 이는 서버 진입부터 응답을 운영체제에
+            넘기는 시점까지이며 클라이언트 수신·프록시 대기·전체 네트워크 지연을 뜻하지 않는다.
+          </p>
+          <p>
+            예외 진단의 durationMs는 예외 처리 시점까지의 경과 시간이다. 완료 histogram은 finish까지
+            측정하므로 값이 다를 수 있다. 예외 진단을 지연 기록하거나 두 번 출력해 숫자를 맞추지
+            않는다. 완료·중단 terminal 상태를 요청당 한 번만 확정하여 finish 다음 close를 중복
+            집계하지 않는다.
+          </p>
+          <h3>느린 요청 로그 · 적용 기본값 제안</h3>
+          <p>
+            HTTP_SLOW_THRESHOLD_MS 기본 1000ms, 양의 유한 정수로 검증한다. durationMs가 기준
+            이상이고 2xx/3xx로 완료된 요청에 event=http.slow, requestId, method, path(query 제외),
+            status, durationMs를 기록한다. health도 느리면 같은 정책을 적용한다. 완료 시점
+            기준이므로 끝나지 않는 요청의 실시간 탐지·timeout은 별도 설계 대상이다.
+          </p>
+          <h3>메트릭 집계 계약</h3>
+          <ul>
+            <li>
+              완료 지연: histogram, 초 단위. 요청 수·상태별 비율은 histogram count와 상태 label에서
+              산출할 수 있으므로 동일한 별도 counter는 필요할 때만 추가한다.
+            </li>
+            <li>
+              label은 정규화한 method, route 패턴, 유한한 status로 제한한다. /users/:id처럼 묶고
+              requestId·사용자 ID·실제 URL·query·메시지는 label에 넣지 않는다. 미지원 method는
+              OTHER로 묶는다.
+            </li>
+            <li>
+              라우트가 확정되지 않은 parser 오류와 미등록 경로는 UNMATCHED로 집계한다. 실제 URL에서
+              임의로 라우트 패턴을 추측하지 않는다. 등록 라우트의 업무 404와 구분한다.
+            </li>
+            <li>
+              중단은 별도 counter로 method·route만 집계한다. 전송하지 않은 status를 200·499 등으로
+              꾸미지 않는다.
+            </li>
+            <li>
+              health는 고유 route로 집계하되 업무 지연 대시보드에서는 분리한다. 향후 메트릭 수집
+              endpoint는 자기 관측을 제외한다. 수집기 scrape 주기와 시간 창을 기준으로 p95/p99를
+              계산한다.
+            </li>
+            <li>
+              여러 인스턴스의 histogram을 합쳐 분위수를 계산한다. 인스턴스별 p95를 평균내지 않는다.
+              분위수는 histogram 해상도에 따른 추정값이다.
+            </li>
+          </ul>
+          <h3>구현 범위 분리</h3>
+          <p>
+            1차 로깅 적용: 공통 타이머·느린 요청 로그·실패 경과 시간·중복 방지. 2차 메트릭 적용:
+            histogram 계측, 수집·보관·조회 연결. 둘의 측정 시작·완료 의미는 공유한다. 1차만 구현된
+            상태를 전체 지연 분포를 조회할 수 있는 상태라고 보고하지 않는다.
+          </p>
+          <p>
+            메트릭 라이브러리·export 방식·수집기 배치와 접근 경계는 2차 구현 전 결정한다. 현재 설계
+            반영만으로 공개 /metrics endpoint나 외부 인프라를 추가하지 않는다. histogram 종류·버킷은
+            선택한 라이브러리와 수집기 호환성, 관심 지연 구간에 맞춰 확정한다.
+          </p>
+        </section>
+        <section id="invariants">
+          <h2>보존해야 할 동작</h2>
+          <ul>
+            <li>
+              서버가 만든 하나의 UUIDv7을 헤더·request.requestId·로그가 공유한다. 클라이언트
+              x-request-id를 그대로 신뢰하지 않는다.
+            </li>
+            <li>
+              잘못된 JSON(400), 용량 초과(413), 미등록 route(404)도 식별자와 예외 진단 로그가
+              남는다.
+            </li>
+            <li>
+              실패 body는 title/status/detail/code, media type은 application/problem+json 그대로
+              유지한다.
+            </li>
+            <li>
+              5xx 응답에 내부 원인을 노출하지 않는다. 같은 예외를 service·filter·자동 HTTP logger가
+              반복 진단하지 않는다.
+            </li>
+            <li>동시 실행 컨텍스트가 격리되고, batch가 실패하면 종료 코드 1이 보존된다.</li>
+          </ul>
+        </section>
+        <section id="failure-recovery">
+          <h2>실패·종료 처리</h2>
+          <p>
+            초기화 전후의 로그 유실을 막도록 bootstrap logger와 Nest 교체 시점을 정한다.
+            bufferLogs를 사용하면 standalone batch의 flushLogs도 처리한다. 동일 로그를 두 logger로
+            재출력하지 않는다.
+          </p>
+          <p>
+            일반 운영 출력은 stdout 직접 기록으로 시작한다. 정상 종료에서는 자원 종료와 남은 로그
+            처리를 기다리고 process.exitCode를 사용한다. SIGKILL·프로세스 강제 중단·수집기 장애까지
+            전달 보장을 제공하지 않는다. 수집기가 느리거나 끊기는 운영 환경은 별도 관측 대상이다.
+          </p>
+          <p>
+            의존성 버전·공개 API 및 종료 방식은 설치 버전에서 확인한다. 현재 Node 24/Nest 12와
+            문서의 nestjs-pino v5 호환표는 부합하나 main 브랜치 기능을 출시 패키지 지원으로 단정하지
+            않는다.
+          </p>
+        </section>
+        <section id="non-goals">
+          <h2>이번 범위 밖</h2>
+          <p>
+            외부 로그 수집기 배포, 보관 기간·대시보드, OpenTelemetry 분산 추적, 감사 로그, DB query
+            로그 통합, 업무 기능·DB 영속화는 별도 작업이다. 기존 MikroORM 개발 debug 로그는 이번
+            통일 범위에서 제외한다.
+          </p>
+          <p>
+            메트릭 관측 정책은 설계에 포함한다. 메트릭 수집·조회 구현은 1차 Pino 적용과 분리하며,
+            2차 상세 설계와 승인이 필요하다.
+          </p>
+        </section>
+        <section id="grilling-state">
+          <h2>설계 의사결정 질문 (grilling)</h2>
+          <p>
+            진행 상태: 완료. G1 및 공유 이해 확인: 정상 자동 로그 없음, 중요 업무 이벤트·실패·중단
+            중심으로 기록하며 요청 컨텍스트는 유지한다는 요약에 사용자가 “ㅇㅇ 그렇게 하자”로
+            동의했다. 이는 정책 합의이며 별도 구현 승인으로 취급하지 않는다.
+          </p>
+          <p>
+            결정 트리: Pino 선택 → 출력·컨텍스트 설계 → G1 기록 범위 확정 → 검증 기준 반영 완료. 1차
+            로깅의 남은 사용자 의사결정 frontier는 없다. parser 등록 순서와 출시 버전 공개 API는
+            구현 시 검증 항목이며, 불일치 시 변경 범위를 재검토한다.
+          </p>
+          <h3>G1 · 정상 HTTP 요청도 기록할까?</h3>
+          <p>
+            결정: 기존 A(모든 요청 완료 로그)는 채택하지 않는다. 정상 요청 추적을 위한 일괄 로그
+            비용을 지불하지 않는다. 후속 합의에 따라 느린 정상 요청만 예외적으로 기록하고 전체 지연
+            분포는 메트릭으로 집계한다.
+          </p>
+          <p>
+            B를 보완: HTTP 실패 완료 요약도 제거하고 예외 필터 진단만 기록한다. 중요한 비즈니스
+            이벤트는 서비스에서 명시적으로 기록한다. 자동 로그 제외는 HTTP에 적용하며 batch의 실행
+            시작·완료·실패 로그는 유지한다.
+          </p>
+          <p>
+            잔여 한계: 일반 정상 요청의 개별 지연·결과는 로그로 복원할 수 없다. 외부 수집기와 보관
+            정책은 이번 범위 밖이다.
+          </p>
+          <p>
+            G2 지연 관측 조합: 전체 메트릭 + 느린 요청 로그에 사용자 동의 및 설계 반영 요청 확인.
+            메트릭 수집·조회 상세 선택은 2차 범위로 명시적으로 분리한다. 1000ms는 변경 가능한 제안
+            기본값이며 사용자가 별도로 정한 SLA가 아니다. 1차 Pino 로깅 구현 범위는 승인됐다.
+          </p>
+        </section>
+        <section id="rejected-alternatives">
+          <h2>대안과 배제 이유</h2>
+          <p>
+            Nest JSON logger 단독은 가능하지만 요청·작업 컨텍스트와 정책을 직접 보완해야 한다. Pino
+            자체 래퍼·별도 logging 패키지는 초기 단계에 추상화를 늘린다. 기본 nestjs-pino 등록만
+            추가하는 방식은 현재 parser 오류 경로를 포괄하지 못한다.
+          </p>
+        </section>
+        <section id="verification-plan">
+          <h2>구현 인수 기준</h2>
+          <table>
+            <caption>
+              실제 동작 중심 검증
+            </caption>
+            <thead>
+              <tr>
+                <th>경계</th>
+                <th>확인 항목</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>출력</td>
+                <td>
+                  운영 로그 줄별 JSON 파싱, 필수 필드·level·service, JSON 문자열 이중 인코딩 없음.
+                </td>
+              </tr>
+              <tr>
+                <td>HTTP</td>
+                <td>
+                  동시 요청의 테스트용 서비스 이벤트·헤더 식별자 일치와 격리. 기준 미만 정상 200 및
+                  health에서 자동 로그 0건, 느린 2xx/3xx에서 http.slow 1건, 400/413/404/500에서 필터
+                  진단 1건. 중요 이벤트의 명시적 기록.
+                </td>
+              </tr>
+              <tr>
+                <td>진단</td>
+                <td>
+                  4xx warn·5xx error, 제한된 stack/cause, 예외 진단 중복 없음. 정상 close 중단 로그
+                  0건, body 수신 중·응답 전 연결 중단 감지. parser 중단 예외와 close 경합에서 중복
+                  억제, 중단 뒤 별도 5xx가 발생하면 원인 진단 보존.
+                </td>
+              </tr>
+              <tr>
+                <td>지연 정책</td>
+                <td>
+                  기준 직전·정확한 경계·직후, 설정값 검증, 느린 실패의 slow 로그 0건, 예외 시점
+                  durationMs와 finish 시간 구분. 중단·정상 close 중복 방지.
+                </td>
+              </tr>
+              <tr>
+                <td>2차 메트릭</td>
+                <td>
+                  완료 요청당 histogram 관측 1회, 상태별 건수, 중단 counter 분리. 가변 ID 경로의
+                  동일 route label, 미등록 경로·parser 오류의 UNMATCHED, method 제한. 실제
+                  수집기에서 수집·다중 인스턴스 집계·분위수 조회까지 검증해야 운영 조회 완료다.
+                </td>
+              </tr>
+              <tr>
+                <td>정보 제외</td>
+                <td>
+                  body·query·authorization·cookie에 sentinel을 넣어 출력 전체에서 누락 검증. 오류
+                  URL 경로도 확인.
+                </td>
+              </tr>
+              <tr>
+                <td>batch</td>
+                <td>
+                  성공·실패·알 수 없는 job, 실행별 컨텍스트 격리, 종료 코드·마지막 로그 flush.
+                </td>
+              </tr>
+              <tr>
+                <td>생명주기</td>
+                <td>초기화 실패·listen 실패·정상 종료·연결 중단에서 로그와 종료 동작 확인.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            예정 명령: npm run typecheck, npm run lint, npm run format:check, npm test, npm run
+            build, npm run test:smoke, npm run contracts:check. 소스·실제 HTTP 테스트 fixture에 검증
+            로그를 넣고 운영용 테스트 route는 추가하지 않는다.
+          </p>
+          <p>
+            설계 단계에서는 소스·공식 문서를 조사했다. 설치·런타임 확인은 구현 제어 문서의 검증
+            증거에서 다룬다.
+          </p>
+        </section>
+        <section id="design-control-state">
+          <h2>설계 이해·통제 점검</h2>
+          <p>
+            상태: 미실시. 정책 합의 후 예측 중심의 self-check를 제공한다. 브라우저 결과는 로컬에만
+            남고 Codex에 자동 전달되지 않는다. 결과 미전달은 구현 승인 요청을 막지 않는다.
+          </p>
+          <p>
+            커버리지: C1 요청 격리·parser 실패, C2 로그량·중단·중복, C3 민감정보·계층 경계, C4 batch
+            종료·보장 한계. C5 지연 메트릭·label·조회 경계. 외부 수집기 상세 운영은 2차 설계까지
+            보류한다.
+          </p>
+          <form id="control-check">
+            <p id="position" aria-live="polite">총 5문항</p>
+            <div class="question">
+              <fieldset>
+                <legend>C1 · 동시에 온 정상 요청과 잘못된 JSON 요청의 로그는?</legend>
+                <label
+                  ><input type="radio" name="c1" value="a" />각 요청의 컨텍스트는 격리되며, 잘못된
+                  JSON 진단도 해당 헤더와 같은 식별자를 쓴다.</label
+                ><br />
+                <label
+                  ><input type="radio" name="c1" value="b" />정상 로그를 끄면 정상 요청에서 중요한
+                  업무 이벤트의 식별자도 사라진다.</label
+                >
+              </fieldset>
+              <div class="result" hidden>
+                <p class="status"></p>
+                <p class="explanation"></p>
+                <p class="next-action"></p>
+              </div>
+            </div>
+            <div class="question">
+              <fieldset>
+                <legend>C2 · 정상 완료, 400 예외, 연결 중단에서 기대하는 기록은?</legend>
+                <label
+                  ><input type="radio" name="c2" value="a" />모두 완료 로그와 진단 로그를
+                  남긴다.</label
+                ><br />
+                <label
+                  ><input type="radio" name="c2" value="b" />기준 미만 정상 자동 로그는 없고 400은
+                  필터에서 한 번 기록한다. 중단은 별도 감지하되 같은 사건의 중복 기록을
+                  억제한다.</label
+                >
+              </fieldset>
+              <div class="result" hidden>
+                <p class="status"></p>
+                <p class="explanation"></p>
+                <p class="next-action"></p>
+              </div>
+            </div>
+            <div class="question">
+              <fieldset>
+                <legend>C3 · 서비스에서 중요한 업무 성공을 기록하려면?</legend>
+                <label
+                  ><input type="radio" name="c3" value="a" />서비스에서 event와 허용한 업무 필드를
+                  명시한다. 원본 body와 비밀값을 메시지에 넣지 않는다.</label
+                ><br />
+                <label
+                  ><input type="radio" name="c3" value="b" />도메인에서 원본 요청을 통째로 기록하면
+                  redaction이 모든 문자열까지 보호한다.</label
+                >
+              </fieldset>
+              <div class="result" hidden>
+                <p class="status"></p>
+                <p class="explanation"></p>
+                <p class="next-action"></p>
+              </div>
+            </div>
+            <div class="question">
+              <fieldset>
+                <legend>C4 · batch 실패와 강제 종료 시 보장 범위는?</legend>
+                <label
+                  ><input type="radio" name="c4" value="a" />flush를 사용하면 SIGKILL과 수집기
+                  장애에도 마지막 로그 전달이 보장된다.</label
+                ><br />
+                <label
+                  ><input type="radio" name="c4" value="b" />jobName·executionId로 실패를 연결하고
+                  정상 종료 절차에서 flush와 실패 종료 코드를 유지한다. 강제 중단의 전달 보장은
+                  없다.</label
+                >
+              </fieldset>
+              <div class="result" hidden>
+                <p class="status"></p>
+                <p class="explanation"></p>
+                <p class="next-action"></p>
+              </div>
+            </div>
+            <div class="question">
+              <fieldset>
+                <legend>C5 · /users/123과 /users/456의 지연 관측은?</legend>
+                <label
+                  ><input type="radio" name="c5" value="a" />같은 /users/:id로 histogram을 집계한다.
+                  느린 정상 요청만 식별자를 포함해 로그를 남기며, 전체 분위수 조회에는 수집·조회
+                  연결이 필요하다.</label
+                ><br />
+                <label
+                  ><input type="radio" name="c5" value="b" />requestId별 메트릭을 만들고 개별
+                  인스턴스의 p95를 평균내면 된다.</label
+                >
+              </fieldset>
+              <div class="result" hidden>
+                <p class="status"></p>
+                <p class="explanation"></p>
+                <p class="next-action"></p>
+              </div>
+            </div>
+            <p>
+              <button type="button" id="previous">이전</button>
+              <button type="submit">답변 확인</button> <button type="button" id="next">다음</button>
+            </p>
+            <output id="check-result" aria-live="polite">미실시 · 구현 승인과 별개입니다.</output>
+          </form>
+        </section>
+        <section id="approval-state">
+          <h2>승인 상태</h2>
+          <p>
+            설계 승인됨 · G1/G2 정책 합의 및 1차 구현 승인이 반영됐다. 이해 점검은 미실시다. 1차
+            범위는 API·batch Pino 적용, 컨텍스트·예외·중단·느린 요청 처리, 공통 설정과 검증이다. 2차
+            메트릭 상세 설계·구현은 별도 범위다.
+          </p>
+          <p>
+            구현 기록은 <a href="logging.implementation.html">logging.implementation.html</a>에
+            남겼다. 승인 기준 시각은 2026-09-12이며, 메트릭 수집·조회와 비즈니스 이벤트 표준은 보류
+            범위다.
+          </p>
+        </section>
+        <section id="sources">
+          <h2>근거</h2>
+          <ul>
+            <li>
+              <a href="https://prometheus.io/docs/practices/histograms/"
+                >Prometheus: histogram 집계와 분위수</a
+              >
+            </li>
+            <li>
+              <a href="https://prometheus.io/docs/practices/naming/"
+                >Prometheus: 메트릭 label과 cardinality</a
+              >
+            </li>
+            <li>
+              <a href="https://github.com/iamolegga/nestjs-pino/blob/master/README.md"
+                >nestjs-pino: 호환성, Logger 교체, 요청 컨텍스트, batch flush</a
+              >
+            </li>
+            <li>
+              <a href="https://github.com/iamolegga/nestjs-pino/blob/master/src/LoggerModule.ts"
+                >LoggerModule 소스: 모듈 미들웨어 등록</a
+              >
+            </li>
+            <li>
+              <a href="https://github.com/iamolegga/nestjs-pino/blob/master/src/PinoLogger.ts"
+                >PinoLogger 소스: 컨텍스트 API</a
+              >
+            </li>
+            <li>
+              <a href="https://github.com/pinojs/pino/blob/main/docs/redaction.md"
+                >Pino redaction</a
+              >
+            </li>
+          </ul>
+        </section>
+      </article>
+    </main>
+    <script>
+      const form = document.getElementById('control-check');
+      const questions = [...form.querySelectorAll('.question')];
+      const answers = ['a', 'b', 'a', 'b', 'a'];
+      const explanations = [
+        '컨텍스트 생성과 로그 출력은 별개다. parser보다 먼저 컨텍스트를 만들고 요청별 비동기 범위를 격리한다.',
+        '일반 자동 완료 로그는 꺼져 있고 느린 정상 요청만 별도 기록한다. 실패는 진단 1회, 중단과의 중복을 억제하되 별도 5xx 원인은 보존한다.',
+        '서비스가 업무 이벤트를 기록한다. 필드 redaction은 예외 메시지에 섞인 비밀 문자열까지 자동 보호하지 않는다.',
+        'batch 실행 경계와 정상 종료 flush를 검증한다. SIGKILL·수집기 장애는 로그 전달 보장 범위 밖이다.',
+        '메트릭은 제한된 route 패턴으로 전체 지연을 집계한다. histogram을 합쳐 분위수를 구하고, 개별 식별자는 로그에만 기록한다. 1차 로깅만으로 분포 조회가 완성되지 않는다.',
+      ];
+      const actions = [
+        'HTTP 동시 요청·parser 검증 기준 확인',
+        '정상 close·중단 경합 검증 기준 확인',
+        '허용 필드와 sentinel 검증 기준 확인',
+        '종료 코드·마지막 로그 검증 기준 확인',
+        '2차 메트릭의 집계 계약과 수집·조회 검증 범위 확인',
+      ];
+      const states = Array(questions.length).fill('미실시');
+      let current = 0;
+      function show() {
+        questions.forEach((question, index) => {
+          question.hidden = index !== current;
+        });
+        document.getElementById('position').textContent =
+          `${current + 1} / ${questions.length} · 확인 ${states.filter((state) => state !== '미실시').length} / ${questions.length}`;
+        document.getElementById('previous').disabled = current === 0;
+        document.getElementById('next').disabled = current === questions.length - 1;
+      }
+      document.getElementById('previous').onclick = () => {
+        current--;
+        show();
+      };
+      document.getElementById('next').onclick = () => {
+        current++;
+        show();
+      };
+      form.onsubmit = (event) => {
+        event.preventDefault();
+        const selected = questions[current].querySelector('input:checked');
+        const result = questions[current].querySelector('.result');
+        states[current] = !selected
+          ? '미실시'
+          : selected.value === answers[current]
+            ? '확립'
+            : '보류';
+        result.querySelector('.status').textContent = `상태: ${states[current]}`;
+        result.querySelector('.explanation').textContent = selected
+          ? `설명: ${explanations[current]}`
+          : '설명: 답변을 선택한 뒤 확인하세요.';
+        result.querySelector('.next-action').textContent = `다음 행동: ${actions[current]}`;
+        result.hidden = false;
+        document.getElementById('check-result').textContent =
+          states.map((state, i) => `C${i + 1}: ${state}`).join(' · ') + ' · 구현 승인과 별개';
+        show();
+      };
+      show();
+    </script>
+  </body>
+</html>

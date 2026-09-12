@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API·batch 구조화 로그 적용 구현 제어</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, sans-serif;
+        color: #203047;
+        background: #f3f5f8;
+      }
+      body {
+        max-width: 1020px;
+        margin: auto;
+        padding: 32px 20px;
+        line-height: 1.75;
+      }
+      header,
+      section {
+        background: white;
+        border: 1px solid #dce2ea;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 18px;
+      }
+      h1,
+      h2 {
+        line-height: 1.35;
+      }
+      h2 {
+        font-size: 1.25rem;
+      }
+      a {
+        color: #215abb;
+      }
+      dt {
+        font-weight: 650;
+      }
+      dd {
+        margin: 0 0 10px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      th,
+      td {
+        text-align: left;
+        border-bottom: 1px solid #dce2ea;
+        padding: 10px;
+        vertical-align: top;
+      }
+      code,
+      pre {
+        background: #f1f4f8;
+      }
+      pre {
+        padding: 16px;
+        overflow: auto;
+      }
+      aside {
+        border-left: 4px solid #b07b1b;
+        padding: 10px 16px;
+        background: #fff7e8;
+      }
+      .badge {
+        color: #875a10;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="badge">운영 제어 보류 · Standard</p>
+      <h1>API·batch 구조화 로그 적용 구현 제어</h1>
+      <p>
+        승인된 logging 설계에 따라 Pino 기반 출력, 요청·배치 컨텍스트, 예외·느린 요청 로그를
+        구현하고 실제 경계를 확인한다.
+      </p>
+      <dl>
+        <dt>purpose · 목적</dt>
+        <dd>API·batch 실행 로그의 수집 및 장애 추적 기반 구현</dd>
+        <dt>audience · 사용자</dt>
+        <dd>백엔드 구현·운영 개발자와 리뷰어</dd>
+        <dt>problem · 문제</dt>
+        <dd>텍스트와 JSON 문자열 혼재, 컨텍스트 누락, 정상 요청 로그 과다, 느린 요청 진단 부재</dd>
+        <dt>core-flow · 핵심 흐름</dt>
+        <dd>실행 컨텍스트 생성 → Pino JSON → 업무 이벤트·예외·느린 요청 기록 → 종료 flush</dd>
+        <dt>baseline</dt>
+        <dd>
+          <a href="logging.design.html">logging.design.html</a> · 사용자 승인: Pino 적용 및 정상
+          자동 로그 제외·전체 지연 메트릭/느린 로그 정책
+        </dd>
+        <dt>시작</dt>
+        <dd><time datetime="2026-09-12">2026-09-12</time></dd>
+        <dt>수정</dt>
+        <dd><time datetime="2026-09-12">2026-09-12</time></dd>
+      </dl>
+    </header>
+    <main>
+      <article>
+        <section id="current-implementation">
+          <h2>구현 범위와 상태</h2>
+          <table>
+            <caption>
+              승인 범위별 구현 상태
+            </caption>
+            <thead>
+              <tr>
+                <th>범위</th>
+                <th>상태</th>
+                <th>근거</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Pino + nestjs-pino 공통 출력</td>
+                <td>완료</td>
+                <td>
+                  <code>nestjs-pino@5.1.0</code>, <code>pino@10.3.1</code>,
+                  <code>pino-http@11.0.0</code>, 운영 stdout JSON·개발 pretty
+                </td>
+              </tr>
+              <tr>
+                <td>UUIDv7 requestId와 HTTP 컨텍스트</td>
+                <td>완료</td>
+                <td>pino-http UUIDv7을 requestId·x-request-id와 연결, parser 앞 timer</td>
+              </tr>
+              <tr>
+                <td>예외 필터 구조화 진단</td>
+                <td>완료</td>
+                <td>객체 로그, 4xx warn/5xx error, requestId binding 중복 제거, durationMs</td>
+              </tr>
+              <tr>
+                <td>느린 정상 요청</td>
+                <td>완료</td>
+                <td>
+                  양의 정수 threshold 이상인 2xx/3xx 응답에 <code>http.slow</code> warn, 단위 테스트
+                </td>
+              </tr>
+              <tr>
+                <td>전체 지연 histogram·수집기·조회</td>
+                <td>보류</td>
+                <td>timer 경계만 확보. histogram·수집기·조회는 2차 설계 필요</td>
+              </tr>
+              <tr>
+                <td>비즈니스 이벤트 표준</td>
+                <td>보류</td>
+                <td>현재 파일럿에 업무 이벤트를 임의로 추가하지 않음</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="implementation-model">
+          <h2>구현 모델</h2>
+          <ol>
+            <li>
+              공통 `createLoggerOptions(service)`에서 level, service, redaction, 개발 transport를
+              만든다. `LOG_LEVEL`과 `HTTP_SLOW_THRESHOLD_MS`의 허용값을 시작 시 검증한다.
+            </li>
+            <li>
+              API·batch 모듈은 `LoggerModule.forRoot()`를 한 번만 등록하고 main에서
+              `app.useLogger()`로 Nest 로그를 교체한다.
+            </li>
+            <li>
+              Pino HTTP middleware의 `genReqId`는 입력 request 값을 신뢰하지 않고 UUIDv7을 생성한다.
+              `HttpRequestContextMiddleware`는 이미 부여된 req.id를 requestId와 헤더에 연결하고,
+              직접 middleware 경로에서는 자체 UUIDv7 fallback을 사용한다.
+            </li>
+            <li>
+              `autoLogging: false`로 정상 HTTP 완료 로그를 끈다. 필터는 예외 진단을 한 번 기록하고,
+              별도 HTTP 응답 완료 hook이 느린 정상 요청만 warn으로 기록한다. 필터는 PinoLogger를
+              필수로 주입받으며 별도 fallback logger 경로를 두지 않는다.
+            </li>
+            <li>
+              5xx 진단은 `exceptionDiagnostic`을 통해 예외 message와 stack 첫 줄을 제외하고,
+              cause의 이름·stack frame만 깊이 제한으로 기록한다. 알려진 password·token·authorization·
+              query 패턴은 `[REDACTED]`로 보정해 Pino field redaction만으로 해결되지 않는 문자열
+              노출도 줄인다.
+            </li>
+            <li>
+              batch는 `PinoLogger.runInContext` 공개 API를 사용해 jobName·executionId를 묶고, 종료
+              시 app.close와 flush를 수행한다. `PinoLogger`가 transient라 API는 `resolve()`로
+              획득한다.
+            </li>
+            <li>
+              명시적 로그 작성자는 `GlobalExceptionFilter`, `HttpRequestContextMiddleware`,
+              `BatchRunner`, bootstrap별 context를 설정해 동일 requestId·executionId 안에서 발생
+              지점을 구분한다.
+            </li>
+          </ol>
+        </section>
+        <section id="files">
+          <h2>변경 파일과 책임</h2>
+          <table>
+            <caption>
+              실제 변경 목록
+            </caption>
+            <thead>
+              <tr>
+                <th>경로</th>
+                <th>변경</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>package.json / package-lock.json</td>
+                <td>nestjs-pino, pino, pino-http, 개발용 pino-pretty</td>
+              </tr>
+              <tr>
+                <td>libs/core/src/common/logging/logging.options.ts</td>
+                <td>앱별 Pino 옵션, level·redaction·slow threshold·ID 생성·허용값</td>
+              </tr>
+              <tr>
+                <td>libs/core/src/index.ts</td>
+                <td>로깅 옵션 공개 export</td>
+              </tr>
+              <tr>
+                <td>libs/core/src/common/logging/exceptionDiagnostic.ts</td>
+                <td>예외 message 제외, cause 깊이 제한, stack·민감값 보정</td>
+              </tr>
+              <tr>
+                <td>apps/api/src/api.module.ts, apps/api/src/main.ts</td>
+                <td>LoggerModule 등록, Nest logger 교체, slow 정상 응답 hook 연결</td>
+              </tr>
+              <tr>
+                <td>apps/api/src/common/middleware/httpRequestContext.middleware.ts</td>
+                <td>pino-http req.id와 requestId를 동일하게 연결</td>
+              </tr>
+              <tr>
+                <td>apps/api/src/common/filter/globalExceptionFilter.ts</td>
+                <td>문자열 JSON을 구조화 객체로 변경, 안전한 4xx detail, duration·중복 상태 연계</td>
+              </tr>
+              <tr>
+                <td>
+                  apps/batch/src/batch.module.ts, apps/batch/src/main.ts,
+                  apps/batch/src/runner/batch.runner.ts
+                </td>
+                <td>Pino logger와 실행 컨텍스트·flush 연결, console.error 제거</td>
+              </tr>
+              <tr>
+                <td>test/unit, test/integration, scripts/smoke.mjs</td>
+                <td>
+                  JSON 줄 파싱, redaction, requestId, slow threshold, batch 컨텍스트·종료 검증
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="issues">
+          <h2>이슈 레지스터</h2>
+          <table>
+            <caption>
+              현재 이슈
+            </caption>
+            <thead>
+              <tr>
+                <th>상태</th>
+                <th>증상·영향</th>
+                <th>조치·검증</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>해결됨</td>
+                <td>
+                  <code>app.get(PinoLogger)</code>가 <code>InvalidClassScopeException</code>으로
+                  bootstrap을 중단
+                </td>
+                <td>
+                  <code>app.resolve(PinoLogger)</code>로 변경. API smoke와 batch 실행으로 확인
+                </td>
+              </tr>
+              <tr>
+                <td>해결됨</td>
+                <td>requestId를 filter·Pino child에 함께 넣으면 JSON key가 중복될 수 있음</td>
+                <td>
+                  현재 Pino binding과 같은 경우 객체 필드에서 제거. smoke에서 중복 key 부재 확인
+                </td>
+              </tr>
+              <tr>
+                <td>잔여</td>
+                <td>전체 지연 histogram을 수집·조회할 endpoint와 저장소가 없음</td>
+                <td>2차 메트릭 설계로 보류. 이번 완료 판단에서 제외</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="verification-evidence">
+          <h2>검증 계획과 현재 공백</h2>
+          <ul>
+            <li>
+              정적: <code>npm run typecheck</code>, <code>npm run lint</code>,
+              <code>npm run format:check</code>, <code>npm run build</code> 모두 통과.
+            </li>
+            <li>
+              단위·통합: 26개 단위 테스트와 5개 통합 테스트 통과. logger option, threshold, filter
+              object logging, batch context와 종료를 확인.
+            </li>
+            <li>
+              실제 HTTP: <code>npm run test:smoke</code> 통과. 정상/4xx/413/404/parser 실패, UUIDv7
+              헤더와 로그 일치, body·parser sentinel 제외, JSON 줄과 requestId 중복 부재를 확인.
+            </li>
+            <li>
+              batch smoke: unknown job 실행에서 구조화된 <code>batch.unknown_job</code> 로그와 exit
+              code 1, 정상 종료 경로의 app.close·flush를 확인.
+            </li>
+            <li>
+              계약: <code>npm run contracts:check</code> 통과. SDK·e2e·OpenAPI 생성, RFC 9457 실패
+              응답 검사와 생성 TypeScript typecheck를 확인.
+            </li>
+            <li>
+              전체 지연 메트릭의 수집기·조회까지는 이번 구현에서 완료하지 않는다. timer와 느린 요청
+              로그의 경계만 검증하며, 향후 histogram 수치·label·다중 인스턴스 집계를 별도 검증한다.
+            </li>
+          </ul>
+          <aside>
+            검증 결과 Pino/nestjs-pino의 실제 공개 API와 Nest 미들웨어 순서는 baseline과 일치했다.
+            transient logger의 `resolve()` 예외만 구현 이슈로 기록하고 해결했다.
+          </aside>
+        </section>
+        <section id="residual-risks">
+          <h2>잔여 위험과 공백</h2>
+          <ul>
+            <li>
+              전체 지연 histogram과 수집·조회 경계는 2차 범위다. 현재 구현만으로 p95/p99나 다중
+              인스턴스 분포를 조회할 수 없다.
+            </li>
+            <li>
+              API 업무 이벤트의 표준 event 목록과 서비스별 기록 위치는 업무 기능 구현 때 확정한다.
+            </li>
+            <li>
+              <code>npm install</code> 당시 7개 취약점(중간 1개, 높음 6개)이 보고됐다. 의존성 경로
+              분석과 remediation은 이번 로깅 구현 범위에서 수행하지 않았다.
+            </li>
+          </ul>
+        </section>
+        <section id="control-state">
+          <h2>구현 이해 점검</h2>
+          <p>
+            상태: 미실시. 기술 검증은 완료됐으나 요청 격리·parser 오류·느린 요청
+            경계·redaction·batch 종료를 실제 as-built 기준으로 묻는 별도 점검은 아직 보고되지
+            않았다.
+          </p>
+        </section>
+        <section id="status">
+          <h2>구현 제어 상태</h2>
+          <p>
+            운영 제어 보류. 기술 상태는 승인된 baseline 범위의 Pino 적용, 요청·배치 컨텍스트,
+            예외·느린 요청 로그 구현과 정적·테스트·실행·계약 검증 완료다. 메트릭 수집·조회와
+            비즈니스 이벤트 표준은 보류 범위다.
+          </p>
+          <p>
+            잔여 제어: 구현 이해 점검은 미실시다. 이 상태는 기술 검증을 되돌리지 않으며, 운영 인수
+            전에 요청 ID 상관관계·예외 중복 억제·slow threshold·batch 종료와 보류된 메트릭 범위를
+            실제 as-built 기준으로 확인한다.
+          </p>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>
