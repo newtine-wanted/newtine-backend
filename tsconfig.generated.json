@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": [
+    "generated/**/*.ts",
+    "generated/**/*.mts",
+    "generated/**/*.cts",
+    "generated/**/*.tsx",
+    "apps/api/src/**/*.ts"
+  ]
+}
