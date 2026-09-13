@@ -200,6 +200,7 @@ DB 기본값은 `NODE_ENV=development` 또는 `test`일 때만 적용됩니다. 
 | `npm test`                             | unit·integration 테스트                        |
 | `npm run test:contracts`               | 생성 계약 테스트                               |
 | `npm run test:smoke`                   | 빌드된 API의 실제 HTTP 동작 확인               |
+| `npm run db:migrate`                    | 기존 base schema에 온보딩 delta migration 적용  |
 | `npm run contracts:all`                | SDK·e2e·OpenAPI 생성                           |
 | `npm run contracts:check`              | 계약 재생성, 계약 테스트, 생성 TypeScript 검사 |
 | `npm run typecheck:generated`          | 생성 TypeScript만 검사                         |
@@ -240,6 +241,7 @@ apps/
     common/                 HTTP 예외·필터·middleware
     health/                 프로세스 확인 endpoint
     issue/                  issue HTTP feature와 type
+    onboarding/             온보딩 HTTP feature와 principal seam
     main.ts
     api.module.ts
   batch/src/
@@ -249,6 +251,7 @@ apps/
     batch.module.ts
 libs/core/src/
   issue/                    issue domain과 repository 경계
+  onboarding/               온보딩 domain·PostgreSQL adapter·migration
   article/                  article domain과 repository 위치
   common/                   entity·exception·id·database·logging·transaction
   core.module.ts            공통 adapter 조립

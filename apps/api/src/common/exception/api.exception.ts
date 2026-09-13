@@ -10,6 +10,12 @@ export const ApiException = {
     title: 'Bad Request',
     description: 'The request is invalid.',
   },
+  Unauthorized: {
+    code: ErrorCode.Unauthorized,
+    status: HttpStatus.UNAUTHORIZED,
+    title: 'Unauthorized',
+    description: 'Authentication is required.',
+  },
   NotFound: {
     code: ErrorCode.NotFound,
     status: HttpStatus.NOT_FOUND,

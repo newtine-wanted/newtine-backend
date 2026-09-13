@@ -11,6 +11,8 @@
     "start:api": "node dist/apps/api/src/main.js",
     "start:batch": "node dist/apps/batch/src/main.js",
     "start:dev:api": "ttsx -P apps/api/tsconfig.app.json apps/api/src/main.ts",
+    "db:migrate": "npm run build:api && node scripts/migrate.mjs up",
+    "db:migrate:down": "npm run build:api && node scripts/migrate.mjs down",
     "format": "prettier --write \"{apps,libs,scripts,test}/**/*.{ts,mts,mjs,json}\" nestia.config.ts tsconfig.generated.json jest.config.mjs jest.transformer.mjs",
     "format:check": "prettier --check \"{apps,libs,scripts,test}/**/*.{ts,mts,mjs,json}\" nestia.config.ts tsconfig.generated.json jest.config.mjs jest.transformer.mjs",
     "lint": "eslint nestia.config.ts jest.config.mjs jest.transformer.mjs \"{apps,libs,scripts,test}/**/*.{ts,mts,mjs}\"",
@@ -30,6 +32,7 @@
   },
   "dependencies": {
     "@mikro-orm/core": "7.2.0",
+    "@mikro-orm/migrations": "^7.2.0",
     "@mikro-orm/nestjs": "7.1.0",
     "@mikro-orm/postgresql": "7.2.0",
     "@nestia/core": "^13.0.2",

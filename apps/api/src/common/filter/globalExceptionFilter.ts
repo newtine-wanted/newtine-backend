@@ -116,6 +116,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (status === HttpStatus.NOT_FOUND) {
       return ErrorCode.NotFound;
     }
+    if (status === HttpStatus.UNAUTHORIZED) {
+      return ErrorCode.Unauthorized;
+    }
     if (status === HttpStatus.CONFLICT) {
       return ErrorCode.Conflict;
     }

@@ -1,5 +1,6 @@
 import { IssueExceptionCode } from '@newtine/core';
 import type { DomainException } from '@newtine/core';
+import { OnboardingExceptionCode } from '@newtine/core';
 
 import {
   ApiException,
@@ -9,6 +10,10 @@ import {
 const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionSpec>> = {
   issue: {
     [IssueExceptionCode.NotFound]: ApiException.NotFound,
+  },
+  onboarding: {
+    [OnboardingExceptionCode.UserNotFound]: ApiException.Unauthorized,
+    [OnboardingExceptionCode.InvalidSelection]: ApiException.InvalidArgument,
   },
 };
 
