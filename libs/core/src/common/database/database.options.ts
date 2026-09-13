@@ -1,5 +1,6 @@
 import type { MikroOrmModuleOptions } from '@mikro-orm/nestjs';
 import { PostgreSqlDriver } from '@mikro-orm/postgresql';
+import { AiUsageRecordEntity } from '@newtine/core/pipeline/repository/mikroOrm/aiUsageRecord.entity.js';
 import { DatabaseConfigurationException } from './databaseConfiguration.exception.js';
 
 export function createDatabaseOptions(
@@ -27,8 +28,8 @@ export function createDatabaseOptions(
     dbName: required('DB_NAME', 'newtine'),
     user: required('DB_USER', 'postgres'),
     password: required('DB_PASSWORD', 'postgres'),
-    entities: [],
-    entitiesTs: [],
+    entities: [AiUsageRecordEntity],
+    entitiesTs: [AiUsageRecordEntity],
     discovery: { warnWhenNoEntities: false },
     allowGlobalContext: false,
     ensureDatabase: false,

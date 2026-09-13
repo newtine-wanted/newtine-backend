@@ -3,12 +3,13 @@ import { test } from '@jest/globals';
 
 import { createDatabaseOptions } from '@newtine/core/common/database/database.options.js';
 import { DatabaseConfigurationException } from '@newtine/core/common/database/databaseConfiguration.exception.js';
+import { AiUsageRecordEntity } from '@newtine/core/pipeline/repository/mikroOrm/aiUsageRecord.entity.js';
 
 test('database options never enable automatic database creation', () => {
   const options = createDatabaseOptions({ NODE_ENV: 'test' });
 
   assert.equal(options.ensureDatabase, false);
-  assert.deepEqual(options.entities, []);
+  assert.deepEqual(options.entities, [AiUsageRecordEntity]);
   assert.equal(options.registerRequestContext, true);
 });
 
