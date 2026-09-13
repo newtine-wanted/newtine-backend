@@ -56,3 +56,4 @@ export {
   InMemoryOnboardingRepository,
 } from './onboarding/inMemoryOnboarding.repository.js';
 export { InMemoryOnboardingTransactionManager } from './onboarding/inMemoryOnboarding.transactionManager.js';
+export { PostgresOnboardingRepository } from './onboarding/postgresOnboarding.repository.js';

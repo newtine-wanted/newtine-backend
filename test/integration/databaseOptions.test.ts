@@ -8,7 +8,11 @@ test('database options never enable automatic database creation', () => {
   const options = createDatabaseOptions({ NODE_ENV: 'test' });
 
   assert.equal(options.ensureDatabase, false);
-  assert.deepEqual(options.entities, []);
+  assert.ok(Array.isArray(options.entities));
+  assert.ok(options.entities.length > 0);
+  assert.ok(options.extensions?.length);
+  assert.equal(options.migrations?.transactional, true);
+  assert.equal(options.migrations?.migrationsList?.length, 1);
   assert.equal(options.registerRequestContext, true);
 });
 
