@@ -1,5 +1,5 @@
 import type {
-  AgeGroup,
+  IssueAgeGroup,
   FeedBatchItemRecord,
   FeedContinuation,
   FeedSessionRecord,
@@ -587,7 +587,7 @@ function hasKnownMismatch(issue: IssueRecord, context: UserRecommendationContext
       !issue.regionCodes.some((code) => context.preferredRegionCodes.includes(code))) ||
     (ageKnown &&
       issue.ageGroups.length > 0 &&
-      !issue.ageGroups.includes(context.ageGroup as AgeGroup))
+      !issue.ageGroups.includes(context.ageGroup as IssueAgeGroup))
   );
 }
 

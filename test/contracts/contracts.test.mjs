@@ -15,6 +15,11 @@ const EXPECTED_FAILURE_STATUSES = {
   '/feed-sessions': ['400', '500'],
   '/feed-sessions/{sessionId}/batches': ['400', '404', '409', '410', '500'],
   '/health': ['500'],
+  '/onboarding/options': ['500'],
+  '/onboarding/entities': ['400', '500'],
+  '/me/onboarding': ['401', '500'],
+  '/me/onboarding/complete': ['400', '401', '500'],
+  '/me/onboarding/skip': ['401', '500'],
 };
 const requiredFiles = [
   'api/index.ts',

@@ -31,6 +31,9 @@
 | [로깅 구현 제어](logging.implementation.html)                       | 로깅 구현과 검증 결과                  |
 | [이슈·카드 조회 설계](issue-card-query-design.html)                  | 10장 개인화 피드·이슈 상세 정책         |
 | [이슈·카드 조회 구현 제어](issue-card-query-implementation.html)     | 구현 상태·게이트·운영 보류 항목          |
+| [온보딩 API 설계](onboarding-api-design.html)                       | 승인된 온보딩 HTTP·상태·선호 계약      |
+| [온보딩 persistence 설계](onboarding-persistence-design.html)       | PostgreSQL schema delta·migration 경계  |
+| [온보딩 API 구현 제어](onboarding-api-implementation.html)          | 구현 범위·검증 증거·운영 보류           |
 
 구현 제어 문서는 설계 승인 이후 실제 변경과 검증을 기록한다. 새로운 정책을 추가하거나 기존 결정을
 바꿀 때는 먼저 [의사결정 기록](../decisions/README.md)을 갱신한다.

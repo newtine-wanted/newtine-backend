@@ -1,5 +1,6 @@
 import { IssueExceptionCode } from '@newtine/core';
 import type { DomainException } from '@newtine/core';
+import { OnboardingExceptionCode } from '@newtine/core';
 
 import {
   ApiException,
@@ -13,6 +14,10 @@ const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionS
     [IssueExceptionCode.FeedSessionExpired]: ApiException.Gone,
     [IssueExceptionCode.FeedBatchConflict]: ApiException.Conflict,
     [IssueExceptionCode.FeedOwnerInvalid]: ApiException.InvalidArgument,
+  },
+  onboarding: {
+    [OnboardingExceptionCode.UserNotFound]: ApiException.Unauthorized,
+    [OnboardingExceptionCode.InvalidSelection]: ApiException.InvalidArgument,
   },
 };
 

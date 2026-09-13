@@ -7,9 +7,15 @@ import { CoreModule, createLoggerOptions } from '@newtine/core';
 import { GlobalExceptionFilter } from '@newtine/api/common/filter/globalExceptionFilter.js';
 import { HealthController } from '@newtine/api/health/health.controller.js';
 import { IssueModule } from '@newtine/api/issue/issue.module.js';
+import { OnboardingModule } from '@newtine/api/onboarding/onboarding.module.js';
 
 @Module({
-  imports: [LoggerModule.forRoot(createLoggerOptions('api')), CoreModule, IssueModule],
+  imports: [
+    LoggerModule.forRoot(createLoggerOptions('api')),
+    CoreModule,
+    IssueModule,
+    OnboardingModule,
+  ],
   controllers: [HealthController],
   providers: [
     {

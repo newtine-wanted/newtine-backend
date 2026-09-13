@@ -23,7 +23,7 @@ export { NestedTransactionException } from './common/transaction/transaction.exc
 export { TRANSACTION_MANAGER } from './common/transaction/transaction.manager.js';
 export type { TransactionManager } from './common/transaction/transaction.manager.js';
 export type {
-  AgeGroup,
+  AgeGroup as IssueAgeGroup,
   FeedBatchItemRecord,
   FeedBatchRecord,
   FeedContinuation,
@@ -42,3 +42,38 @@ export type {
   UserRecommendationContext,
 } from './issue/repository/type/issueQuery.repository.js';
 export { ISSUE_QUERY_REPOSITORY } from './issue/repository/type/issueQuery.repository.js';
+export {
+  AgeGroup,
+  EntityType,
+  OnboardingStatus,
+  ONBOARDING_REPOSITORY,
+} from './onboarding/onboarding.model.js';
+export type {
+  AgeGroupValue,
+  EntityTypeValue,
+  EntitySearchCommand,
+  EntitySearchResult,
+  OnboardingEntity,
+  OnboardingOptions,
+  OnboardingRepository,
+  OnboardingState,
+  OnboardingStateWithPreferences,
+  MaybePromise,
+  OnboardingTopicOption,
+  RegionOption,
+  CompleteOnboardingCommand,
+} from './onboarding/onboarding.model.js';
+export { OnboardingException, OnboardingExceptionCode } from './onboarding/onboarding.exception.js';
+export type { OnboardingExceptionCodeValue } from './onboarding/onboarding.exception.js';
+export {
+  ONBOARDING_AGE_GROUPS,
+  ONBOARDING_OPTIONS,
+  ONBOARDING_REGIONS,
+  ONBOARDING_TOPICS,
+} from './onboarding/onboarding.options.js';
+export {
+  DEFAULT_ONBOARDING_ENTITY_FIXTURES,
+  InMemoryOnboardingRepository,
+} from './onboarding/inMemoryOnboarding.repository.js';
+export { InMemoryOnboardingTransactionManager } from './onboarding/inMemoryOnboarding.transactionManager.js';
+export { PostgresOnboardingRepository } from './onboarding/postgresOnboarding.repository.js';

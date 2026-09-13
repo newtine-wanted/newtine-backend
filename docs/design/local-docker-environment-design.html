@@ -1,0 +1,1027 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="로컬에서 NEWTINE NestJS API·batch와 PostgreSQL을 반복 실행할 수 있는 Docker 환경 확립" />
+    <meta name="audience" content="로컬 개발을 시작하거나 재현하는 백엔드 개발자" />
+    <meta name="problem" content="호스트 Node 실행과 컨테이너 PostgreSQL 사이의 실행 순서·호스트명·데이터 보존·환경변수 계약이 정의되지 않음" />
+    <meta name="core-flow" content="Docker Compose로 PostgreSQL 기동 → readiness 확인 → API 또는 batch 실행 → 로그·DB 상태 확인 → 명시적 종료·초기화" />
+    <title>로컬 Docker·Compose 실행 환경 설계</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #203047;
+        background: #f3f6fa;
+      }
+      body {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 28px 20px 56px;
+        line-height: 1.7;
+      }
+      header,
+      section,
+      aside {
+        background: #fff;
+        border: 1px solid #d7e0eb;
+        border-radius: 12px;
+        padding: 22px;
+        margin: 20px 0;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 22px;
+        padding: 8px 0 20px;
+      }
+      a {
+        color: #1b5dbb;
+      }
+      dt {
+        font-weight: 700;
+      }
+      dd {
+        margin: 0 0 10px;
+      }
+      code,
+      pre {
+        background: #eef3f8;
+      }
+      code {
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+      pre {
+        padding: 16px;
+        overflow: auto;
+        border-radius: 8px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 10px;
+        border-bottom: 1px solid #d7e0eb;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f6f8fb;
+      }
+      aside {
+        border-left: 5px solid #bf8425;
+        border-radius: 4px 12px 12px 4px;
+        background: #fff9ed;
+      }
+      .status {
+        color: #875a10;
+        font-weight: 700;
+      }
+      .muted {
+        color: #52627a;
+      }
+      figure {
+        margin: 20px 0;
+      }
+      figcaption {
+        margin-bottom: 8px;
+        color: #52627a;
+        font-weight: 650;
+      }
+      .decision {
+        border-left: 3px solid #6593cf;
+        padding-left: 14px;
+      }
+      .quiz-progress {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        background: #eef4fb;
+        border-radius: 8px;
+      }
+      .quizSlide {
+        border: 1px solid #d7e0eb;
+        border-radius: 10px;
+        padding: 18px;
+        margin-top: 18px;
+      }
+      body.enhanced .quizSlide:not(.is-active) {
+        display: none;
+      }
+      .quizSlide label {
+        display: block;
+        margin: 10px 0;
+        padding: 10px 12px;
+        border: 1px solid #d7e0eb;
+        border-radius: 8px;
+      }
+      .quizSlide label:hover,
+      .quizSlide label:has(input:checked) {
+        background: #f0f6ff;
+        border-color: #6593cf;
+      }
+      .quiz-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 16px;
+      }
+      .quiz-actions button {
+        font: inherit;
+        padding: 8px 14px;
+        border: 1px solid #7187a5;
+        border-radius: 7px;
+        background: #edf3ff;
+        cursor: pointer;
+      }
+      .quiz-actions button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .quiz-result {
+        margin-top: 16px;
+        padding: 14px;
+        border-left: 4px solid #4d8c61;
+        background: #edf5ef;
+        border-radius: 4px 8px 8px 4px;
+      }
+      .quiz-result p {
+        margin: 4px 0;
+      }
+      .question-meta {
+        color: #52627a;
+        font-size: 0.95rem;
+      }
+      output {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="status">설계 승인됨 · baseline snapshot · Standard · 구현 연계 완료</p>
+      <h1>로컬 Docker·Compose 실행 환경 설계</h1>
+      <p>
+        NEWTINE 백엔드를 새 개발 환경에서 같은 순서로 띄우고, PostgreSQL 연결 상태와 데이터를
+        예측 가능하게 관리하기 위한 설계 기준선이다. 현재 문서는 구현 명세가 아니라 선택이 필요한
+        설계와 검증 기준을 기록한다.
+      </p>
+      <dl>
+        <dt>purpose · 목적</dt>
+        <dd>로컬에서 NEWTINE NestJS API·batch와 PostgreSQL을 반복 실행할 수 있는 Docker 환경 확립</dd>
+        <dt>audience · 사용자</dt>
+        <dd>로컬 개발을 시작하거나 재현하는 백엔드 개발자</dd>
+        <dt>problem · 문제</dt>
+        <dd>호스트 Node 실행과 컨테이너 PostgreSQL 사이의 실행 순서·호스트명·데이터 보존·환경변수 계약이 정의되지 않음</dd>
+        <dt>core-flow · 핵심 흐름</dt>
+        <dd>Docker Compose로 PostgreSQL 기동 → readiness 확인 → API 또는 batch 실행 → 로그·DB 상태 확인 → 명시적 종료·초기화</dd>
+        <dt>범위·강도</dt>
+        <dd>로컬 개발용 Compose, Node 실행 이미지/방식, PostgreSQL 연결·상태·볼륨·환경변수·검증 · Standard</dd>
+        <dt>작성·승인 기준일</dt>
+        <dd><time datetime="2026-09-13">2026-09-13</time> · 승인 당시의 불변 design baseline snapshot</dd>
+        <dt>작업 참조</dt>
+        <dd>사용자 요청: “로컬에서 돌릴 수 있게, 도커 컴포즈, 도커 세팅해야해. nestjs + postgresql 정도일듯. 이를 위한 설계 ㄱㄱ”</dd>
+      </dl>
+      <p>
+        기존 <a href="nestjs-foundation-design.html">NestJS 초기 골격 설계</a>는 앱·core 코드 경계를,
+        <a href="foundationRobustness.design.html">견고성 설계</a>는 설정 실패를 다룬다. 이 문서는
+        컨테이너와 로컬 실행 토폴로지를 다루므로 목적이 달라 새 peer 설계로 기록한다.
+        구현 승인 후에는 <code>local-docker-environment-implementation.html</code>을 이 문서와 연결한다.
+      </p>
+      <p class="muted">
+        이 문서는 구현·review 결과를 덧씌우지 않는 승인 기준선이다. 구현 및 최종 검증 상태와 갱신일은
+        연결된 구현-control 문서에서 관리하며, 이 문서의 2026-09-13은 설계 선택·승인 기준일이다.
+      </p>
+    </header>
+
+    <nav aria-label="설계 탐색">
+      <a href="#goal">목표·근거</a>
+      <a href="#system-model">시스템 모델</a>
+      <a href="#invariants">불변식</a>
+      <a href="#decisions">결정 트리</a>
+      <a href="#grilling-state">Grilling</a>
+      <a href="#shared-understanding">공유 이해</a>
+      <a href="#failure-recovery">실패·복구</a>
+      <a href="#verification-plan">검증</a>
+      <a href="#design-control-state">이해 점검</a>
+      <a href="#approval-state">승인</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="goal">
+          <h2>목표와 확인된 근거</h2>
+          <p>
+            성공 신호는 로컬 개발자가 명시된 한두 개의 Compose·npm 명령으로 PostgreSQL을 준비하고,
+            기존 API의 <code>/health</code> 및 batch의 <code>databaseCheck</code>로 연결을 확인하며,
+            재시작 후에도 의도한 로컬 데이터 상태를 설명할 수 있는 것이다. 운영 배포나 외부 서비스
+            연동을 이 문서의 성공으로 간주하지 않는다.
+          </p>
+          <table>
+            <caption>저장소와 현재 환경에서 확인한 사실</caption>
+            <thead>
+              <tr>
+                <th scope="col">영역</th>
+                <th scope="col">확인된 사실</th>
+                <th scope="col">설계에 미치는 영향</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">앱</th>
+                <td><code>apps/api</code>와 <code>apps/batch</code>가 <code>libs/core</code>의 MikroORM/PostgreSQL 경계를 공유한다.</td>
+                <td>API와 batch가 같은 DB 접속 변수·네트워크 규칙을 사용해야 한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">DB 설정</th>
+                <td><code>createDatabaseOptions</code>가 <code>DB_HOST</code>, <code>DB_PORT</code>, <code>DB_NAME</code>, <code>DB_USER</code>, <code>DB_PASSWORD</code>를 읽는다. <code>development</code>/<code>test</code>에만 기본값이 있고 <code>ensureDatabase=false</code>이며 schema sync·자동 migration은 없다.</td>
+                <td>Compose가 DB를 준비해도 앱이 schema를 자동 변경한다고 약속할 수 없다. 컨테이너 내부와 호스트 실행의 DB host 값은 실행 위치에 따라 달라진다.</td>
+              </tr>
+              <tr>
+                <th scope="row">실행</th>
+                <td><code>npm run start:dev:api</code>는 ttsx 기반 개발 실행이며 현재 script에 watch 옵션은 없다. <code>npm run start:api</code>는 빌드 산출물 실행, <code>npm run start:batch -- databaseCheck</code>는 일회성 DB 확인이다.</td>
+                <td>개발 편의와 production-like 컨테이너 실행은 서로 다른 흐름으로 명시할 수 있다.</td>
+              </tr>
+              <tr>
+                <th scope="row">환경 로드</th>
+                <td>애플리케이션은 <code>.env</code>를 자동으로 읽지 않는다. Node의 <code>--env-file</code> 또는 셸 주입이 필요하다.</td>
+                <td>Compose의 <code>env_file</code>와 호스트 npm 실행의 env-file은 별도 계약으로 설명해야 한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">컨테이너 런타임</th>
+                <td>API는 <code>API_HOST</code> 기본값이 <code>127.0.0.1</code>이고, 개발 로그 pretty 출력은 <code>pino-pretty</code> devDependency에 의존한다.</td>
+                <td>컨테이너 API는 publish된 포트를 받도록 <code>API_HOST=0.0.0.0</code>을 명시하고, production dependency만 포함하는 runtime image라면 <code>NODE_ENV=production</code>을 사용한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">상태 경계</th>
+                <td><code>/health</code>는 DB 쿼리를 하지 않는 프로세스 확인 endpoint이고, batch <code>databaseCheck</code>는 실제 <code>select 1</code>을 실행한다.</td>
+                <td>Compose DB healthcheck, API liveness, batch 연결 확인을 서로 다른 검증으로 유지한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">현재 설정</th>
+                <td>Dockerfile·Compose·<code>.dockerignore</code>·전용 Docker script는 없다. 확인 환경은 Node <code>v24.18.0</code>, npm <code>11.16.0</code>, Docker <code>27.5.0</code>, Compose <code>v5.0.1</code>이다.</td>
+                <td>기존 파일을 덮어쓸 기준선이 없으므로 새 목적 문서와 새 실행 파일을 설계한다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="change-model">
+          <h2>변경 모델과 제외 범위</h2>
+          <p>
+            최종 구현 후보는 Compose project 안에 PostgreSQL 서비스와 필요 시 API·batch 실행 경계를
+            정의하고, 실행 위치에 맞는 DB host와 readiness 확인 절차를 제공하는 것이다. 명령어와 파일
+            이름은 토폴로지 결정 후 확정한다.
+          </p>
+          <h3>제외</h3>
+          <ul>
+            <li>운영·staging 배포, 이미지 registry, TLS, secret manager, Kubernetes, CI 배포 파이프라인</li>
+            <li>업무 entity·repository·migration·seed 및 데이터 모델 변경</li>
+            <li>애플리케이션의 <code>/health</code> 계약을 DB readiness endpoint로 바꾸는 코드 변경</li>
+            <li>현재 사용하지 않는 임베딩 모델·차원·추천 정책을 확정하는 일</li>
+          </ul>
+        </section>
+
+        <section id="system-model">
+          <h2>후보 시스템 모델</h2>
+          <figure>
+            <figcaption>후보 A — DB 컨테이너와 호스트 Node 실행</figcaption>
+            <pre>개발자 터미널
+  ├─ docker compose up -d db
+  │       └─ PostgreSQL :5432 (호스트 포트 publish)
+  ├─ npm run start:dev:api  ── DB_HOST=127.0.0.1 ──┐
+  └─ npm run start:batch -- databaseCheck ─────────┘
+
+  readiness: pg_isready / batch databaseCheck
+  종료: compose down, 데이터 초기화는 별도 명시 명령</pre>
+            <p>
+              텍스트 등가: Compose가 DB만 소유하고 API·batch는 호스트 Node 프로세스가 소유한다. 현재
+              개발 실행 명령만으로 watch 동작을 약속하지 않는다. 앱은 DB 서비스명 <code>db</code>가
+              아니라 publish된 <code>127.0.0.1</code>로 연결한다.
+            </p>
+          </figure>
+          <figure>
+            <figcaption>후보 B — API·batch·DB 전체 컨테이너</figcaption>
+            <pre>docker compose
+  ├─ db   ── PostgreSQL :5432 (내부 network)
+  ├─ api  ── DB_HOST=db ── HTTP :3000 publish
+  └─ batch (one-shot) ── DB_HOST=db
+
+  readiness: db healthcheck → api/batch 실행
+  개발 편의: image rebuild 또는 source bind mount·node_modules 전략 필요</pre>
+            <p>
+              텍스트 등가: 컨테이너 내부에서는 <code>db</code>가 DNS 서비스명이고, 호스트의
+              <code>127.0.0.1</code> 설정을 그대로 재사용하면 안 된다. API 이미지는 build 후 산출물을
+              실행하는 흐름이 자연스럽고, hot reload는 별도 설계가 필요하다.
+            </p>
+          </figure>
+          <figure>
+            <figcaption>후보 C — 기본 개발 경로와 컨테이너 경로를 Compose profile로 병행</figcaption>
+            <pre>기본 경로: db profile/service + 호스트 start:dev:api
+컨테이너 경로: db + api profile (+ batch one-shot)
+
+공유해야 하는 것: DB volume·credentials·readiness·포트 정책
+추가해야 하는 것: profile 문서·두 실행 경로 검증·source/image 차이 관리</pre>
+            <p>
+              텍스트 등가: 두 운영 모드를 한 저장소에 보존한다. 유연성이 늘지만 명령과 환경변수
+              계약이 두 벌이 되어 초기 설정의 설명·검증 부담이 커진다.
+            </p>
+          </figure>
+        </section>
+
+        <section id="invariants">
+          <h2>유지해야 할 불변식과 경계</h2>
+          <table>
+            <caption>설계 전 과정에서 유지하는 계약</caption>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">불변식</th>
+                <th scope="col">검증 또는 관찰</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">D-INV-01</th>
+                <td>PostgreSQL readiness와 앱 실행 가능성을 같은 상태로 취급하지 않는다. DB가 healthy여도 앱 bootstrap·schema·업무 기능은 별도 검증 대상이다.</td>
+                <td><code>pg_isready</code>, API <code>/health</code>, batch <code>databaseCheck</code> 결과를 구분해 기록한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">D-INV-02</th>
+                <td>Compose는 DB를 생성·기동할 뿐 schema sync, 자동 migration, 업무 seed를 암묵적으로 실행하지 않는다.</td>
+                <td>PostgreSQL 시작 로그와 앱 설정(<code>ensureDatabase=false</code>)을 확인하고, init SQL을 넣지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">D-INV-03</th>
+                <td>컨테이너 내부 DB host와 호스트 프로세스의 DB host는 실행 위치에 맞게 명시한다. <code>db</code>를 호스트에서 해석된다고 가정하지 않는다.</td>
+                <td>각 실행 모드의 환경변수 표와 실제 <code>databaseCheck</code> 연결 성공으로 확인한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">D-INV-04</th>
+                <td>개발 비밀번호는 로컬 전용 예시로만 두고 <code>.env</code>와 실제 비밀값은 git에 포함하지 않는다.</td>
+                <td><code>.gitignore</code>, <code>.env.example</code>, Compose env 전달 경로를 확인한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">D-INV-05</th>
+                <td>볼륨 삭제는 기본 종료 동작이 아니며, 데이터 초기화는 사용자가 대상을 인지하는 별도 절차다.</td>
+                <td>정상 재기동과 명시적 초기화 검증을 분리한다. destructive command는 문서에 경고를 둔다.</td>
+              </tr>
+              <tr>
+                <th scope="row">D-INV-06</th>
+                <td>API 컨테이너의 정상 종료·DB 연결 실패·batch one-shot 실패가 조용히 성공으로 변환되지 않는다.</td>
+                <td>non-zero exit, Compose 상태, 로그, 재실행 후 상태를 확인한다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="decisions">
+          <h2>결정 트리와 현재 권고</h2>
+          <ol>
+            <li><strong>실행 토폴로지</strong>를 결정한다.</li>
+            <li>토폴로지에 맞춰 <strong>환경변수 전달과 DB host</strong>를 결정한다.</li>
+            <li>그 결과에 따라 API image, hot reload, batch one-shot 및 profile 필요성을 정한다.</li>
+            <li>DB image·pgvector 여부와 volume 보존·초기화 정책을 확정한다.</li>
+            <li>readiness, 연결 확인, API smoke, build/lint/test의 검증 명령을 확정한다.</li>
+          </ol>
+          <div class="decision">
+            <h3>선택된 설계 기준선</h3>
+            <p>
+              사용자가 말한 “실행이 한번에 되는 구조”와 최신 G1-A 답변을 반영해 후보 B를 선택된
+              기준선으로 좁힌다. <code>docker compose up --build</code> 한 번으로 DB와 API를 계속
+              실행하고, batch는 같은 Compose 프로젝트에서 명시적으로 한 번 실행하는 one-shot
+              도구로 둔다. batch를 상시 <code>up</code>에 포함하지 않는 이유는 현재 작업이 종료
+              프로세스라 API 재시작 때 자동 반복되거나, 완료된 batch가 Compose의 정상 실행 흐름을
+              바꿀 수 있기 때문이다.
+            </p>
+            <p>
+              필요하면 <code>docker compose up -d db</code>와 기존 npm 실행을 병행하는 호스트 개발
+              경로도 보존할 수 있다. 다만 그것은 선택된 container mode와 별도의 실행 계약으로
+              문서화하며, 컨테이너 개발용 watch는 현재 script에 없으므로 이 설계에서 약속하지 않는다.
+            </p>
+          </div>
+        </section>
+
+        <section id="grilling-state">
+            <h2>설계 의사결정 상태 · 완료</h2>
+          <dl>
+            <dt>범위</dt>
+            <dd>로컬 Compose의 서비스 토폴로지, DB image/extension, 데이터 volume 보존 정책과 그에 따른 실행·검증 계약</dd>
+            <dt>현재 frontier</dt>
+            <dd>없음. G1~G6의 material design frontier가 모두 닫혔다. 공유 이해 확인과 별도 구현 승인도 완료되어 구현 단계로 전환한다.</dd>
+            <dt>확정된 결정</dt>
+            <dd>최신 질문 기준 G1-A: DB+API는 Compose 한 번으로 계속 실행하고 batch는 명시적 one-shot으로 실행한다. G2-A·G2-EXACT-A: 공식 PostgreSQL image의 major를 고정하고, 저장소에 기준이 없어 로컬 baseline은 <code>postgres:18</code>로 두며 pgvector는 실제 사용 시 도입한다. G3-A: named volume을 보존하고 schema가 깨질 때만 명시적 reset을 사용한다. G5-A: built JS와 production dependencies 기반 runtime만 제공하고 container watch는 넣지 않는다. G6-A: host/container env를 명시적으로 나누고 service name·loopback port를 실행 위치에 맞게 사용한다. 기존 저장소의 DB 자동 schema 변경 금지·환경변수 검증·앱별 명령은 계속 전제 불변식으로 유지한다.</dd>
+            <dt>보류된 branch</dt>
+            <dd>운영 PostgreSQL major가 따로 발견되면 local baseline과의 호환성은 재검토한다. migration·seed·pgvector와 실제 watch 개발 흐름은 후속 설계 범위다.</dd>
+            <dt>답변 반영 · 2026-09-13</dt>
+            <dd>사용자: “G1에서 batch는 애매하지만 우선 실행이 한번에 되는 구조를 생각했다. G2는 모름. G3는 DB schema가 계속 바뀐다.” → G1의 persistent service 범위를 좁히고, G2는 호환 기준 확인 또는 임시 pinned baseline이 필요하며, G3는 데이터 보존과 schema 갱신 방식을 함께 결정해야 한다.</dd>
+            <dt>답변 반영 · 2026-09-13</dt>
+            <dd>사용자: “G1-A, G2-A, G3-A” → 최신 라운드의 G1-BATCH-A·G2-MAJOR-A·G3-SCHEMA-A를 선택했다. G2의 정확한 major는 저장소에 운영/CI 근거가 없어 <code>postgres:18</code> local baseline 후보와 호환성 확인을 분리해 기록한다.</dd>
+            <dt>답변 반영 · 2026-09-13</dt>
+            <dd>사용자: “그래 그렇게 하자. 권장대로 ㄱㄱ” → G2-EXACT-A·G5-A·G6-A를 권고대로 선택했다. 이는 설계 선택의 반영이며, 별도의 구현 승인 질문에 대한 답은 아니다.</dd>
+            <dt>답변 반영 · 2026-09-13</dt>
+            <dd>사용자: “A” → G4-A를 선택했다. 빈 volume에서는 공식 image가 DB/user만 초기화하고 application table·migration·seed는 생성하지 않으며, schema 변경 대응은 후속 migration 설계 또는 명시적 reset으로 남긴다.</dd>
+            <dt>설계 승인 · 2026-09-13</dt>
+            <dd>사용자: “구현 ㄱㄱ” → 아래 공유 이해 기준선의 구현을 승인했다. 승인 범위는 Dockerfile·Compose·.dockerignore와 README 실행 문서이며, TypeScript·schema·migration·기존 테스트 계약은 제외한다.</dd>
+            <dt>이번 라운드의 질문</dt>
+            <dd>G4는 빈 volume에서 DB/user만 만들지 schema까지 만들지 정한다. G5·G6는 권고안으로 확정됐다.</dd>
+            <dt>G4 설명 보완</dt>
+            <dd>A는 PostgreSQL container가 빈 named volume에서 <code>POSTGRES_DB</code>·사용자·자격증명만 초기화하고, 애플리케이션 table은 만들지 않는다는 뜻이다. 현재처럼 entity·migration이 없는 골격에서는 <code>databaseCheck</code>의 <code>select 1</code>까지 확인할 수 있다. B의 <code>docker-entrypoint-initdb.d</code> SQL은 최초 빈 volume에서만 실행되므로, 이후 schema 변경을 자동 적용하는 migration 방식과는 다르다.</dd>
+            <dt>중요 가정</dt>
+            <dd>목표는 로컬 개발 재현이며 운영 배포나 외부 공개가 아니다. 현재 업무 migration과 vector extension 사용 코드는 없다.</dd>
+          </dl>
+          <table>
+            <caption>이번 라운드에서 닫을 frontier</caption>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">결정</th>
+                <th scope="col">추천 방향</th>
+                <th scope="col">다음에 열리는 것</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">G1-BATCH</th>
+                <td>한 번 실행에 batch를 포함할지</td>
+                <td>DB+API는 계속 실행, batch는 명시적 one-shot 실행</td>
+                <td>확정: A</td>
+              </tr>
+              <tr>
+                <th scope="row">G2-MAJOR</th>
+                <td>PostgreSQL major·vector extension</td>
+                <td>공식 이미지의 pinned major, pgvector는 실제 사용 시 도입</td>
+                <td>확정: A</td>
+              </tr>
+              <tr>
+                <th scope="row">G3-SCHEMA</th>
+                <td>schema 변경 시 volume·migration/reset</td>
+                <td>자동 schema 변경 없이 volume 보존, 깨질 때만 명시적 reset</td>
+                <td>확정: A</td>
+              </tr>
+            </tbody>
+          </table>
+          <table>
+            <caption>결정 트리의 의존 관계</caption>
+            <thead>
+              <tr>
+                <th scope="col">노드</th>
+                <th scope="col">선행 결정</th>
+                <th scope="col">이 노드가 여는 결정</th>
+                <th scope="col">상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">G1 한번 실행·batch lifecycle</th>
+                <td>없음</td>
+                <td>env host명, API image, batch one-shot 명령, profile</td>
+                <td>확정: A</td>
+              </tr>
+              <tr>
+                <th scope="row">G2 DB major·vector</th>
+                <td>없음</td>
+                <td>image tag, extension 설치·검증, 향후 migration 경계</td>
+                <td>A 선택·major 검증 필요</td>
+              </tr>
+              <tr>
+                <th scope="row">G3 volume·schema 변경</th>
+                <td>없음</td>
+                <td>migration/reset 명령, 데이터 보존 테스트</td>
+                <td>확정: A</td>
+              </tr>
+              <tr>
+                <th scope="row">G2-EXACT PostgreSQL major</th>
+                <td>G2-A</td>
+                <td>운영/CI 기준이 없으면 <code>postgres:18</code> local baseline</td>
+                <td>확정: A</td>
+              </tr>
+              <tr>
+                <th scope="row">G4 빈 volume 초기화</th>
+                <td>G2-EXACT, G3</td>
+                <td>공식 image env, init SQL·migration 경계</td>
+                <td>확정: A</td>
+              </tr>
+              <tr>
+                <th scope="row">G5 API runtime</th>
+                <td>G1</td>
+                <td>built JS, production dependency, watch·bind mount</td>
+                <td>확정: A</td>
+              </tr>
+              <tr>
+                <th scope="row">G6 env·port 경계</th>
+                <td>G1</td>
+                <td>host/container DB host, API bind, loopback publish</td>
+                <td>확정: A</td>
+              </tr>
+              <tr>
+                <th scope="row">G7 검증 계약</th>
+                <td>G1~G6</td>
+                <td>focused Docker smoke 및 전체 local gate</td>
+                <td>공유 이해 후</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="failure-recovery">
+          <h2>실패·복구 모델(결정 전 기준)</h2>
+          <table>
+            <caption>예상 실패와 안전한 다음 행동</caption>
+            <thead>
+              <tr>
+                <th scope="col">상황</th>
+                <th scope="col">관찰해야 할 사실</th>
+                <th scope="col">복구 방향</th>
+                <th scope="col">자동으로 하지 않을 것</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">DB가 아직 준비되지 않음</th>
+                <td>Compose health 상태, <code>pg_isready</code> 출력, 앱 bootstrap 로그</td>
+                <td>readiness가 healthy가 된 뒤 API/batch를 재실행한다.</td>
+                <td>앱 retry가 있다고 가정하거나 schema 변경을 시작하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">앱이 <code>db</code>를 찾지 못함</th>
+                <td>앱 실행 위치와 실제 <code>DB_HOST</code>의 불일치</td>
+                <td>host mode면 <code>127.0.0.1</code>, container mode면 Compose service name을 사용한다.</td>
+                <td>DNS 실패를 PostgreSQL 데이터 손상으로 해석하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">기존 volume의 schema가 기대와 다름</th>
+                <td>DB 연결은 성공하지만 업무 쿼리·migration 전제는 별도 실패할 수 있다.</td>
+                <td>현재 범위에서는 schema migration/seed를 별도 작업으로 열고 원인을 기록한다.</td>
+                <td>Compose up이나 container start에서 volume을 자동 삭제하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">batch <code>databaseCheck</code> 실패</th>
+                <td>batch exit code 1과 <code>batch.failed</code> 로그</td>
+                <td>DB health·env·로그를 확인한 뒤 같은 one-shot job을 명시적으로 재실행한다.</td>
+                <td>실패를 성공으로 감싸거나 무한 재시도하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">데이터를 초기화해야 함</th>
+                <td>reset 대상 volume과 로컬 데이터의 보존 필요성</td>
+                <td>대상을 표시한 별도 reset 절차 후 다시 up·readiness·연결 검증을 한다.</td>
+                <td>일반 <code>down</code>에 <code>-v</code>를 숨겨 넣지 않는다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="verification-plan">
+          <h2>검증 계획(토폴로지 결정 후 명령 확정)</h2>
+          <ol>
+            <li>빈 로컬 환경에서 Compose config가 해석되고 DB container가 생성된다.</li>
+            <li>DB healthcheck가 healthy가 된 뒤 <code>psql</code> 또는 <code>databaseCheck</code>가 연결에 성공한다.</li>
+            <li>선택한 API 실행 모드가 <code>/health</code> 200과 기존 smoke 계약을 통과한다.</li>
+            <li>API/batch bootstrap 실패 시 non-zero exit와 기존 구조화 로그·예외 계약이 유지된다.</li>
+            <li>정상 종료 후 volume 보존 정책이 실제로 유지되고, reset 절차만 데이터를 삭제한다.</li>
+            <li>변경 범위에 비례해 <code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm test</code>, <code>npm run build</code>와 focused Docker smoke를 실행한다.</li>
+          </ol>
+          <aside>
+            Docker daemon 접근과 실제 PostgreSQL 기동은 설계 확정 후 별도 실행 검증이다. 현재 문서에
+            Docker CLI 버전이 기록되어 있다는 사실을 실제 container 성공의 증거로 해석하지 않는다.
+          </aside>
+        </section>
+
+        <section id="rejected-alternatives">
+          <h2>현재 단계에서 배제하거나 보류하는 대안</h2>
+          <table>
+            <caption>대안과 배제 이유</caption>
+            <thead>
+              <tr>
+                <th scope="col">대안</th>
+                <th scope="col">현재 판단</th>
+                <th scope="col">다시 열 조건</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">PostgreSQL <code>latest</code> tag</th>
+                <td>보류·비권고. 재현성이 없어 local gate 결과가 달라질 수 있다.</td>
+                <td>버전 갱신 정책과 호환성 검증을 별도 운영 계약으로 정할 때</td>
+              </tr>
+              <tr>
+                <th scope="row">Compose 시작 시 자동 schema sync/migration</th>
+                <td>배제. 현재 저장소의 자동 schema 변경 금지와 충돌한다.</td>
+                <td>migration 도구·락·실패 복구·rollback을 별도 승인한 뒤</td>
+              </tr>
+              <tr>
+                <th scope="row">호스트와 컨테이너에서 같은 <code>.env</code>를 무조건 재사용</th>
+                <td>비권고. <code>DB_HOST</code>의 의미가 실행 위치에 따라 바뀐다.</td>
+                <td>Compose interpolation과 앱 env override를 명시적으로 검증해 혼동을 제거한 경우</td>
+              </tr>
+              <tr>
+                <th scope="row">컨테이너 내부에서 무제한 <code>npm install</code></th>
+                <td>비권고. lockfile 재현성과 startup 시간이 나빠진다.</td>
+                <td>개발 전용 bind mount 전략과 캐시를 별도 설계할 때</td>
+              </tr>
+              <tr>
+                <th scope="row">지금 바로 pgvector를 활성화</th>
+                <td>현재는 보류 권고. 코드·차원·migration이 없어 image 복잡성만 늘어난다.</td>
+                <td>임베딩 차원·extension migration·실제 query가 확정될 때</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="shared-understanding">
+          <h2>공유 이해 확인 · 확인됨</h2>
+          <p>
+            아래 내용은 G1~G6의 선택을 하나의 실행 계약으로 합친 요약이다. 사용자가 “ㅇㅇ”으로
+            공유 이해를 확인했고, 이후 “구현 ㄱㄱ”으로 이 기준선의 구현을 승인했다. 이 문서는
+            승인된 설계 baseline이며 as-built 사실은 구현 제어 문서에 기록한다.
+          </p>
+          <figure>
+            <figcaption>확정된 로컬 실행 흐름</figcaption>
+            <pre>1. docker compose up --build
+   ├─ db: 고정된 postgres:18, pg_isready healthcheck, named volume
+   └─ api: built JS runtime, DB_HOST=db, API_HOST=0.0.0.0
+
+2. batch가 필요할 때만 별도 one-shot 명령으로 databaseCheck 실행
+   └─ DB health 이후 실행, 성공 0 / 실패 1 유지
+
+3. schema가 바뀌어 기존 volume과 맞지 않으면 자동 변경하지 않음
+   └─ 데이터 보존을 확인한 뒤 명시적 reset 절차를 수행
+
+호스트 개발 보조 경로: docker compose up -d db → 호스트 npm 실행
+호스트 DB_HOST=127.0.0.1 / 컨테이너 DB_HOST=db</pre>
+            <p>
+              텍스트 등가: 기본 Compose 실행은 DB와 API를 지속 서비스로 올린다. batch는 서버처럼
+              계속 실행하지 않고 사용자가 필요할 때만 한 번 실행한다. PostgreSQL image는 빈 volume의
+              DB/user만 초기화하며 application table·migration·seed는 만들지 않는다. 일반 종료는
+              volume을 보존하고, reset만 데이터를 삭제할 수 있다.
+            </p>
+          </figure>
+          <table>
+            <caption>공유할 실행 계약</caption>
+            <thead>
+              <tr>
+                <th scope="col">항목</th>
+                <th scope="col">확정 내용</th>
+                <th scope="col">의도적으로 하지 않는 것</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">서비스</th>
+                <td>Compose의 기본 서비스는 <code>db</code>와 <code>api</code>다. batch는 one-shot 도구다.</td>
+                <td>batch를 API 재시작마다 자동 실행하거나 상시 scheduler로 만들지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">DB</th>
+                <td><code>postgres:18</code> local baseline, pgvector 후도입, named volume 보존</td>
+                <td><code>latest</code>, 자동 schema sync, migration, seed, init SQL</td>
+              </tr>
+              <tr>
+                <th scope="row">앱 image</th>
+                <td>Node 24 기반 multi-stage built runtime, production dependencies, non-root 실행</td>
+                <td>검증되지 않은 source bind mount와 watch 동작</td>
+              </tr>
+              <tr>
+                <th scope="row">연결·노출</th>
+                <td>container는 <code>DB_HOST=db</code>·<code>API_HOST=0.0.0.0</code>, host는 <code>DB_HOST=127.0.0.1</code>; publish는 loopback</td>
+                <td>host/container에서 같은 <code>DB_HOST</code>를 무조건 재사용하거나 외부 공개하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">상태 확인</th>
+                <td>DB healthcheck, API <code>/health</code>, batch <code>select 1</code>를 별도 검증</td>
+                <td>API <code>/health</code>가 DB readiness까지 보장한다고 약속하지 않는다.</td>
+              </tr>
+            </tbody>
+          </table>
+          <dl>
+            <dt>남은 가정</dt>
+            <dd>운영·CI PostgreSQL major는 아직 저장소에서 확인되지 않았다. 운영 기준이 발견되면 <code>postgres:18</code> local baseline과 호환성을 다시 검토한다.</dd>
+            <dt>후속 범위</dt>
+            <dd>업무 entity가 생기면 migration·seed·schema 검증을 별도 설계한다. 임베딩을 실제 저장하면 pgvector image·extension·차원·migration을 별도 설계한다.</dd>
+            <dt>잔여 위험</dt>
+            <dd>DB healthcheck는 애플리케이션 자격증명·업무 쿼리 성공을 보장하지 않는다. 기존 volume은 초기화 환경변수 변경을 재적용하지 않으며, major 변경은 단순 tag 교체로 처리하지 않는다.</dd>
+          </dl>
+        </section>
+
+        <section id="design-control-state">
+          <h2>설계 이해·통제 점검 · 확인 중</h2>
+          <p>
+            grilling과 공유 이해 확인이 끝났으므로, 선택된 토폴로지의 readiness·DB host·volume
+            초기화·실패 exit 동작을 예측하는 별도 self-check를 진행한다. 이 점검은 설계 선택이나
+            구현 승인과 다르다. 아래 질문은 현재 설계의 material coverage를 기준으로 생성했다.
+          </p>
+          <dl>
+            <dt>coverage ledger</dt>
+            <dd>목표/범위 → DC-01, material 결정 → DC-02, 불변식 → DC-03, 경계/상태 전이 → DC-04, 실패/복구 → DC-05, 외부 효과 → DC-06, 운영 관찰 → DC-07, 검증/잔여 위험 → DC-08.</dd>
+            <dt>활성 질문</dt>
+            <dd><code>DC-01</code> ~ <code>DC-08</code> · 한 번에 한 장씩 표시 · 답변 진행률을 보존한다.</dd>
+            <dt>답변 형식</dt>
+            <dd>HTML에서 각 질문을 선택하고 <strong>답변 제출</strong>을 누른다. 결과를 Codex에 전송할 필요는 없다.</dd>
+            <dt>상태</dt>
+            <dd>확인 중 — 사용자의 HTML self-check 결과는 이 대화로 전달되지 않았다. 이 상태는 informational이며, 명시적 설계 승인으로 구현을 시작한다.</dd>
+          </dl>
+
+          <div id="design-control-quiz">
+            <div class="quiz-progress">
+              <output id="design-control-progress" aria-live="polite">질문 1 / 8 · 제출 0 / 8</output>
+              <output id="design-control-overall" aria-live="polite">아직 제출된 답변이 없습니다.</output>
+            </div>
+
+            <section class="quizSlide is-active" data-question-id="DC-01">
+              <p class="question-meta">DC-01 · 목표/범위</p>
+              <fieldset>
+                <legend><strong><code>docker compose up --build</code> 직후 보장되는 상태는 무엇인가?</strong></legend>
+                <label><input type="radio" name="DC-01" value="a" /> DB·API·batch가 모두 계속 실행된다.</label>
+                <label><input type="radio" name="DC-01" value="b" /> DB·API가 실행되고 batch는 자동 실행되지 않으며, application schema도 자동 변경되지 않는다.</label>
+                <label><input type="radio" name="DC-01" value="c" /> DB가 시작될 때 migration과 seed가 자동 적용된다.</label>
+              </fieldset>
+              <div class="quiz-actions">
+                <button type="button" data-action="previous" disabled>이전</button>
+                <button type="button" data-action="submit">답변 제출</button>
+                <button type="button" data-action="next">다음</button>
+              </div>
+              <div class="quiz-result" hidden>
+                <p><strong>상태:</strong> <span data-result-status></span></p>
+                <p><strong>설명:</strong> <span data-result-explanation></span></p>
+                <p><strong>다음 행동:</strong> <span data-result-next-action></span></p>
+              </div>
+            </section>
+
+            <section class="quizSlide" data-question-id="DC-02">
+              <p class="question-meta">DC-02 · Material decisions</p>
+              <fieldset>
+                <legend><strong>기존 named volume의 schema가 새 코드와 맞지 않을 때 현재 설계의 동작은?</strong></legend>
+                <label><input type="radio" name="DC-02" value="a" /> Compose가 volume을 자동 삭제하고 새로 만든다.</label>
+                <label><input type="radio" name="DC-02" value="b" /> init SQL이 매번 재실행되어 schema를 자동 보정한다.</label>
+                <label><input type="radio" name="DC-02" value="c" /> 자동 변경·삭제하지 않고 상태를 확인한 뒤, 필요하면 명시적 reset을 수행한다.</label>
+              </fieldset>
+              <div class="quiz-actions">
+                <button type="button" data-action="previous">이전</button>
+                <button type="button" data-action="submit">답변 제출</button>
+                <button type="button" data-action="next">다음</button>
+              </div>
+              <div class="quiz-result" hidden>
+                <p><strong>상태:</strong> <span data-result-status></span></p>
+                <p><strong>설명:</strong> <span data-result-explanation></span></p>
+                <p><strong>다음 행동:</strong> <span data-result-next-action></span></p>
+              </div>
+            </section>
+
+            <section class="quizSlide" data-question-id="DC-03">
+              <p class="question-meta">DC-03 · 불변식</p>
+              <fieldset>
+                <legend><strong>컨테이너 API와 호스트에서 실행하는 Node 프로세스의 DB host 매핑은?</strong></legend>
+                <label><input type="radio" name="DC-03" value="a" /> 컨테이너는 <code>db</code>, 호스트 프로세스는 publish된 <code>127.0.0.1</code>을 사용한다.</label>
+                <label><input type="radio" name="DC-03" value="b" /> 둘 다 항상 <code>db</code>를 사용한다.</label>
+                <label><input type="radio" name="DC-03" value="c" /> 컨테이너는 항상 <code>127.0.0.1</code>을 사용한다.</label>
+              </fieldset>
+              <div class="quiz-actions">
+                <button type="button" data-action="previous">이전</button>
+                <button type="button" data-action="submit">답변 제출</button>
+                <button type="button" data-action="next">다음</button>
+              </div>
+              <div class="quiz-result" hidden>
+                <p><strong>상태:</strong> <span data-result-status></span></p>
+                <p><strong>설명:</strong> <span data-result-explanation></span></p>
+                <p><strong>다음 행동:</strong> <span data-result-next-action></span></p>
+              </div>
+            </section>
+
+            <section class="quizSlide" data-question-id="DC-04">
+              <p class="question-meta">DC-04 · 경계/상태 전이</p>
+              <fieldset>
+                <legend><strong>DB healthcheck, API <code>/health</code>, batch <code>databaseCheck</code>의 관계는?</strong></legend>
+                <label><input type="radio" name="DC-04" value="a" /> DB health가 healthy면 API의 모든 DB 업무 쿼리도 성공한다고 본다.</label>
+                <label><input type="radio" name="DC-04" value="b" /> DB health는 DB readiness, API <code>/health</code>는 process liveness, batch는 실제 <code>select 1</code> 연결 확인으로 분리한다.</label>
+                <label><input type="radio" name="DC-04" value="c" /> API <code>/health</code>만 확인하면 DB healthcheck와 batch 검증은 필요 없다.</label>
+              </fieldset>
+              <div class="quiz-actions">
+                <button type="button" data-action="previous">이전</button>
+                <button type="button" data-action="submit">답변 제출</button>
+                <button type="button" data-action="next">다음</button>
+              </div>
+              <div class="quiz-result" hidden>
+                <p><strong>상태:</strong> <span data-result-status></span></p>
+                <p><strong>설명:</strong> <span data-result-explanation></span></p>
+                <p><strong>다음 행동:</strong> <span data-result-next-action></span></p>
+              </div>
+            </section>
+
+            <section class="quizSlide" data-question-id="DC-05">
+              <p class="question-meta">DC-05 · 실패/복구</p>
+              <fieldset>
+                <legend><strong>DB가 내려간 상태에서 batch <code>databaseCheck</code>가 실패하면?</strong></legend>
+                <label><input type="radio" name="DC-05" value="a" /> batch는 성공 code 0을 반환하고 무한 재시도한다.</label>
+                <label><input type="radio" name="DC-05" value="b" /> Compose가 volume을 삭제한 뒤 batch를 자동 재실행한다.</label>
+                <label><input type="radio" name="DC-05" value="c" /> batch는 실패 code 1과 실패 로그를 남기며, DB가 healthy해진 뒤 명시적으로 재실행한다.</label>
+              </fieldset>
+              <div class="quiz-actions">
+                <button type="button" data-action="previous">이전</button>
+                <button type="button" data-action="submit">답변 제출</button>
+                <button type="button" data-action="next">다음</button>
+              </div>
+              <div class="quiz-result" hidden>
+                <p><strong>상태:</strong> <span data-result-status></span></p>
+                <p><strong>설명:</strong> <span data-result-explanation></span></p>
+                <p><strong>다음 행동:</strong> <span data-result-next-action></span></p>
+              </div>
+            </section>
+
+            <section class="quizSlide" data-question-id="DC-06">
+              <p class="question-meta">DC-06 · 외부 효과/권한</p>
+              <fieldset>
+                <legend><strong>로컬 port와 환경변수의 안전한 기본 경계는?</strong></legend>
+                <label><input type="radio" name="DC-06" value="a" /> 필요한 env만 명시적으로 전달하고, API·DB port는 host loopback에 publish하며 실제 비밀은 image에 넣지 않는다.</label>
+                <label><input type="radio" name="DC-06" value="b" /> 편의를 위해 <code>.env</code> 전체를 image에 복사하고 모든 host interface에 publish한다.</label>
+                <label><input type="radio" name="DC-06" value="c" /> password를 Dockerfile <code>ARG</code>에 넣으면 image layer에 남지 않는다.</label>
+              </fieldset>
+              <div class="quiz-actions">
+                <button type="button" data-action="previous">이전</button>
+                <button type="button" data-action="submit">답변 제출</button>
+                <button type="button" data-action="next">다음</button>
+              </div>
+              <div class="quiz-result" hidden>
+                <p><strong>상태:</strong> <span data-result-status></span></p>
+                <p><strong>설명:</strong> <span data-result-explanation></span></p>
+                <p><strong>다음 행동:</strong> <span data-result-next-action></span></p>
+              </div>
+            </section>
+
+            <section class="quizSlide" data-question-id="DC-07">
+              <p class="question-meta">DC-07 · 운영 관찰</p>
+              <fieldset>
+                <legend><strong>정상 종료와 reset에서 named volume은 어떻게 처리되는가?</strong></legend>
+                <label><input type="radio" name="DC-07" value="a" /> 일반 <code>docker compose down</code>도 항상 volume을 삭제한다.</label>
+                <label><input type="radio" name="DC-07" value="b" /> 일반 종료·재생성에서는 volume을 보존하고, 데이터 삭제는 사용자가 인지한 명시적 reset에서만 수행한다.</label>
+                <label><input type="radio" name="DC-07" value="c" /> PostgreSQL image 환경변수를 바꾸면 기존 volume도 자동 재초기화된다.</label>
+              </fieldset>
+              <div class="quiz-actions">
+                <button type="button" data-action="previous">이전</button>
+                <button type="button" data-action="submit">답변 제출</button>
+                <button type="button" data-action="next">다음</button>
+              </div>
+              <div class="quiz-result" hidden>
+                <p><strong>상태:</strong> <span data-result-status></span></p>
+                <p><strong>설명:</strong> <span data-result-explanation></span></p>
+                <p><strong>다음 행동:</strong> <span data-result-next-action></span></p>
+              </div>
+            </section>
+
+            <section class="quizSlide" data-question-id="DC-08">
+              <p class="question-meta">DC-08 · 검증/잔여 위험</p>
+              <fieldset>
+                <legend><strong>이 설계를 실제로 검증하는 최소 조합은?</strong></legend>
+                <label><input type="radio" name="DC-08" value="a" /> Compose config/build, DB health와 batch의 실제 연결, API <code>/health</code> 및 기존 local gate를 각각 확인한다.</label>
+                <label><input type="radio" name="DC-08" value="b" /> Docker CLI가 설치되어 있다는 사실만 확인하면 충분하다.</label>
+                <label><input type="radio" name="DC-08" value="c" /> API <code>/health</code>가 200이면 DB·batch·volume 보존도 검증된 것으로 간주한다.</label>
+              </fieldset>
+              <div class="quiz-actions">
+                <button type="button" data-action="previous">이전</button>
+                <button type="button" data-action="submit">답변 제출</button>
+                <button type="button" data-action="next" disabled>다음</button>
+              </div>
+              <div class="quiz-result" hidden>
+                <p><strong>상태:</strong> <span data-result-status></span></p>
+                <p><strong>설명:</strong> <span data-result-explanation></span></p>
+                <p><strong>다음 행동:</strong> <span data-result-next-action></span></p>
+              </div>
+            </section>
+
+            <noscript>
+              <p>
+                JavaScript가 꺼져 있으면 질문 카드가 모두 표시됩니다. 답변 결과를 계산하려면 브라우저에서
+                JavaScript를 켜세요.
+              </p>
+            </noscript>
+          </div>
+        </section>
+
+        <section id="approval-state">
+          <h2>승인 상태 · 설계 승인됨</h2>
+          <p>
+            G1~G6의 material frontier와 공유 이해 확인이 완료되었고, 사용자가 “구현 ㄱㄱ”으로
+            승인했다. 구현 진행·이슈·검증 증거는 연결된 구현 제어 문서에서 관리한다.
+          </p>
+          <p class="status">승인 범위: Dockerfile·compose.yaml·.dockerignore 생성 및 README 로컬 실행 문서 갱신 · 승인: 2026-09-13</p>
+        </section>
+      </article>
+    </main>
+    <script>
+      (() => {
+        const quiz = document.querySelector('#design-control-quiz');
+        if (!quiz) return;
+
+        const slides = Array.from(quiz.querySelectorAll('.quizSlide'));
+        const progress = document.querySelector('#design-control-progress');
+        const overall = document.querySelector('#design-control-overall');
+        const correctAnswers = {
+          'DC-01': 'b',
+          'DC-02': 'c',
+          'DC-03': 'a',
+          'DC-04': 'b',
+          'DC-05': 'c',
+          'DC-06': 'a',
+          'DC-07': 'b',
+          'DC-08': 'a',
+        };
+        const explanations = {
+          'DC-01': '기본 Compose 흐름은 DB와 API를 지속 실행하며, batch·schema 변경은 자동으로 포함하지 않는다.',
+          'DC-02': '기존 volume을 자동 삭제하거나 보정하지 않는다. 데이터 확인 후 명시적 reset을 선택해야 한다.',
+          'DC-03': 'Compose network의 service name은 container에서만 해석되며, 호스트 프로세스는 publish된 loopback port를 사용한다.',
+          'DC-04': '각 상태는 다른 경계를 검사한다. 특히 API health는 DB 업무 쿼리 성공을 보장하지 않는다.',
+          'DC-05': 'batch의 실패 code와 로그를 보존하고, 의존성이 회복된 뒤 운영자가 명시적으로 재실행한다.',
+          'DC-06': '필요한 env만 전달하고 local loopback으로 노출한다. 비밀은 source·image layer에 저장하지 않는다.',
+          'DC-07': 'named volume은 일반 종료에서 보존된다. 초기화가 필요할 때만 대상을 확인하고 reset한다.',
+          'DC-08': '설정·build·DB readiness·실제 query·HTTP·기존 gate를 서로 독립적인 증거로 확인해야 한다.',
+        };
+        const nextActions = {
+          'DC-01': '다음 질문에서 schema·batch 경계를 확인한다.',
+          'DC-02': 'reset은 데이터 보존 여부를 확인한 뒤에만 수행한다.',
+          'DC-03': '실행 위치에 맞는 DB_HOST를 선택한다.',
+          'DC-04': 'DB health·API health·batch 결과를 검증 기록에서 분리한다.',
+          'DC-05': 'DB 회복을 확인한 뒤 batch를 한 번만 재실행한다.',
+          'DC-06': 'Compose env 매핑과 publish 주소를 실제 config에서 확인한다.',
+          'DC-07': 'volume을 삭제하는 reset 명령에는 데이터 삭제 경고를 둔다.',
+          'DC-08': '점검 결과와 무관하게 다음 단계에서 별도 구현 승인을 판단한다.',
+        };
+        const submitted = new Set();
+        let currentIndex = 0;
+
+        document.body.classList.add('enhanced');
+
+        function currentAnswer(slide) {
+          return slide.querySelector('input[type="radio"]:checked')?.value;
+        }
+
+        function render() {
+          slides.forEach((slide, index) => {
+            slide.classList.toggle('is-active', index === currentIndex);
+          });
+          progress.textContent = `질문 ${currentIndex + 1} / ${slides.length} · 제출 ${submitted.size} / ${slides.length}`;
+          overall.textContent = submitted.size === slides.length
+            ? '모든 질문이 이 브라우저에서 제출되었습니다. 결과는 Codex에 자동 전달되지 않습니다.'
+            : `제출된 답변 ${submitted.size} / ${slides.length}`;
+          slides.forEach((slide, index) => {
+            slide.querySelector('[data-action="previous"]').disabled = index === 0;
+            slide.querySelector('[data-action="next"]').disabled = index === slides.length - 1;
+          });
+        }
+
+        function submit(slide) {
+          const id = slide.dataset.questionId;
+          const answer = currentAnswer(slide);
+          const result = slide.querySelector('.quiz-result');
+          const status = slide.querySelector('[data-result-status]');
+          const explanation = slide.querySelector('[data-result-explanation]');
+          const nextAction = slide.querySelector('[data-result-next-action]');
+
+          result.hidden = false;
+          if (!answer) {
+            status.textContent = '미실시';
+            explanation.textContent = '선택된 답변이 없습니다.';
+            nextAction.textContent = '선택지를 고른 뒤 다시 제출하세요.';
+            submitted.delete(id);
+          } else {
+            submitted.add(id);
+            const established = answer === correctAnswers[id];
+            status.textContent = established ? '확립' : '보류';
+            explanation.textContent = established
+              ? explanations[id]
+              : '선택한 답변으로는 이 설계의 핵심 동작을 예측하기 어렵습니다. 설계 요약을 다시 확인하세요.';
+            nextAction.textContent = established
+              ? nextActions[id]
+              : '해당 질문의 설계 요약을 다시 읽고 답변을 바꿔 제출하세요.';
+          }
+          render();
+        }
+
+        quiz.addEventListener('click', (event) => {
+          const button = event.target.closest('button[data-action]');
+          if (!button) return;
+          const slide = button.closest('.quizSlide');
+          const action = button.dataset.action;
+          if (action === 'previous' && currentIndex > 0) currentIndex -= 1;
+          if (action === 'next' && currentIndex < slides.length - 1) currentIndex += 1;
+          if (action === 'submit') submit(slide);
+          render();
+        });
+
+        render();
+      })();
+    </script>
+  </body>
+</html>
