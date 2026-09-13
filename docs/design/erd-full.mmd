@@ -8,6 +8,7 @@ erDiagram
  issues ||--o{ issue_entities : mentions
  entities ||--o{ issue_entities : identifies
  issues ||--o| issue_embeddings : vector
+ issues ||--o| issue_embedding_tasks : embedding_repair
  issues ||--o{ issue_relations : previous
  issues ||--o{ issue_relations : following
  users ||--o{ refresh_sessions : sessions
@@ -96,6 +97,25 @@ erDiagram
   text input_hash "NOT NULL"
   timestamptz embedded_at "NOT NULL"
  }
+ issue_embedding_tasks {
+  uuid id PK "NOT NULL"
+  uuid issue_id FK,UK "NOT NULL"
+  uuid pipeline_run_id FK "NOT NULL"
+  uuid issue_content_job_id FK "NOT NULL"
+  int run_attempt "NOT NULL"
+  uuid run_execution_id "NULL; publication execution provenance"
+  text input_hash "NOT NULL"
+  text model "NOT NULL"
+  text status "NOT NULL"
+  int attempt_count "NOT NULL"
+  text last_error "NULL"
+  uuid claim_token "NULL; RUNNING only"
+  uuid claimed_by_process_execution_id "NULL; RUNNING only"
+  timestamptz claimed_at "NULL; RUNNING only"
+  timestamptz completed_at "NULL"
+  timestamptz created_at "NOT NULL"
+  timestamptz updated_at "NOT NULL"
+ }
  issue_relations {
   uuid from_issue_id PK,FK "NOT NULL"
   uuid to_issue_id PK,FK "NOT NULL"
@@ -168,8 +188,13 @@ erDiagram
  }
  ai_usage_records {
   uuid id PK "NOT NULL"
+  uuid pipeline_run_id FK "NULL"
   uuid issue_content_job_id FK "NULL"
+  int run_attempt "NOT NULL"
   text operation "NOT NULL"
+  text purpose "NOT NULL"
+  text prompt_version "NULL"
+  text prompt_hash "NULL"
   text provider "NOT NULL"
   text status "NOT NULL"
   text model "NULL"

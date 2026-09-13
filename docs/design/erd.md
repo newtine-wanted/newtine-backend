@@ -2,6 +2,10 @@
 
 상단 Notion 컬럼 명세 기준 19개 테이블이다. article_discoveries는 도입 검토 중인 선택 테이블이다. 이 문서는 DDL이 아니며 DB에 제약을 생성하지 않는다.
 
+> **파이프라인 구현 오버레이(v1.3)**: 이 문서의 19개 테이블 설명은 원본 ERD 기록으로 보존한다. 현재 이슈·기사 콘텐츠 생성 파이프라인의 실행 기준은 [기본 migration](../../libs/core/src/common/database/migration/202609130001_pipeline.sql), [embedding task migration](../../libs/core/src/common/database/migration/202609130002_pipeline_embedding_tasks.sql)과 [구현 제어 문서](issue-content-pipeline-implementation.html)다. 해당 범위에서는 `issue_categories.code` 참조, `issue_seed_articles`, `pipeline_runs`, `issue_content_jobs`, `ai_usage_records`의 run 귀속, `issue_embeddings vector(1536)`, 공개 후 보완을 위한 `issue_embedding_tasks`를 사용하며 기사 본문·프롬프트·원시 응답은 저장하지 않는다. `articles.article_url` 원문은 유지하고 애플리케이션 비교 단계에서만 URL을 정규화한다. 전체 ERD를 갱신할 때 이 오버레이를 본문 표로 승격한다.
+
+Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 `RUNNING`일 때만 claim token·process ID·claim 시각을 가진다. 시간 기반 takeover 없이 종료 확인된 process ID를 운영자가 명시적으로 재큐잉한다.
+
 ## 표기
 
 - PK: 기본키, FK: 외래키, UK: 단일 UNIQUE. 복합 UNIQUE는 각 설명을 따른다.
@@ -31,13 +35,13 @@
 
 ## 02. articles
 
-보도 메타데이터. 정규화한 article_url로 중복 방지. 타 언론사 전재는 별도 기사이며 독립 근거인지는 별도 판단한다.
+보도 메타데이터. 공급자 원문 article_url은 그대로 보존하고 애플리케이션 비교 단계에서만 정규화해 중복을 줄인다. 타 언론사 전재는 별도 기사이며 독립 근거인지는 별도 판단한다.
 
 | 컬럼 | 타입 | 키 | NULL | 기본값 | 허용값·참조·비고 |
 | --- | --- | --- | --- | --- | --- |
 | id | uuid | PK | 불가 | — | — |
 | publisher_id | uuid | FK | 불가 | — | publishers.id |
-| article_url | text | UK | 불가 | — | — |
+| article_url | text | UK | 불가 | — | 공급자 원문 유지. 중복 비교는 애플리케이션 URL normalizer 사용 |
 | title | text | — | 불가 | — | — |
 | description | text | — | 허용 | — | — |
 | reporter | text | — | 허용 | — | — |
@@ -262,8 +266,13 @@
 | 컬럼 | 타입 | 키 | NULL | 기본값 | 허용값·참조·비고 |
 | --- | --- | --- | --- | --- | --- |
 | id | uuid | PK | 불가 | — | — |
+| pipeline_run_id | uuid | FK | 허용 | — | pipeline_runs.id, 실행 귀속 |
 | issue_content_job_id | uuid | FK | 허용 | — | issue_content_jobs.id |
+| run_attempt | integer | — | 불가 | — | 1 이상 |
 | operation | text | — | 불가 | — | SEARCH / FETCH / EMBED / LLM |
+| purpose | text | — | 불가 | — | 호출 목적 |
+| prompt_version | text | — | 허용 | — | 단계 ID@version; 비LLM은 NULL |
+| prompt_hash | text | — | 허용 | — | immutable prompt hash; 원문 저장 없음 |
 | provider | text | — | 불가 | — | — |
 | status | text | — | 불가 | — | RUNNING / SUCCEEDED / FAILED / UNKNOWN |
 | model | text | — | 허용 | — | SEARCH/FETCH 또는 모델 정보 미확인 시 NULL 가능 |
@@ -290,6 +299,7 @@ erDiagram
  issues ||--o{ issue_entities : mentions
  entities ||--o{ issue_entities : identifies
  issues ||--o| issue_embeddings : vector
+ issues ||--o| issue_embedding_tasks : embedding_repair
  issues ||--o{ issue_relations : previous
  issues ||--o{ issue_relations : following
 ```
