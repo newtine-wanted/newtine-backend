@@ -12,6 +12,11 @@ const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post
 const EXPECTED_FAILURE_STATUSES = {
   '/issues/search': ['400', '413', '500'],
   '/health': ['500'],
+  '/onboarding/options': ['500'],
+  '/onboarding/entities': ['400', '500'],
+  '/me/onboarding': ['401', '500'],
+  '/me/onboarding/complete': ['400', '401', '500'],
+  '/me/onboarding/skip': ['401', '500'],
 };
 const requiredFiles = [
   'api/index.ts',

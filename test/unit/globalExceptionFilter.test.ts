@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from '@jest/globals';
 
 import type { PinoLogger } from 'nestjs-pino';
-import { BadRequestException, HttpException, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  InternalServerErrorException,
+  UnauthorizedException,
+} from '@nestjs/common';
 
 import { DomainException, IssueException, IssueExceptionCode } from '@newtine/core';
 import { GlobalExceptionFilter } from '@newtine/api/common/filter/globalExceptionFilter.js';
@@ -146,6 +151,20 @@ test('GlobalExceptionFilter keeps validation failures within the four-field cont
     status: 400,
     detail: '요청 값이 올바르지 않습니다.',
     code: 'INVALID_ARGUMENT',
+  });
+});
+
+test('GlobalExceptionFilter maps missing authentication to the standard unauthorized error', () => {
+  const filter = createFilter();
+  const { state, host } = createHost();
+
+  filter.catch(new UnauthorizedException(), host as never);
+
+  assert.deepEqual(state.body, {
+    title: 'Unauthorized',
+    status: 401,
+    detail: '요청을 처리할 수 없습니다.',
+    code: 'UNAUTHORIZED',
   });
 });
 
