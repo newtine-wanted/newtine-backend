@@ -70,11 +70,11 @@ function get(path) {
   });
 }
 
-function postJson(path, payload) {
-  return postRawJson(path, JSON.stringify(payload));
+function postJson(path, payload, headers = {}) {
+  return postRawJson(path, JSON.stringify(payload), headers);
 }
 
-function postRawJson(path, body) {
+function postRawJson(path, body, headers = {}) {
   return new Promise((resolve, reject) => {
     if (!apiPort) {
       reject(new Error('API port is not known yet'));
@@ -90,6 +90,7 @@ function postRawJson(path, body) {
         headers: {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(body),
+          ...headers,
         },
       },
       (response) => {
@@ -174,6 +175,44 @@ try {
   const searchBody = JSON.parse(search.body);
   assert.equal(searchBody.query, '파일럿');
   assert.ok(Array.isArray(searchBody.items));
+
+  const feedSession = await postJson('/feed-sessions', {});
+  assert.equal(feedSession.response.statusCode, 200);
+  const feedSessionBody = JSON.parse(feedSession.body);
+  assert.match(
+    feedSessionBody.sessionId,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
+  assert.match(feedSessionBody.guestKey, /^[A-Za-z0-9_-]{40,}$/);
+  assert.equal(feedSessionBody.nextBatchNo, 0);
+  const missingGuestProof = await postJson(`/feed-sessions/${feedSessionBody.sessionId}/batches`, {
+    batchNo: 0,
+  });
+  assert.equal(missingGuestProof.response.statusCode, 400);
+  const firstBatch = await postJson(
+    `/feed-sessions/${feedSessionBody.sessionId}/batches`,
+    {
+      batchNo: 0,
+    },
+    { 'x-feed-guest-key': feedSessionBody.guestKey },
+  );
+  assert.equal(firstBatch.response.statusCode, 200);
+  const firstBatchBody = JSON.parse(firstBatch.body);
+  assert.equal(firstBatchBody.batchNo, 0);
+  assert.ok(Array.isArray(firstBatchBody.items));
+  assert.equal(firstBatchBody.continuation, 'EXHAUSTED');
+  const retriedBatch = await postJson(
+    `/feed-sessions/${feedSessionBody.sessionId}/batches`,
+    {
+      batchNo: 0,
+    },
+    { 'x-feed-guest-key': feedSessionBody.guestKey },
+  );
+  assert.equal(retriedBatch.response.statusCode, 200);
+  assert.deepEqual(
+    JSON.parse(retriedBatch.body).items.map((item) => item.issueId),
+    firstBatchBody.items.map((item) => item.issueId),
+  );
 
   const invalidSearch = await postJson('/issues/search', { query: '', unexpected: true });
   assert.equal(invalidSearch.response.statusCode, 400);
@@ -261,7 +300,7 @@ try {
   );
 
   console.log(
-    'API smoke passed: health, search, four-field failures, parser 400/413, JSON logs, and request ID correlation',
+    'API smoke passed: health, search, feed session/batch retry, four-field failures, parser 400/413, JSON logs, and request ID correlation',
   );
 } finally {
   await stopApi();

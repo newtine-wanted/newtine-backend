@@ -11,6 +11,9 @@ const generatedRoot = join(root, 'generated');
 const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace']);
 const EXPECTED_FAILURE_STATUSES = {
   '/issues/search': ['400', '413', '500'],
+  '/issues/{issueId}': ['400', '404', '500'],
+  '/feed-sessions': ['400', '500'],
+  '/feed-sessions/{sessionId}/batches': ['400', '404', '409', '410', '500'],
   '/health': ['500'],
 };
 const requiredFiles = [

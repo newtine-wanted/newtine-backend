@@ -5,6 +5,7 @@ import {
   createLoggerOptions,
   DEFAULT_HTTP_SLOW_THRESHOLD_MS,
   isUuidV7,
+  loggingRedactPaths,
   LoggingConfigurationException,
   resolveHttpSlowThreshold,
   resolveLogLevel,
@@ -23,6 +24,8 @@ test('logging configuration uses safe defaults and validates values', () => {
   assert.equal(typeof requestId, 'string');
   assert.equal(isUuidV7(String(requestId)), true);
   assert.notEqual(requestId, 'client-value');
+  assert.ok(loggingRedactPaths.includes('req.headers.x-feed-guest-key'));
+  assert.ok(loggingRedactPaths.includes('request.headers.x-feed-guest-key'));
 });
 
 test('logging configuration rejects invalid level and slow threshold', () => {
