@@ -1,4 +1,4 @@
-import { IssueExceptionCode } from '@newtine/core';
+import { IssueExceptionCode, PipelineExceptionCode } from '@newtine/core';
 import type { DomainException } from '@newtine/core';
 
 import {
@@ -9,6 +9,15 @@ import {
 const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionSpec>> = {
   issue: {
     [IssueExceptionCode.NotFound]: ApiException.NotFound,
+  },
+  pipeline: {
+    [PipelineExceptionCode.InvalidInput]: ApiException.InvalidArgument,
+    [PipelineExceptionCode.RunNotFound]: ApiException.NotFound,
+    [PipelineExceptionCode.IdempotencyConflict]: ApiException.Conflict,
+    [PipelineExceptionCode.ActiveRunConflict]: ApiException.Conflict,
+    [PipelineExceptionCode.StaleAttempt]: ApiException.Conflict,
+    [PipelineExceptionCode.RetryNotAllowed]: ApiException.Conflict,
+    [PipelineExceptionCode.ClaimConflict]: ApiException.Conflict,
   },
 };
 

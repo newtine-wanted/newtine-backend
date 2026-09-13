@@ -12,11 +12,18 @@ const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post
 const EXPECTED_FAILURE_STATUSES = {
   '/issues/search': ['400', '413', '500'],
   '/health': ['500'],
+  '/pipeline/runs': ['400', '409', '500'],
+  '/pipeline/runs/{runId}': ['404', '500'],
+  '/pipeline/runs/{runId}/retry': ['400', '404', '409', '500'],
+  '/pipeline/runs/{runId}/interrupt': ['400', '404', '409', '500'],
 };
 const requiredFiles = [
   'api/index.ts',
   'e2e/features/api/automated/test_api_health_getHealth.ts',
   'e2e/features/api/automated/test_api_issues_search.ts',
+  'api/functional/pipeline/runs/index.ts',
+  'e2e/features/api/automated/test_api_pipeline_runs_create.ts',
+  'e2e/features/api/automated/test_api_pipeline_runs_interrupt.ts',
   'openapi.json',
 ];
 
@@ -33,6 +40,21 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   const schemas = document.components?.schemas;
   const problemDetails = schemas?.ProblemDetails;
   assert.ok(problemDetails, 'ProblemDetails schema is required');
+
+  const pipelineCreate = schemas?.PipelineRunCreateRequest;
+  assert.deepEqual(Object.keys(pipelineCreate?.properties ?? {}), ['query']);
+  assert.equal(schemas?.PipelineRunLimitsRequest, undefined);
+
+  const retrySchema =
+    document.paths?.['/pipeline/runs/{runId}/retry']?.post?.requestBody?.content?.[
+      'application/json'
+    ]?.schema;
+  assert.deepEqual(retrySchema?.discriminator?.propertyName, 'scope');
+  const contentSchemaName = retrySchema?.discriminator?.mapping?.CONTENT?.split('/').pop();
+  const discoverySchemaName = retrySchema?.discriminator?.mapping?.DISCOVERY?.split('/').pop();
+  assert.ok(contentSchemaName && discoverySchemaName);
+  assert.ok(schemas?.[contentSchemaName]?.required?.includes('failedJobIds'));
+  assert.equal(schemas?.[discoverySchemaName]?.required?.includes('failedJobIds'), false);
 
   assert.deepEqual(Object.keys(problemDetails.properties ?? {}).sort(), [
     'code',
