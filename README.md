@@ -45,6 +45,19 @@ NODE_ENV=development npm run start:batch -- databaseCheck
 `databaseCheck`는 연결 확인에 성공하면 0, 작업명 오류나 연결 실패가 발생하면 1로 종료합니다.
 초기 골격은 스키마를 자동으로 생성하거나 수정하지 않습니다.
 
+온보딩 persistence delta는 기존 base schema가 있는 PostgreSQL에 명시적으로 적용합니다.
+
+```bash
+npm run db:migrate
+```
+
+이 migration은 `users`, `entities`, `issue_categories`, 기존 preference table이 이미 존재한다는
+전제에서 연령·topic code·지역 선호와 제약을 추가합니다. 빈 DB의 전체 ERD를 생성하거나 운영용
+인물·정당·기관 master를 넣지는 않습니다.
+
+seed와 사용자 선호를 되돌리는 `db:migrate:down`은 데이터 삭제를 자동으로 수행하지 않도록
+차단되어 있습니다. 롤백은 별도 데이터 검토와 전용 migration으로 진행합니다.
+
 ## 환경 변수
 
 `.env` 파일은 자동으로 읽지 않습니다. 셸이나 실행 환경에서 주입하거나 Node.js의 env-file
@@ -81,6 +94,7 @@ DB 기본값은 `NODE_ENV=development` 또는 `test`일 때만 적용됩니다. 
 | `npm test`                             | unit·integration 테스트                        |
 | `npm run test:contracts`               | 생성 계약 테스트                               |
 | `npm run test:smoke`                   | 빌드된 API의 실제 HTTP 동작 확인               |
+| `npm run db:migrate`                    | 기존 base schema에 온보딩 delta migration 적용  |
 | `npm run contracts:all`                | SDK·e2e·OpenAPI 생성                           |
 | `npm run contracts:check`              | 계약 재생성, 계약 테스트, 생성 TypeScript 검사 |
 | `npm run typecheck:generated`          | 생성 TypeScript만 검사                         |
@@ -121,6 +135,7 @@ apps/
     common/                 HTTP 예외·필터·middleware
     health/                 프로세스 확인 endpoint
     issue/                  issue HTTP feature와 type
+    onboarding/             온보딩 HTTP feature와 principal seam
     main.ts
     api.module.ts
   batch/src/
@@ -130,6 +145,7 @@ apps/
     batch.module.ts
 libs/core/src/
   issue/                    issue domain과 repository 경계
+  onboarding/               온보딩 domain·PostgreSQL adapter·migration
   article/                  article domain과 repository 위치
   common/                   entity·exception·id·database·logging·transaction
   core.module.ts            공통 adapter 조립

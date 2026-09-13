@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="온보딩 API의 PostgreSQL 영속화 경계와 migration 계약 확정" />
+    <meta name="audience" content="NEWTINE 백엔드 개발자와 기획 결정자" />
+    <meta
+      name="problem"
+      content="reference in-memory adapter를 실제 users·entities·선호 테이블과 원자적으로 연결"
+    />
+    <meta
+      name="core-flow"
+      content="기존 기준선 확인 → schema delta 결정 → ORM/migration 결정 → repository adapter 구현 → DB 검증"
+    />
+    <title>온보딩 PostgreSQL 영속화 설계 · 승인 대기</title>
+    <style>
+      :root {
+        font-family: system-ui, sans-serif;
+        color: #172b36;
+        background: #f2f5f7;
+        line-height: 1.7;
+      }
+      body {
+        max-width: 1080px;
+        margin: auto;
+        padding: 28px;
+      }
+      header,
+      section {
+        background: #fff;
+        border: 1px solid #d9e3e8;
+        border-radius: 12px;
+        padding: 24px;
+        margin: 18px 0;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      h1 {
+        font-size: 30px;
+      }
+      h2 {
+        font-size: 22px;
+      }
+      h3 {
+        font-size: 18px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        border: 1px solid #cbd8df;
+        padding: 9px;
+        text-align: left;
+        vertical-align: top;
+      }
+      caption {
+        text-align: left;
+        font-weight: 700;
+        margin: 10px 0;
+      }
+      dt {
+        font-weight: 700;
+      }
+      dd {
+        margin: 0 0 10px;
+      }
+      aside {
+        padding: 14px;
+        background: #fff4db;
+        border-left: 4px solid #cc8700;
+      }
+      .state {
+        color: #885900;
+        font-weight: 700;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      .control-result {
+        margin-top: 8px;
+        padding: 8px;
+        background: #eef7fa;
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>설계 기준선 · 2026-09-13 · <strong class="state">설계 승인됨</strong></p>
+      <h1>온보딩 PostgreSQL 영속화</h1>
+      <p>
+        <a href="onboarding-api-design.html">승인된 온보딩 API 설계</a>와 현재 reference adapter를
+        실제 PostgreSQL 데이터 모델에 연결하기 위한 후속 설계다. 소셜 로그인·토큰 발급은 계속
+        제외하며, principal은 기존 seam을 사용한다.
+      </p>
+      <dl>
+        <dt>목적</dt>
+        <dd>온보딩 API의 PostgreSQL 영속화 경계와 migration 계약 확정</dd>
+        <dt>사용자</dt>
+        <dd>NEWTINE 백엔드 개발자와 기획 결정자</dd>
+        <dt>문제</dt>
+        <dd>프로세스 재시작 시 사라지는 reference state를 기존 users·entities·선호 모델에 연결</dd>
+        <dt>핵심 흐름</dt>
+        <dd>기존 기준선 확인 → schema delta 결정 → ORM/migration 결정 → adapter 구현 → DB 검증</dd>
+      </dl>
+    </header>
+
+    <main>
+      <section id="current-state">
+        <h2>설계 시점 확인 상태</h2>
+        <ul>
+          <li>현재 API 계약, 상태 전이, 가중치 규칙은 <code>onboarding-api-design.html</code>에 승인되어 있다.</li>
+          <li><code>CoreModule</code>의 MikroORM 설정은 <code>entities: []</code>, <code>ensureDatabase: false</code>다.</li>
+          <li>migration 명령과 업무 ORM entity가 아직 없다.</li>
+          <li>로컬 ERD에는 <code>users</code>, <code>entities</code>, <code>issue_categories</code>,
+            <code>user_category_preferences</code>, <code>user_entity_preferences</code>가 있다.</li>
+          <li>승인된 G9-B 지역 선호는 ERD에 없어서 새 master와 사용자 선호 관계가 필요하다.</li>
+        </ul>
+        <aside>
+          이 문서는 기존 API의 재설계가 아니다. 영속화가 API 결과와 상태 불변식을 바꾸면 이 기준선을
+          폐기하고 API 설계 승인을 다시 받아야 한다.
+        </aside>
+        <p>
+          구현 결과와 검증 공백은 <a href="onboarding-api-implementation.html">온보딩 API 구현 제어</a>에
+          기록한다. 현재 구현은 delta migration을 제공하지만 base migration과 실제 PostgreSQL 실행
+          환경이 없으므로 운영 활성화 상태로 해석하지 않는다.
+        </p>
+      </section>
+
+      <section id="proposed-model">
+        <h2>제안하는 schema delta</h2>
+        <table>
+          <caption>기존 ERD와 승인된 온보딩 결정을 연결하는 변경</caption>
+          <thead>
+            <tr><th>대상</th><th>변경</th><th>불변식</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>users</code></td>
+              <td><code>age_group</code> nullable, <code>onboarding_status</code>와
+                <code>onboarding_completed_at</code>는 기존 컬럼을 사용</td>
+              <td>PENDING만 최초 complete/skip 전이. 완료 시각은 complete에서만 기록.</td>
+            </tr>
+            <tr>
+              <td><code>issue_categories</code></td>
+              <td><code>code</code> unique와 <code>display_order</code>를 추가하고 승인된 12개 topic seed를 적재</td>
+              <td>API의 topic code를 UUID에 하드코딩하지 않는다. seed code가 계약의 기준이다.</td>
+            </tr>
+            <tr>
+              <td><code>user_category_preferences</code></td>
+              <td>기존 <code>(user_id, category_id)</code> unique를 사용해 topic +2</td>
+              <td>행이 있으면 weight에 2를 더하고, 재설문은 이번 범위에서 terminal 상태를 반환.</td>
+            </tr>
+            <tr>
+              <td><code>entities</code> / <code>user_entity_preferences</code></td>
+              <td>기존 active entity를 name prefix/type으로 조회하고 사용자 선호에 +2</td>
+              <td>비활성·없는 entity와 중복 선택은 전체 요청을 거절.</td>
+            </tr>
+            <tr>
+              <td>신규 <code>regions</code> / <code>user_region_preferences</code></td>
+              <td>17개 시도 seed, 사용자별 region code + weight, <code>(user_id, region_code)</code> unique</td>
+              <td>최초 선택마다 +1. 빈 집합은 전국 이슈 선택으로 유지.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="transaction">
+        <h2>transaction과 adapter 경계</h2>
+        <ol>
+          <li>API가 principal user id와 body를 검증한다. body/query의 user id는 사용하지 않는다.</li>
+          <li>한 PostgreSQL transaction에서 해당 users 행을 <code>FOR UPDATE</code>로 잠근다.</li>
+          <li>사용자가 없으면 401로 종료하고 새 users 행을 만들지 않는다.</li>
+          <li>상태가 COMPLETED/SKIPPED면 선호 조회·변경 없이 저장 snapshot을 반환한다.</li>
+          <li>PENDING이면 topic/entity/region master를 확인하고 상태·나이·선호를 함께 저장한다.</li>
+          <li>DB commit 뒤 기존 API output으로 변환한다. 피드 호출은 transaction 밖이다.</li>
+        </ol>
+        <p>
+          ORM adapter는 현재 <code>OnboardingRepository</code> port 뒤에 둔다. reference in-memory adapter는
+          테스트 fixture용으로 남기고, production provider는 PostgreSQL adapter로 교체한다. 실제 auth
+          provider 연결은 이 단계에서도 하지 않는다.
+        </p>
+      </section>
+
+      <section id="migration-choice">
+        <h2>권장 구현 선택</h2>
+        <ul>
+          <li><strong>migration:</strong> <code>@mikro-orm/migrations</code>를 도입하고 versioned migration으로 schema와 seed를 관리한다.</li>
+          <li><strong>ORM:</strong> users, entities, issue categories, preferences, regions를 MikroORM entity로 등록한다.</li>
+          <li><strong>topic mapping:</strong> category UUID를 코드에 넣지 않고 <code>issue_categories.code</code>로 조회한다.</li>
+          <li><strong>entity master:</strong> 운영 migration에는 임의 인물·정당·기관을 넣지 않는다. test fixture와 별도 운영 적재 절차를 둔다.</li>
+          <li><strong>migration boundary:</strong> 기존 base tables가 이미 존재한다는 delta migration을 우선하고, 빈 DB 초기화 migration은 별도 baseline으로 분리한다.</li>
+        </ul>
+        <aside>
+          마지막 항목은 특히 중요하다. 현재 저장소에는 업무 table을 생성하는 baseline migration이 없으므로,
+          delta migration만 추가해도 빈 PostgreSQL에서 바로 부팅된다고 주장할 수 없다.
+          기존 issue category의 이름·참조가 승인된 12개 code로 정규화되지 않으면 migration은
+          taxonomy가 조용히 분리되지 않도록 실패한다. 그런 환경은 별도 legacy mapping migration을
+          먼저 적용해야 한다.
+        </aside>
+      </section>
+
+      <section id="grilling">
+        <h2>설계 질문</h2>
+        <h3>P1 — migration은 기존 base table을 전제로 할까?</h3>
+        <p>A: 기존 users/entities 등 base migration이 선행된 환경에 onboarding delta만 추가(권장). B: 모든 ERD table을 이번에 baseline으로 생성. A는 범위를 통제하지만 현재 빈 DB 부팅에는 선행 작업이 필요하고, B는 unrelated schema까지 책임진다.</p>
+        <h3>P2 — topic seed를 어떤 테이블 계약으로 둘까?</h3>
+        <p>A: issue_categories에 stable code/display_order를 추가(권장). B: API 코드와 category UUID 매핑을 애플리케이션 상수로 고정. A는 DB seed와 API가 같은 계약을 공유하고, B는 migration과 코드가 쉽게 어긋난다.</p>
+        <h3>P3 — age 컬럼 이름은?</h3>
+        <p>A: ERD와 동일한 <code>age_group</code>(권장). B: <code>onboarding_age_group</code>로 온보딩 전용성을 표시. A는 기존 ERD와 후속 조회를 맞추고, B는 기존 문서·쿼리 변경이 늘어난다.</p>
+        <h3>P4 — 운영 entity master seed를 포함할까?</h3>
+        <p>A: 운영 migration에는 넣지 않고 fixture·적재 절차만 제공(권장). B: 임시 명단을 넣어 즉시 선택 가능하게 함. A는 근거 없는 운영 데이터를 만들지 않고, B는 명단 출처·관리 책임이 필요하다.</p>
+        <h3>P5 — DB adapter 구현 방식은?</h3>
+        <p>A: MikroORM entity + migrations + repository adapter(권장). B: raw SQL adapter와 SQL migration. A는 프로젝트 ORM 규칙과 transaction manager를 공유하고, B는 SQL 제어가 직접적이지만 mapping·test harness를 별도로 만든다.</p>
+        <p><strong>권장 조합:</strong> P1-A, P2-A, P3-A, P4-A, P5-A.</p>
+      </section>
+
+      <section id="self-check">
+        <h2>설계 이해 점검</h2>
+        <p>아래는 구현 승인과 별도의 자가점검이다. 선택 결과는 이 브라우저 안에서만 처리된다.</p>
+        <form id="check-form">
+          <fieldset>
+            <legend>빈 DB에서 delta migration만 실행하면 운영 온보딩이 바로 가능한가?</legend>
+            <label><input type="radio" name="check" value="a" /> 아니다. base migration 선행 조건을 별도로 검증해야 한다.</label><br />
+            <label><input type="radio" name="check" value="b" /> 그렇다. delta가 없는 업무 table도 자동 생성한다.</label>
+          </fieldset>
+          <button type="button" id="check-submit">제출</button>
+          <div id="check-result" class="control-result" hidden></div>
+        </form>
+        <script>
+          document.getElementById('check-submit').addEventListener('click', () => {
+            const answer = document.querySelector('input[name="check"]:checked');
+            const result = document.getElementById('check-result');
+            result.hidden = false;
+            result.textContent = answer?.value === 'a'
+              ? '확립: base migration과 delta migration의 경계를 분리한다.'
+              : '보완 필요: 현재 제안은 기존 base table을 전제로 한다.';
+          });
+        </script>
+      </section>
+
+      <section id="approval">
+        <h2>승인 상태</h2>
+        <p>
+          <strong class="state">설계 승인됨</strong> · P1-A/P2-A/P3-A/P4-A/P5-A. 사용자의 “권고대로
+          ㄱㄱ” 지시로 이 기준선을 승인했다.
+        </p>
+        <p>승인된 범위에서 ORM entity, migration, PostgreSQL repository, DB integration test를 수정한다.</p>
+      </section>
+    </main>
+  </body>
+</html>
