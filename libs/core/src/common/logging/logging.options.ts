@@ -22,6 +22,8 @@ const REDACT_PATHS = [
   'req.headers.cookie',
   'request.headers.authorization',
   'request.headers.cookie',
+  'req.headers.x-feed-guest-key',
+  'request.headers.x-feed-guest-key',
 ] as const;
 
 export function createLoggerOptions(service: LogService): Params<Request, Response> {

@@ -22,6 +22,12 @@ export const ApiException = {
     title: 'Conflict',
     description: 'The request conflicts with the current resource state.',
   },
+  Gone: {
+    code: 'GONE',
+    status: HttpStatus.GONE,
+    title: 'Gone',
+    description: 'The requested resource is no longer available.',
+  },
   PayloadTooLarge: {
     code: 'HTTP_413',
     status: HttpStatus.PAYLOAD_TOO_LARGE,
