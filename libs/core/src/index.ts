@@ -22,3 +22,23 @@ export { MikroOrmTransactionManager } from './common/transaction/mikroOrm/mikroO
 export { NestedTransactionException } from './common/transaction/transaction.exception.js';
 export { TRANSACTION_MANAGER } from './common/transaction/transaction.manager.js';
 export type { TransactionManager } from './common/transaction/transaction.manager.js';
+export type {
+  AgeGroup,
+  FeedBatchItemRecord,
+  FeedBatchRecord,
+  FeedContinuation,
+  FeedOwner,
+  FeedSessionRecord,
+  IssueArticleRecord,
+  IssueCandidateScope,
+  IssueGlossaryRecord,
+  IssueImpactRecord,
+  IssueQueryRepository,
+  IssueRecord,
+  IssueRelationRecord,
+  IssueSelectionType,
+  IssueViewpointRecord,
+  UserInteractionRecord,
+  UserRecommendationContext,
+} from './issue/repository/type/issueQuery.repository.js';
+export { ISSUE_QUERY_REPOSITORY } from './issue/repository/type/issueQuery.repository.js';

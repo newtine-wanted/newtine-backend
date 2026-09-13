@@ -1,0 +1,271 @@
+import { Injectable } from '@nestjs/common';
+
+import {
+  generateUuidV7,
+  IssueException,
+  IssueExceptionCode,
+  type FeedBatchRecord,
+  type FeedOwner,
+  type FeedSessionRecord,
+  type IssueCandidateScope,
+  type IssueQueryRepository,
+  type IssueRecord,
+  type IssueRelationRecord,
+  type UserInteractionRecord,
+  type UserRecommendationContext,
+} from '@newtine/core';
+
+export interface InMemoryIssueQuerySeed {
+  issues?: readonly IssueRecord[];
+  contexts?: readonly UserRecommendationContext[];
+  interactions?: readonly UserInteractionRecord[];
+  relations?: readonly IssueRelationRecord[];
+}
+
+/**
+ * A deterministic adapter used while the production issue schema is being connected.
+ * It intentionally mirrors the repository port so recommendation rules can be tested
+ * without inventing a second domain model or requiring a local PostgreSQL instance.
+ */
+@Injectable()
+export class InMemoryIssueQueryRepository implements IssueQueryRepository {
+  private readonly issues: IssueRecord[];
+  private readonly contexts = new Map<string, UserRecommendationContext>();
+  private readonly interactions: UserInteractionRecord[];
+  private readonly relations: IssueRelationRecord[];
+  private readonly sessions = new Map<string, FeedSessionRecord>();
+  private readonly batches = new Map<string, FeedBatchRecord>();
+
+  constructor(seed: InMemoryIssueQuerySeed = {}) {
+    this.issues = (seed.issues ?? []).map(cloneIssue);
+    for (const context of seed.contexts ?? []) {
+      this.contexts.set(context.userId, cloneContext(context));
+    }
+    this.interactions = (seed.interactions ?? []).map(cloneInteraction);
+    this.relations = (seed.relations ?? []).map(cloneRelation);
+  }
+
+  async createFeedSession(owner: FeedOwner, now: Date): Promise<FeedSessionRecord> {
+    const session: FeedSessionRecord = {
+      id: generateUuidV7(),
+      owner: { ...owner },
+      algorithmVersion: 'issue-card-query-v1',
+      nextBatchNo: 0,
+      status: 'ACTIVE',
+      createdAt: new Date(now),
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      lastTopic: null,
+      lastRepresentativeEntityId: null,
+      topicRun: 0,
+      entityRun: 0,
+    };
+    this.sessions.set(session.id, cloneSession(session));
+    return cloneSession(session);
+  }
+
+  async findFeedSession(
+    id: string,
+    owner: FeedOwner,
+    now: Date,
+  ): Promise<FeedSessionRecord | null> {
+    const session = this.sessions.get(id);
+    if (session === undefined || !sameOwner(session.owner, owner)) return null;
+    void now;
+    return cloneSession(session);
+  }
+
+  async findFeedBatch(sessionId: string, batchNo: number): Promise<FeedBatchRecord | null> {
+    const batch = this.batches.get(batchKey(sessionId, batchNo));
+    return batch === undefined ? null : cloneBatch(batch);
+  }
+
+  async findFeedBatches(sessionId: string): Promise<FeedBatchRecord[]> {
+    return [...this.batches.values()]
+      .filter((batch) => batch.sessionId === sessionId)
+      .sort((left, right) => left.batchNo - right.batchNo)
+      .map(cloneBatch);
+  }
+
+  async saveFeedBatch(session: FeedSessionRecord, batch: FeedBatchRecord): Promise<void> {
+    const key = batchKey(batch.sessionId, batch.batchNo);
+    if (this.batches.has(key)) return;
+    const currentSession = this.sessions.get(session.id);
+    const previousBatches = [...this.batches.values()]
+      .filter((storedBatch) => storedBatch.sessionId === session.id)
+      .sort((left, right) => left.batchNo - right.batchNo);
+    const lastBatch = previousBatches[previousBatches.length - 1];
+    if (
+      currentSession === undefined ||
+      currentSession.status === 'COMPLETED' ||
+      currentSession.nextBatchNo !== batch.batchNo ||
+      (lastBatch !== undefined && lastBatch.continuation !== 'CONTINUE')
+    ) {
+      throw new IssueException(
+        IssueExceptionCode.FeedBatchConflict,
+        '현재 탐색 상태에서는 새 묶음을 저장할 수 없습니다.',
+      );
+    }
+    this.batches.set(key, cloneBatch(batch));
+    this.sessions.set(session.id, cloneSession(session));
+  }
+
+  async findCandidates(
+    excludedIssueIds: ReadonlySet<string>,
+    limit?: number,
+    _scope?: IssueCandidateScope,
+  ): Promise<IssueRecord[]> {
+    void _scope;
+    return this.issues
+      .filter(
+        (issue) =>
+          issue.publicationStatus === 'PUBLISHED' &&
+          issue.integratedSummary !== null &&
+          issue.summaryLines.length === 3 &&
+          !excludedIssueIds.has(issue.id),
+      )
+      .sort(compareIssue)
+      .slice(0, limit === undefined ? undefined : Math.max(0, limit))
+      .map(cloneIssue);
+  }
+
+  async findIssue(id: string): Promise<IssueRecord | null> {
+    const issue = this.issues.find((candidate) => candidate.id === id);
+    return issue === undefined ? null : cloneIssue(issue);
+  }
+
+  async findIssuesByIds(ids: ReadonlySet<string>): Promise<IssueRecord[]> {
+    return this.issues.filter((issue) => ids.has(issue.id)).map(cloneIssue);
+  }
+
+  async findUserContext(userId: string): Promise<UserRecommendationContext | null> {
+    const context = this.contexts.get(userId);
+    return context === undefined ? null : cloneContext(context);
+  }
+
+  async findLatestInteractions(userId: string): Promise<UserInteractionRecord[]> {
+    const latest = new Map<string, UserInteractionRecord>();
+    for (const interaction of this.interactions) {
+      if (interaction.userId !== userId) continue;
+      const previous = latest.get(interaction.issueId);
+      if (previous === undefined || compareInteraction(interaction, previous) > 0) {
+        latest.set(interaction.issueId, interaction);
+      }
+    }
+    return [...latest.values()]
+      .sort((left, right) => left.issueId.localeCompare(right.issueId))
+      .map(cloneInteraction);
+  }
+
+  async findFollowUps(issueIds: ReadonlySet<string>): Promise<IssueRelationRecord[]> {
+    return this.relations
+      .filter(
+        (relation) =>
+          relation.relationType === 'FOLLOW_UP' &&
+          Number.isFinite(relation.verifiedAt.getTime()) &&
+          issueIds.has(relation.fromIssueId),
+      )
+      .map(cloneRelation);
+  }
+
+  /** Test/fixture helper. Production callers depend on the repository port only. */
+  seed(seed: InMemoryIssueQuerySeed): void {
+    if (seed.issues !== undefined) this.issues.push(...seed.issues.map(cloneIssue));
+    for (const context of seed.contexts ?? [])
+      this.contexts.set(context.userId, cloneContext(context));
+    this.interactions.push(...(seed.interactions ?? []).map(cloneInteraction));
+    this.relations.push(...(seed.relations ?? []).map(cloneRelation));
+  }
+
+  getStoredSession(id: string): FeedSessionRecord | undefined {
+    const session = this.sessions.get(id);
+    return session === undefined ? undefined : cloneSession(session);
+  }
+}
+
+function batchKey(sessionId: string, batchNo: number): string {
+  return `${sessionId}:${batchNo}`;
+}
+
+function sameOwner(left: FeedOwner, right: FeedOwner): boolean {
+  return left.userId === right.userId && left.guestKey === right.guestKey;
+}
+
+function compareInteraction(left: UserInteractionRecord, right: UserInteractionRecord): number {
+  const byTime = left.createdAt.getTime() - right.createdAt.getTime();
+  return byTime === 0 ? left.id.localeCompare(right.id) : byTime;
+}
+
+function compareIssue(left: IssueRecord, right: IssueRecord): number {
+  const byImportance = clamp01(right.importanceScore) - clamp01(left.importanceScore);
+  if (byImportance !== 0) return byImportance;
+  const byFreshness = clamp01(right.freshnessScore) - clamp01(left.freshnessScore);
+  if (byFreshness !== 0) return byFreshness;
+  const leftEventAt = left.eventAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  const rightEventAt = right.eventAt?.getTime() ?? Number.NEGATIVE_INFINITY;
+  if (rightEventAt !== leftEventAt) return rightEventAt - leftEventAt;
+  return left.id.localeCompare(right.id);
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
+function cloneIssue(issue: IssueRecord): IssueRecord {
+  return {
+    ...issue,
+    eventAt: cloneDate(issue.eventAt),
+    publishedAt: cloneDate(issue.publishedAt),
+    updatedAt: new Date(issue.updatedAt),
+    entityIds: [...issue.entityIds],
+    regionCodes: [...issue.regionCodes],
+    ageGroups: [...issue.ageGroups],
+    summaryLines: [...issue.summaryLines],
+    viewpoints:
+      issue.viewpoints?.map((item) => ({ ...item, articleIds: [...item.articleIds] })) ?? null,
+    glossary: issue.glossary.map((item) => ({ ...item, articleIds: [...item.articleIds] })),
+    articles: issue.articles.map((article) => ({
+      ...article,
+      publishedAt: cloneDate(article.publishedAt),
+    })),
+    impacts: issue.impacts.map((impact) => ({ ...impact })),
+  };
+}
+
+function cloneContext(context: UserRecommendationContext): UserRecommendationContext {
+  return {
+    ...context,
+    selectedCategoryCodes: [...context.selectedCategoryCodes],
+    selectedEntityIds: [...context.selectedEntityIds],
+    preferredRegionCodes: [...context.preferredRegionCodes],
+  };
+}
+
+function cloneInteraction(interaction: UserInteractionRecord): UserInteractionRecord {
+  return { ...interaction, createdAt: new Date(interaction.createdAt) };
+}
+
+function cloneRelation(relation: IssueRelationRecord): IssueRelationRecord {
+  return { ...relation, verifiedAt: new Date(relation.verifiedAt) };
+}
+
+function cloneSession(session: FeedSessionRecord): FeedSessionRecord {
+  return {
+    ...session,
+    owner: { ...session.owner },
+    createdAt: new Date(session.createdAt),
+    expiresAt: new Date(session.expiresAt),
+  };
+}
+
+function cloneBatch(batch: FeedBatchRecord): FeedBatchRecord {
+  return {
+    ...batch,
+    createdAt: new Date(batch.createdAt),
+    items: batch.items.map((item) => ({ ...item, reasonCodes: [...item.reasonCodes] })),
+  };
+}
+
+function cloneDate(value: Date | null): Date | null {
+  return value === null ? null : new Date(value);
+}
