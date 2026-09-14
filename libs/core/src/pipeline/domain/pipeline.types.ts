@@ -1,4 +1,9 @@
 import type { UuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
+import {
+  CATEGORY_CODES,
+  isCategoryCode,
+  type CategoryCode,
+} from '@newtine/core/common/category/category.catalog.js';
 
 export type { UuidV7 };
 
@@ -27,24 +32,11 @@ export type PipelineJobStage = (typeof PIPELINE_JOB_STAGES)[number];
 export const PIPELINE_RETRY_SCOPES = ['DISCOVERY', 'CONTENT'] as const;
 export type PipelineRetryScope = (typeof PIPELINE_RETRY_SCOPES)[number];
 
-export const PIPELINE_CATEGORY_CODES = [
-  'housing',
-  'labor',
-  'finance',
-  'welfare',
-  'education',
-  'health',
-  'climate',
-  'security',
-  'local',
-  'politics',
-] as const;
-export type PipelineCategoryCode = (typeof PIPELINE_CATEGORY_CODES)[number];
+export const PIPELINE_CATEGORY_CODES = CATEGORY_CODES;
+export type PipelineCategoryCode = CategoryCode;
 
 export function isPipelineCategoryCode(value: unknown): value is PipelineCategoryCode {
-  return (
-    typeof value === 'string' && (PIPELINE_CATEGORY_CODES as readonly string[]).includes(value)
-  );
+  return isCategoryCode(value);
 }
 
 export const PIPELINE_FAILURE_KINDS = [

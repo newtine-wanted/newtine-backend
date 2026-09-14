@@ -5,21 +5,15 @@ import {
   type OnboardingTopicOption,
   type RegionOption,
 } from './onboarding.model.js';
+import { CATEGORY_CATALOG } from '../common/category/category.catalog.js';
 
-export const ONBOARDING_TOPICS: readonly OnboardingTopicOption[] = [
-  { code: 'HOUSING', name: '주거', displayOrder: 1 },
-  { code: 'LABOR', name: '노동', displayOrder: 2 },
-  { code: 'FINANCE_TAX', name: '금융·세제', displayOrder: 3 },
-  { code: 'EDUCATION', name: '교육', displayOrder: 4 },
-  { code: 'WELFARE', name: '복지', displayOrder: 5 },
-  { code: 'DIPLOMACY_SECURITY', name: '외교·안보', displayOrder: 6 },
-  { code: 'ENVIRONMENT_ENERGY', name: '환경·에너지', displayOrder: 7 },
-  { code: 'LOCAL', name: '지역', displayOrder: 8 },
-  { code: 'YOUTH_GENERATION', name: '청년·세대', displayOrder: 9 },
-  { code: 'JUDICIARY', name: '사법·검찰', displayOrder: 10 },
-  { code: 'ASSEMBLY_PARTY', name: '국회·정당', displayOrder: 11 },
-  { code: 'MEDIA', name: '미디어', displayOrder: 12 },
-] as const;
+export const ONBOARDING_TOPICS: readonly OnboardingTopicOption[] = CATEGORY_CATALOG.map(
+  ({ code, displayName, displayOrder }) => ({
+    code,
+    name: displayName,
+    displayOrder,
+  }),
+);
 
 export const ONBOARDING_AGE_GROUPS: readonly OnboardingAgeOption[] = [
   { code: AgeGroup.Age19To34, name: '19~34세', displayOrder: 1 },

@@ -35,7 +35,10 @@ import {
     DatabaseCheckJob,
     BatchRunner,
     PipelineBatchJob,
-    PipelineAiConfiguration,
+    {
+      provide: PipelineAiConfiguration,
+      useFactory: () => new PipelineAiConfiguration(),
+    },
     PipelineWorker,
     PipelineEmbeddingRepairJob,
     NaverNewsProvider,

@@ -11,14 +11,18 @@ create extension if not exists vector;
 create table if not exists issue_categories (
   code text primary key,
   display_name text not null,
+  display_order integer not null,
   created_at timestamptz not null default now()
 );
 
-insert into issue_categories (code, display_name) values
-  ('housing', '주거'), ('labor', '노동'), ('finance', '금융'), ('welfare', '복지'),
-  ('education', '교육'), ('health', '건강'), ('climate', '기후'), ('security', '안보'),
-  ('local', '지역'), ('politics', '정치')
-on conflict (code) do nothing;
+insert into issue_categories (code, display_name, display_order) values
+  ('housing', '주거', 1), ('labor', '일자리', 2), ('finance', '세금·금융', 3),
+  ('welfare', '복지·연금', 4), ('education', '교육', 5), ('health', '보건·의료', 6),
+  ('climate', '환경·기후', 7), ('security', '외교·안보', 8),
+  ('local', '지역·교통', 9), ('politics', '정치·사법', 10)
+on conflict (code) do update set
+  display_name = excluded.display_name,
+  display_order = excluded.display_order;
 
 create table if not exists publishers (
   id uuid primary key,

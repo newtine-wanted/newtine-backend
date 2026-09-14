@@ -295,7 +295,10 @@ core는 feature별로 domain과 repository를 나누고, `common`에는 여러 f
 사용합니다.
 
 스키마는 [MikroORM migration](libs/core/src/pipeline/migrations/)으로 관리하며
-`npm run db:migrate`가 온보딩·파이프라인 migration을 등록 순서대로 한 번에 적용합니다.
+`npm run db:migrate`가 외부 base schema preflight 후 온보딩·category code·파이프라인 migration을
+등록 순서대로 한 번에 적용합니다. `users`, `entities`, `issue_categories`,
+`user_category_preferences`, `user_entity_preferences`는 이 저장소 밖의 선행 migration이 소유합니다.
+category master의 PK는 `issue_categories.code`이며 이슈·분류 선호도는 `category_code`로 참조합니다.
 파이프라인 migration은 데이터 손실을 막기 위해 `down`을 지원하지 않습니다. 애플리케이션은
 schema 자동 동기화를 수행하지 않습니다.
 

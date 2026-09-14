@@ -5,6 +5,7 @@ import { AiUsageRecordEntity } from '@newtine/core/pipeline/repository/mikroOrm/
 import { DatabaseConfigurationException } from './databaseConfiguration.exception.js';
 import { ONBOARDING_PERSISTENCE_ENTITIES } from '../../onboarding/persistence/onboarding.persistence.entity.js';
 import { Migration20260913000000OnboardingPersistence } from '../../onboarding/migrations/Migration20260913000000OnboardingPersistence.js';
+import { Migration20260913000001CategoryCodePrimaryKey } from '../../pipeline/migrations/Migration20260913000001CategoryCodePrimaryKey.js';
 import { Migration202609130001Pipeline } from '../../pipeline/migrations/Migration202609130001Pipeline.js';
 import { Migration202609130002PipelineEmbeddingTasks } from '../../pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
 
@@ -43,11 +44,16 @@ export function createDatabaseOptions(
       emit: 'ts',
       migrationsList: [
         Migration20260913000000OnboardingPersistence,
+        Migration20260913000001CategoryCodePrimaryKey,
         Migration202609130001Pipeline,
         Migration202609130002PipelineEmbeddingTasks,
       ],
       transactional: true,
       allOrNothing: true,
+      // Migrations are authored and reviewed as TypeScript SQL. Do not write a
+      // database-specific schema snapshot into the source tree during deploys.
+      snapshot: false,
+      snapshotOnMigrate: false,
     },
     discovery: { warnWhenNoEntities: false },
     allowGlobalContext: false,

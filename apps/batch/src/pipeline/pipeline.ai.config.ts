@@ -41,8 +41,11 @@ export interface PipelineAiConfigSnapshot {
 export class PipelineAiConfiguration {
   readonly snapshot: PipelineAiConfigSnapshot;
 
-  constructor(filePath = process.env[PIPELINE_AI_CONFIG_ENV] ?? DEFAULT_PIPELINE_AI_CONFIG_PATH) {
-    const resolvedPath = isAbsolute(filePath) ? filePath : resolve(process.cwd(), filePath);
+  constructor(filePath?: string) {
+    const configuredPath = filePath ?? process.env[PIPELINE_AI_CONFIG_ENV];
+    const resolvedPath = isAbsolute(configuredPath ?? DEFAULT_PIPELINE_AI_CONFIG_PATH)
+      ? (configuredPath ?? DEFAULT_PIPELINE_AI_CONFIG_PATH)
+      : resolve(process.cwd(), configuredPath ?? DEFAULT_PIPELINE_AI_CONFIG_PATH);
     this.snapshot = loadPipelineAiConfig(resolvedPath);
   }
 

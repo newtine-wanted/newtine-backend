@@ -51,7 +51,7 @@
 {
   "analysis_status": "READY",
   "issue_count": 12,
-  "category_counts": [{"category_id": "분류 id", "count": 7}],
+  "category_counts": [{"category_code": "finance", "count": 7}],
   "connections": [
     {
       "title": "주거 부담을 줄이는 두 접근",
@@ -87,7 +87,7 @@
 | 조회 | 후보 |
 | --- | --- |
 | 공개 피드 | issues(publication_status, published_at, id) |
-| 분류별 조회 | issues(category_id, published_at) |
+| 분류별 조회 | issues(category_code, published_at) |
 | 기사에서 이슈 역조회 | issue_articles(article_id, issue_id) |
 | 이전 이슈 조회 | issue_relations(to_issue_id) |
 | 최신 행동 | user_interaction_events(user_id, issue_id, created_at) |

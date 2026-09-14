@@ -447,6 +447,51 @@ npm run test:smoke</code></pre>
           </tbody></table>
           <p><strong>Technical status:</strong> 승인된 G24-A·G25-A·G27-A 구현과 로컬 검증 완료. <strong>Implementation issues:</strong> 위 해결됨/보류 항목과 운영 수용 잔여 위험을 유지한다. <strong>Developer operational understanding:</strong> 실제 운영자 실행 시연과 로그 해석 답변은 아직 관찰하지 못했다.</p>
         </section>
+        <section id="pr-integration-review">
+          <h2>PR 통합 후 작업 리뷰</h2>
+          <p><strong>review-status: 변경 요청.</strong> 로컬 통합 커밋 <code>2a33d83</code>을 기준으로 읽기 전용 재점검했다. API 계약 유실은 확인되지 않았지만 batch 실행 경로에 blocker가 남아 있다.</p>
+          <table><caption>리뷰 issue-register</caption><thead><tr><th>ID</th><th>우선순위</th><th>증상·영향</th><th>증거</th><th>권고 조치</th></tr></thead><tbody>
+            <tr><td>PR2-REV-001</td><td>P1 · Blocker</td><td><code>BatchModule</code>이 <code>PipelineAiConfiguration</code>의 기본 인자 <code>filePath</code>를 Nest DI 의존성으로 해석해 모든 batch job이 bootstrap 전에 실패한다.</td><td><code>apps/batch/src/pipeline/pipeline.ai.config.ts:40-46</code>의 무주입 생성자 인자. <code>databaseCheck</code> 실행 재현 결과 <code>UnknownDependenciesException</code>, exit 1.</td><td>환경값을 생성자 내부에서 읽거나 명시적 factory/optional DI로 바꾸고, 실제 <code>BatchModule</code> bootstrap smoke test를 추가한다.</td></tr>
+            <tr><td>PR2-REV-002</td><td>P1 · Blocker</td><td>위 DI 문제를 해결해도 Docker runtime stage가 <code>config/pipeline-ai.yml</code>을 복사하지 않아 worker의 기본 경로가 깨진다.</td><td><code>Dockerfile:19-28</code>은 <code>dist</code>만 runtime에 복사한다. <code>/private/tmp</code>에서 기본 생성자 실행 시 <code>ENOENT .../config/pipeline-ai.yml</code> 재현.</td><td>runtime image에 안전한 config를 포함하거나 명시적 외부 config mount/path를 compose와 함께 계약하고, image artifact smoke test를 추가한다.</td></tr>
+            <tr><td>PR2-REV-003</td><td>P1 · Blocker</td><td>통합한 두 migration이 공유 schema를 서로 다르게 가정한다. onboarding은 <code>issue_categories(id,name,code)</code>와 <code>issues.category_id</code>를 사용하지만 pipeline은 <code>display_name</code>과 <code>issues.category_code</code>를 사용한다.</td><td><code>onboarding.persistence.entity.ts:43-51</code>, onboarding migration의 <code>118-124</code>, pipeline migration의 <code>11-21,44-52</code>. 기존 <code>issue_categories</code>가 있으면 pipeline seed의 <code>display_name</code> 컬럼이 없고, <code>create table if not exists</code>는 기존 <code>issues</code>를 보정하지 않는다.</td><td>공유 category/issue canonical schema와 code mapping을 먼저 결정하고 migration·repository·seed를 같은 계약으로 재작성한 뒤 실제 기존 schema에서 up을 검증한다.</td></tr>
+            <tr><td>PR2-REV-004</td><td>P1 · 운영 blocker</td><td>Compose DB는 <code>postgres:18</code>인데 pipeline migration은 <code>vector</code> extension과 <code>vector(1536)</code> 컬럼을 요구한다. 로컬 단일 migration 경로가 pgvector 준비 없이 적용되지 않는다.</td><td><code>compose.yaml:3</code>과 <code>Migration202609130001Pipeline.ts:9,163</code>의 불일치. 실제 pgvector runtime 검증은 환경 부재로 미실시.</td><td>pgvector image/extension provisioning을 compose에 포함하거나, 외부 DB 사전조건을 실행 문서와 검사 단계에 명시한다.</td></tr>
+            <tr><td>PR2-REV-005</td><td>P1 · 조건부</td><td>빈 Compose volume에서 실행하는 흐름이라면 첫 onboarding migration부터 <code>users</code> 등 외부 base schema를 요구해 중단한다.</td><td>migration 주석이 <code>users</code>, <code>entities</code>, 기존 preference/category table을 별도 schema history로 전제하지만 저장소에는 그 base migration이 없다. 실제 빈 DB runtime 검증은 미실시.</td><td>base schema owner/선행 migration을 실행 계약에 명시하거나, 이 저장소가 fresh DB를 소유한다면 base migration을 ordered list에 포함한다.</td></tr>
+          </tbody></table>
+          <h3>유실 점검과 검증 범위</h3>
+          <ul>
+            <li>병합 후 conflict marker 없음, 기준 PR head 대비 삭제 파일 없음. 기존 pipeline raw SQL은 TypeScript migration으로 rename되었고 SQL 내용은 유지된다.</li>
+            <li>OpenAPI에 onboarding 5개·pipeline 4개·health/search 경로가 함께 존재하며 <code>contracts:check</code>, unit/integration test, typecheck, build, format, lint는 통과했다.</li>
+            <li>다만 기존 테스트는 직접 생성/단위 경로 중심이라 실제 Nest batch bootstrap, Docker runtime 파일 구성, PostgreSQL/pgvector migration up을 검증하지 못했다.</li>
+          </ul>
+          <p><strong>판정:</strong> API 기능 유실은 없지만 위 P1 batch blocker와 migration/운영 blocker를 닫기 전에는 PR을 merge-ready로 볼 수 없다. 본 리뷰에서는 소스 코드를 수정하지 않았다.</p>
+        </section>
+        <section id="pr-integration-remediation-result">
+          <h2>PR #2 통합 blocker 보완 결과</h2>
+          <p>
+            <strong>implementation-control-state: 코드 보완 완료 · 운영 수용 일부 보류.</strong>
+            위 review register의 후속 조치를 현재 branch에 반영했다. 기존 review 섹션은 당시
+            판단의 기록으로 보존하고, 이 섹션을 최신 결과로 사용한다.
+          </p>
+          <table>
+            <caption>보완 결과와 증거</caption>
+            <thead><tr><th>항목</th><th>결과</th><th>증거</th></tr></thead>
+            <tbody>
+              <tr><td>Batch DI / runtime config</td><td>해결</td><td><code>BatchModule</code> factory provider, runtime <code>config/</code> copy, unknown-job bootstrap smoke 통과.</td></tr>
+              <tr><td>공유 category schema</td><td>해결</td><td><code>issue_categories.code</code> PK, canonical lowercase 10개, <code>issues.category_code</code>·preference <code>category_code</code> FK/UNIQUE로 통일.</td></tr>
+              <tr><td>레거시 변환 안전성</td><td>해결</td><td>승인된 legacy mapping만 backfill하고 <code>YOUTH_GENERATION</code>/<code>MEDIA</code>는 fail-closed. 미지원 row fixture에서 전체 transaction rollback 확인.</td></tr>
+              <tr><td>pgvector / migration</td><td>해결</td><td>pgvector Compose DB에서 fresh legacy up, 재실행, 최종 schema·data·vector extension 확인.</td></tr>
+              <tr><td>base schema 경계</td><td>해결</td><td><code>db:migrate up</code> preflight가 외부 base table 누락을 명시적으로 거절한다. 빈 DB에서 partial migration은 남기지 않는다.</td></tr>
+              <tr><td>Docker cold build</td><td>환경 보류</td><td>host build는 통과했지만 2 GiB ARM Docker Desktop에서 cold <code>ttsc</code> Go compiler가 OOM kill되어 image artifact 검증은 재현하지 못했다.</td></tr>
+            </tbody>
+          </table>
+          <p>
+            최종 로컬 gate는 <code>npm test</code>(unit 15 suites/79 tests, integration 2 suites/8 tests),
+            <code>npm run typecheck</code>, <code>npm run build</code>, <code>npm run format:check</code>,
+            <code>npm run lint</code>, <code>npm run contracts:check</code>, <code>npm run test:smoke</code>,
+            conflict marker 검색과 <code>git diff --check</code>를 통과했다. GitHub push와 PR 원격 상태
+            갱신은 수행하지 않았다.
+          </p>
+        </section>
       </article>
     </main>
   </body>

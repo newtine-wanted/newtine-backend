@@ -2,6 +2,7 @@ import { EntityManager } from '@mikro-orm/core';
 import { Injectable } from '@nestjs/common';
 
 import { generateUuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
+import type { CategoryCode } from '@newtine/core/common/category/category.catalog.js';
 import { OnboardingException, OnboardingExceptionCode } from './onboarding.exception.js';
 import { ONBOARDING_OPTIONS } from './onboarding.options.js';
 import {
@@ -44,8 +45,7 @@ interface CountRow {
 }
 
 interface CategoryRow {
-  readonly id: string;
-  readonly code: string;
+  readonly code: CategoryCode;
 }
 
 interface RegionRow {
@@ -134,16 +134,16 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
 
     const selection = await this.validateSelection(command);
 
-    for (const categoryId of selection.categoryIds) {
+    for (const categoryCode of selection.categoryCodes) {
       await this.execute(
         `
           INSERT INTO user_category_preferences
-            (user_category_preferences_id, user_id, category_id, weight)
-          VALUES (?::uuid, ?::uuid, ?::uuid, 2)
-          ON CONFLICT (user_id, category_id)
+            (user_category_preferences_id, user_id, category_code, weight)
+          VALUES (?::uuid, ?::uuid, ?::text, 2)
+          ON CONFLICT (user_id, category_code)
           DO UPDATE SET weight = user_category_preferences.weight + 2
         `,
-        [generateUuidV7(), userId, categoryId],
+        [generateUuidV7(), userId, categoryCode],
       );
     }
     for (const entityId of command.entityIds) {
@@ -217,7 +217,7 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
   }
 
   private async validateSelection(command: CompleteOnboardingCommand): Promise<{
-    readonly categoryIds: readonly string[];
+    readonly categoryCodes: readonly CategoryCode[];
   }> {
     const topicCodes = new Set(command.topicCodes);
     const entityIds = new Set(command.entityIds);
@@ -265,7 +265,7 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     }
 
     const categoryRows = await this.queryRows<CategoryRow>(
-      `SELECT id::text AS id, code FROM issue_categories WHERE code IN (?)`,
+      `SELECT code FROM issue_categories WHERE code IN (?)`,
       [command.topicCodes],
     );
     if (categoryRows.length !== topicCodes.size) {
@@ -301,7 +301,7 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
       }
     }
 
-    return { categoryIds: categoryRows.map((row) => row.id) };
+    return { categoryCodes: categoryRows.map((row) => row.code) };
   }
 
   private async findUser(userId: string, lock: boolean): Promise<UserRow | undefined> {
@@ -327,9 +327,8 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
                u.onboarding_completed_at,
                u.age_group,
                COALESCE((
-                 SELECT jsonb_object_agg(c.code, p.weight)
+                 SELECT jsonb_object_agg(p.category_code, p.weight)
                    FROM user_category_preferences p
-                   JOIN issue_categories c ON c.id = p.category_id
                   WHERE p.user_id = u.id
                ), '{}'::jsonb) AS topic_weights,
                COALESCE((

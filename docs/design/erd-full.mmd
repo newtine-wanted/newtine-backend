@@ -49,7 +49,7 @@ erDiagram
   uuid id PK "NOT NULL"
   varchar(40) title "NOT NULL"
   timestamptz event_at "NULL"
-  uuid category_id FK "NOT NULL"
+  text category_code FK "NOT NULL"
   text sub_category "NULL"
   text publication_status "NOT NULL"
   numeric freshness_score "NOT NULL"
@@ -144,7 +144,7 @@ erDiagram
  user_category_preferences {
   uuid user_category_preferences_id PK "NOT NULL"
   uuid user_id FK "NOT NULL"
-  uuid category_id FK "NOT NULL"
+  text category_code FK "NOT NULL"
   numeric weight "NOT NULL"
  }
  user_entity_preferences {

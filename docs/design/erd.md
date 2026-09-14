@@ -64,14 +64,14 @@ Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 
 
 ## 04. issues
 
-구체적인 사건·발표·전개와 공개 상태. category_id는 대표 분류, sub_category는 선택 텍스트다. published_at은 최초 서비스 공개 시각이다.
+구체적인 사건·발표·전개와 공개 상태. category_code는 canonical category code를 참조하고, sub_category는 선택 텍스트다. published_at은 최초 서비스 공개 시각이다.
 
 | 컬럼 | 타입 | 키 | NULL | 기본값 | 허용값·참조·비고 |
 | --- | --- | --- | --- | --- | --- |
 | id | uuid | PK | 불가 | — | — |
 | title | varchar(40) | — | 불가 | — | — |
 | event_at | timestamptz | — | 허용 | — | 사건 발생 시각 |
-| category_id | uuid | FK | 불가 | — | issue_categories.id |
+| category_code | text | FK | 불가 | — | issue_categories.code |
 | sub_category | text | — | 허용 | — | — |
 | publication_status | text | — | 불가 | — | UNPUBLISHED / PUBLISHED / WITHDRAWN |
 | freshness_score | numeric | — | 불가 | 0 | — |
@@ -191,13 +191,13 @@ Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 
 
 ## 14. user_category_preferences
 
-분류별 추천 가중치. UUID PK 유지, 복합 UNIQUE(user_id, category_id) 추가. 온보딩 선택 +2.
+분류별 추천 가중치. UUID PK 유지, 복합 UNIQUE(user_id, category_code) 추가. 온보딩 선택 +2.
 
 | 컬럼 | 타입 | 키 | NULL | 기본값 | 허용값·참조·비고 |
 | --- | --- | --- | --- | --- | --- |
 | user_category_preferences_id | uuid | PK | 불가 | — | — |
 | user_id | uuid | FK | 불가 | — | users.id |
-| category_id | uuid | FK | 불가 | — | issue_categories.id |
+| category_code | text | FK | 불가 | — | issue_categories.code |
 | weight | numeric | — | 불가 | — | — |
 
 ## 15. user_entity_preferences

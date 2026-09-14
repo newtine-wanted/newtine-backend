@@ -16,439 +16,6 @@
   },
   "components": {
     "schemas": {
-      "IssueSearchItem": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "title": {
-            "type": "string"
-          },
-          "publicationStatus": {
-            "const": "PUBLISHED",
-            "title": null,
-            "description": null
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "publicationStatus"
-        ],
-        "type": "object"
-      },
-      "IssueSearchResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "query": {
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/IssueSearchItem"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "query",
-          "items"
-        ],
-        "type": "object"
-      },
-      "IssueSearchRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "query": {
-            "maxLength": 100,
-            "minLength": 1,
-            "type": "string"
-          },
-          "limit": {
-            "maximum": 50,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "query"
-        ],
-        "type": "object"
-      },
-      "ProblemDetails": {
-        "additionalProperties": false,
-        "properties": {
-          "title": {
-            "type": "string"
-          },
-          "status": {
-            "type": "number"
-          },
-          "detail": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "status",
-          "detail",
-          "code"
-        ],
-        "type": "object"
-      },
-      "OnboardingAgeOption": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "oneOf": [
-              {
-                "const": "AGE_19_34"
-              },
-              {
-                "const": "AGE_35_49"
-              },
-              {
-                "const": "AGE_50_64"
-              },
-              {
-                "const": "AGE_65_PLUS"
-              }
-            ],
-            "readOnly": true
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "displayOrder": {
-            "readOnly": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "code",
-          "name",
-          "displayOrder"
-        ],
-        "type": "object"
-      },
-      "OnboardingOptions": {
-        "additionalProperties": false,
-        "properties": {
-          "topics": {
-            "items": {
-              "$ref": "#/components/schemas/OnboardingTopicOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          },
-          "ageGroups": {
-            "items": {
-              "$ref": "#/components/schemas/OnboardingAgeOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          },
-          "regions": {
-            "items": {
-              "$ref": "#/components/schemas/RegionOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          }
-        },
-        "required": [
-          "topics",
-          "ageGroups",
-          "regions"
-        ],
-        "type": "object"
-      },
-      "OnboardingTopicOption": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "displayOrder": {
-            "readOnly": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "code",
-          "name",
-          "displayOrder"
-        ],
-        "type": "object"
-      },
-      "RegionOption": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "displayOrder": {
-            "readOnly": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "code",
-          "name",
-          "displayOrder"
-        ],
-        "type": "object"
-      },
-      "OnboardingEntityResult": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "type": {
-            "oneOf": [
-              {
-                "const": "INSTITUTION"
-              },
-              {
-                "const": "PARTY"
-              },
-              {
-                "const": "POLITICIAN"
-              }
-            ],
-            "readOnly": true
-          },
-          "subtitle": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "aliases": {
-            "items": {
-              "type": "string"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "type",
-          "aliases"
-        ],
-        "type": "object"
-      },
-      "OnboardingEntitySearchResult": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/OnboardingEntityResult"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          },
-          "total": {
-            "readOnly": true,
-            "type": "number"
-          },
-          "limit": {
-            "readOnly": true,
-            "type": "number"
-          },
-          "offset": {
-            "readOnly": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "offset"
-        ],
-        "type": "object"
-      },
-      "OnboardingEntityQuery": {
-        "additionalProperties": false,
-        "properties": {
-          "q": {
-            "maxLength": 100,
-            "type": "string"
-          },
-          "type": {
-            "oneOf": [
-              {
-                "const": "INSTITUTION"
-              },
-              {
-                "const": "PARTY"
-              },
-              {
-                "const": "POLITICIAN"
-              }
-            ]
-          },
-          "limit": {
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "offset": {
-            "maximum": 2147483647,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "OnboardingStateResult": {
-        "additionalProperties": false,
-        "properties": {
-          "status": {
-            "oneOf": [
-              {
-                "const": "COMPLETED"
-              },
-              {
-                "const": "PENDING"
-              },
-              {
-                "const": "SKIPPED"
-              }
-            ],
-            "readOnly": true
-          },
-          "completedAt": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "readOnly": true
-          },
-          "ageGroup": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "const": "AGE_19_34"
-              },
-              {
-                "const": "AGE_35_49"
-              },
-              {
-                "const": "AGE_50_64"
-              },
-              {
-                "const": "AGE_65_PLUS"
-              }
-            ],
-            "readOnly": true
-          },
-          "regionCodes": {
-            "items": {
-              "type": "string"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          }
-        },
-        "required": [
-          "status",
-          "completedAt",
-          "ageGroup",
-          "regionCodes"
-        ],
-        "type": "object"
-      },
-      "CompleteOnboardingRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "topicCodes": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 12,
-            "minItems": 1,
-            "type": "array"
-          },
-          "entityIds": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "maxItems": 100,
-            "type": "array"
-          },
-          "ageGroup": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "const": "AGE_19_34"
-              },
-              {
-                "const": "AGE_35_49"
-              },
-              {
-                "const": "AGE_50_64"
-              },
-              {
-                "const": "AGE_65_PLUS"
-              }
-            ]
-          },
-          "regionCodes": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 17,
-            "type": "array"
-          }
-        },
-        "required": [
-          "topicCodes",
-          "entityIds",
-          "ageGroup",
-          "regionCodes"
-        ],
-        "type": "object"
-      },
       "PipelineRunAcceptedResponse": {
         "additionalProperties": false,
         "properties": {
@@ -496,6 +63,30 @@
         },
         "required": [
           "query"
+        ],
+        "type": "object"
+      },
+      "ProblemDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "status",
+          "detail",
+          "code"
         ],
         "type": "object"
       },
@@ -804,31 +395,511 @@
           "executionId"
         ],
         "type": "object"
+      },
+      "OnboardingAgeOption": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ],
+            "readOnly": true
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "displayOrder": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "displayOrder"
+        ],
+        "type": "object"
+      },
+      "OnboardingOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingTopicOption"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          },
+          "ageGroups": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingAgeOption"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/RegionOption"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          }
+        },
+        "required": [
+          "topics",
+          "ageGroups",
+          "regions"
+        ],
+        "type": "object"
+      },
+      "OnboardingTopicOption": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "const": "climate"
+              },
+              {
+                "const": "education"
+              },
+              {
+                "const": "finance"
+              },
+              {
+                "const": "health"
+              },
+              {
+                "const": "housing"
+              },
+              {
+                "const": "labor"
+              },
+              {
+                "const": "local"
+              },
+              {
+                "const": "politics"
+              },
+              {
+                "const": "security"
+              },
+              {
+                "const": "welfare"
+              }
+            ],
+            "readOnly": true
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "displayOrder": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "displayOrder"
+        ],
+        "type": "object"
+      },
+      "RegionOption": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "displayOrder": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "displayOrder"
+        ],
+        "type": "object"
+      },
+      "OnboardingEntityResult": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "type": {
+            "oneOf": [
+              {
+                "const": "INSTITUTION"
+              },
+              {
+                "const": "PARTY"
+              },
+              {
+                "const": "POLITICIAN"
+              }
+            ],
+            "readOnly": true
+          },
+          "subtitle": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "aliases"
+        ],
+        "type": "object"
+      },
+      "OnboardingEntitySearchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingEntityResult"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          },
+          "total": {
+            "readOnly": true,
+            "type": "number"
+          },
+          "limit": {
+            "readOnly": true,
+            "type": "number"
+          },
+          "offset": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "OnboardingEntityQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "q": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "type": {
+            "oneOf": [
+              {
+                "const": "INSTITUTION"
+              },
+              {
+                "const": "PARTY"
+              },
+              {
+                "const": "POLITICIAN"
+              }
+            ]
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "OnboardingStateResult": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "oneOf": [
+              {
+                "const": "COMPLETED"
+              },
+              {
+                "const": "PENDING"
+              },
+              {
+                "const": "SKIPPED"
+              }
+            ],
+            "readOnly": true
+          },
+          "completedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "readOnly": true
+          },
+          "ageGroup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ],
+            "readOnly": true
+          },
+          "regionCodes": {
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          }
+        },
+        "required": [
+          "status",
+          "completedAt",
+          "ageGroup",
+          "regionCodes"
+        ],
+        "type": "object"
+      },
+      "CompleteOnboardingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "topicCodes": {
+            "items": {
+              "oneOf": [
+                {
+                  "const": "climate"
+                },
+                {
+                  "const": "education"
+                },
+                {
+                  "const": "finance"
+                },
+                {
+                  "const": "health"
+                },
+                {
+                  "const": "housing"
+                },
+                {
+                  "const": "labor"
+                },
+                {
+                  "const": "local"
+                },
+                {
+                  "const": "politics"
+                },
+                {
+                  "const": "security"
+                },
+                {
+                  "const": "welfare"
+                }
+              ]
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "type": "array"
+          },
+          "entityIds": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "ageGroup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ]
+          },
+          "regionCodes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 17,
+            "type": "array"
+          }
+        },
+        "required": [
+          "topicCodes",
+          "entityIds",
+          "ageGroup",
+          "regionCodes"
+        ],
+        "type": "object"
+      },
+      "IssueSearchItem": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "publicationStatus": {
+            "const": "PUBLISHED",
+            "title": null,
+            "description": null
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "publicationStatus"
+        ],
+        "type": "object"
+      },
+      "IssueSearchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IssueSearchItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "items"
+        ],
+        "type": "object"
+      },
+      "IssueSearchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
       }
     }
   },
   "paths": {
-    "/issues/search": {
+    "/pipeline/runs": {
       "post": {
         "tags": [],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IssueSearchRequest"
+                "$ref": "#/components/schemas/PipelineRunCreateRequest"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IssueSearchResponse"
+                  "$ref": "#/components/schemas/PipelineRunAcceptedResponse"
                 }
               }
             }
@@ -843,8 +914,8 @@
               }
             }
           },
-          "413": {
-            "description": "The request body exceeds the size limit.",
+          "409": {
+            "description": "The request conflicts with the current resource state.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -865,10 +936,244 @@
           }
         },
         "x-samchon-accessor": [
-          "issues",
-          "search"
+          "pipeline",
+          "runs",
+          "create"
         ],
-        "x-samchon-controller": "IssueController"
+        "x-samchon-controller": "PipelineController"
+      }
+    },
+    "/pipeline/runs/{runId}": {
+      "get": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRunResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "pipeline",
+          "runs",
+          "get"
+        ],
+        "x-samchon-controller": "PipelineController"
+      }
+    },
+    "/pipeline/runs/{runId}/retry": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/PipelineRunRetryRequestBase__type-o1"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PipelineRunRetryRequestBase__type"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "scope",
+                  "mapping": {
+                    "CONTENT": "#/components/schemas/PipelineRunRetryRequestBase__type-o1",
+                    "DISCOVERY": "#/components/schemas/PipelineRunRetryRequestBase__type"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRunAcceptedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "pipeline",
+          "runs",
+          "retry"
+        ],
+        "x-samchon-controller": "PipelineController"
+      }
+    },
+    "/pipeline/runs/{runId}/interrupt": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineRunInterruptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRunAcceptedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "pipeline",
+          "runs",
+          "interrupt"
+        ],
+        "x-samchon-controller": "PipelineController"
       }
     },
     "/onboarding/options": {
@@ -1188,176 +1493,27 @@
         "x-samchon-controller": "HealthController"
       }
     },
-    "/pipeline/runs": {
+    "/issues/search": {
       "post": {
         "tags": [],
-        "parameters": [
-          {
-            "name": "idempotency-key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            },
-            "required": true
-          }
-        ],
+        "parameters": [],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PipelineRunCreateRequest"
+                "$ref": "#/components/schemas/IssueSearchRequest"
               }
             }
           },
           "required": true
         },
-        "responses": {
-          "202": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PipelineRunAcceptedResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request conflicts with the current resource state.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "pipeline",
-          "runs",
-          "create"
-        ],
-        "x-samchon-controller": "PipelineController"
-      }
-    },
-    "/pipeline/runs/{runId}": {
-      "get": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "runId",
-            "in": "path",
-            "schema": {
-              "type": "string"
-            },
-            "required": true
-          }
-        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineRunResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The requested resource was not found.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "pipeline",
-          "runs",
-          "get"
-        ],
-        "x-samchon-controller": "PipelineController"
-      }
-    },
-    "/pipeline/runs/{runId}/retry": {
-      "post": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "runId",
-            "in": "path",
-            "schema": {
-              "type": "string"
-            },
-            "required": true
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/PipelineRunRetryRequestBase__type-o1"
-                  },
-                  {
-                    "$ref": "#/components/schemas/PipelineRunRetryRequestBase__type"
-                  }
-                ],
-                "discriminator": {
-                  "propertyName": "scope",
-                  "mapping": {
-                    "CONTENT": "#/components/schemas/PipelineRunRetryRequestBase__type-o1",
-                    "DISCOVERY": "#/components/schemas/PipelineRunRetryRequestBase__type"
-                  }
-                }
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PipelineRunAcceptedResponse"
+                  "$ref": "#/components/schemas/IssueSearchResponse"
                 }
               }
             }
@@ -1372,18 +1528,8 @@
               }
             }
           },
-          "404": {
-            "description": "The requested resource was not found.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request conflicts with the current resource state.",
+          "413": {
+            "description": "The request body exceeds the size limit.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1404,94 +1550,10 @@
           }
         },
         "x-samchon-accessor": [
-          "pipeline",
-          "runs",
-          "retry"
+          "issues",
+          "search"
         ],
-        "x-samchon-controller": "PipelineController"
-      }
-    },
-    "/pipeline/runs/{runId}/interrupt": {
-      "post": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "runId",
-            "in": "path",
-            "schema": {
-              "type": "string"
-            },
-            "required": true
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PipelineRunInterruptRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PipelineRunAcceptedResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The requested resource was not found.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request conflicts with the current resource state.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "pipeline",
-          "runs",
-          "interrupt"
-        ],
-        "x-samchon-controller": "PipelineController"
+        "x-samchon-controller": "IssueController"
       }
     }
   },

@@ -1,5 +1,11 @@
 export { CoreModule } from './core.module.js';
 export { Entity } from './common/entity/base.entity.js';
+export {
+  CATEGORY_CATALOG,
+  CATEGORY_CODES,
+  isCategoryCode,
+} from './common/category/category.catalog.js';
+export type { CategoryCatalogEntry, CategoryCode } from './common/category/category.catalog.js';
 export { DomainException } from './common/exception/domain.exception.js';
 export { ErrorCode } from './common/exception/error.code.js';
 export type { ErrorCodeValue } from './common/exception/error.code.js';
