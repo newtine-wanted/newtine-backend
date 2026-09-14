@@ -22,7 +22,7 @@
   <body>
     <header>
       <h1>PR #3 issue-card-query 최신 main 통합 구현</h1>
-      <p>구현-control 기록 · <span class="status">구현 점검 중</span></p>
+      <p>구현-control 기록 · <span class="status">운영 제어 보류</span></p>
       <dl>
         <dt>목적</dt><dd>승인된 PR #3 issue-card-query 최신 main 통합을 구현·검증한다.</dd>
         <dt>사용자</dt><dd>PR을 통합·검증하는 백엔드 개발자.</dd>
@@ -47,19 +47,19 @@
 
       <section id="current-implementation">
         <h2>현재 구현</h2>
-        <p>PR worktree <code>.worktrees/issue-card-query</code>에 <code>origin/main=d4db486</code>을 merge했고, 현재 main worktree의 사용자 변경은 건드리지 않았다. 로컬 merge index는 충돌 표식 없이 정리되어 commit/push 직전이다.</p>
+        <p>PR worktree <code>.worktrees/issue-card-query</code>에 <code>origin/main=d4db486</code>을 merge했고, 현재 main worktree의 사용자 변경은 건드리지 않았다. merge commit <code>0af1b95459829d8631dd4143aa6b3920609fa5cf</code>를 원격 branch에 push했다.</p>
         <ol>
           <li>origin/main을 PR branch에 merge했다.</li>
           <li>예외 mapper, module, core export와 generated source를 양쪽 기능의 합집합으로 해소했다.</li>
           <li>feed raw SQL을 <code>Migration202609130003IssueCardQuery</code>로 옮기고 database options/test를 갱신했다.</li>
           <li>5개 controller, 14개 route 기준으로 SDK/e2e/OpenAPI를 재생성했다.</li>
-          <li>로컬 검증을 완료했고 commit/push와 원격 mergeability 확인이 남았다.</li>
+          <li>로컬 검증과 commit/push를 완료했고 GitHub가 <code>MERGEABLE</code>·<code>CLEAN</code>을 반환했다.</li>
         </ol>
       </section>
 
       <section id="implementation-status">
         <h2>구현 상태</h2>
-        <p><strong>구현 점검 중.</strong> 승인: <time datetime="2026-09-14">2026-09-14 KST</time>, 사용자 <code>ㄱ</code>. 승인 범위의 로컬 구현과 기술 검증은 끝났고, merge commit·push·원격 PR 상태 확인을 기다린다.</p>
+        <p><strong>구현 완료.</strong> 승인: <time datetime="2026-09-14">2026-09-14 KST</time>, 사용자 <code>ㄱ</code>. 승인 범위의 구현·검증·원격 PR branch 갱신이 완료됐다.</p>
       </section>
 
       <section id="issue-register">
@@ -68,7 +68,7 @@
           <caption>구현 이슈와 해결 증거</caption>
           <thead><tr><th>ID</th><th>상태</th><th>증상·원인</th><th>조치·검증</th><th>잔여 위험</th></tr></thead>
           <tbody>
-            <tr><td>PR3-MERGE-001</td><td>완화됨</td><td>GitHub PR #3가 <code>CONFLICTING</code>·<code>DIRTY</code>로 표시된다.</td><td>최신 원격 main merge, 3개 수동 conflict 해소, generated 재생성, staged diff 검사를 완료했다. commit/push 후 원격 상태를 재확인한다.</td><td>원격 branch 갱신 전에는 GitHub 상태가 바뀌지 않는다.</td></tr>
+            <tr><td>PR3-MERGE-001</td><td>해결됨</td><td>GitHub PR #3가 <code>CONFLICTING</code>·<code>DIRTY</code>로 표시됐다.</td><td>최신 원격 main merge, 3개 수동 conflict 해소, generated 재생성, staged diff 검사, commit <code>0af1b95</code> push 후 GitHub에서 <code>MERGEABLE</code>·<code>CLEAN</code>을 확인했다.</td><td>원격 checks는 현재 비어 있어 CI 결과는 별도 확인 대상이다.</td></tr>
             <tr><td>PR3-MERGE-002</td><td>해당 없음</td><td>기록 시작 시점에 추가 구현 이슈는 관찰되지 않았다.</td><td>새 이슈 발견 시 증상·원인·조치·증거를 이 행에 추가하지 않고 별도 행으로 보존한다.</td><td>실제 PostgreSQL 왕복은 환경에 따라 미검증일 수 있다.</td></tr>
           </tbody>
         </table>
@@ -86,6 +86,7 @@
             <tr><td><code>npm test</code></td><td>통과</td><td>unit 20 suites/106 tests, integration 2 suites/11 tests.</td></tr>
             <tr><td><code>npm run build</code></td><td>통과</td><td>API와 batch build 모두 통과.</td></tr>
             <tr><td><code>git diff --check</code> · staged conflict check</td><td>통과</td><td>whitespace 오류와 unresolved conflict 없음.</td></tr>
+            <tr><td><code>gh pr view 3</code></td><td>통과</td><td>head <code>0af1b95</code>, base <code>d4db486</code>, <code>mergeable=MERGEABLE</code>, <code>mergeStateStatus=CLEAN</code>.</td></tr>
           </tbody>
         </table>
       </section>
@@ -102,9 +103,9 @@
       <section id="implementation-control-state">
         <h2>implementation-control-state</h2>
         <dl>
-          <dt>lifecycle</dt><dd>구현 점검 중</dd>
+          <dt>lifecycle</dt><dd>운영 제어 보류</dd>
           <dt>developer-understanding-state</dt><dd>미실시</dd>
-          <dt>coverage</dt><dd>merge 경계·migration 순서/실패·generated 계약·검증·원격 PR 상태를 구현 후 각각 실제 증거로 채운다.</dd>
+          <dt>coverage</dt><dd>merge 경계·migration 순서/실패·generated 계약·검증·원격 PR 상태를 실제 증거로 채웠다. 개발자 운영 이해 점검은 별도 evidence가 없어 보류한다.</dd>
           <dt>design-delta</dt><dd>없음. 승인 baseline과 다른 behavior/contract/state가 발견되면 즉시 재승인 필요로 전환한다.</dd>
         </dl>
       </section>
