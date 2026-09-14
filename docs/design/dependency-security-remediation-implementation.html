@@ -148,10 +148,11 @@
         <section id="implementation-status">
           <h2>구현 상태</h2>
           <dl>
-            <dt>lifecycle</dt><dd>구현 점검 중</dd>
+            <dt>lifecycle</dt><dd>구현 완료 · main 충돌 해소</dd>
             <dt>affected paths</dt><dd><code>package.json</code>, <code>package-lock.json</code>, <code>docs/design/README.md</code>, 설계·구현 제어 HTML</dd>
             <dt>현재 단계</dt><dd>manifest·lockfile 수정, clean install, security audit, 정적 품질·타입·빌드·unit/integration·계약·HTTP smoke 게이트와 독립 diff 검토 완료. 로컬 커밋 생성: Nest 12.0.2, multer 2.3.0, uuid 11.1.1</dd>
-            <dt>다음 단계</dt><dd>PR 리뷰·merge 대기</dd>
+            <dt>merge resolution</dt><dd><code>origin/main</code>과 충돌한 <code>package.json</code>·<code>package-lock.json</code>을 해소했다. main의 <code>yaml@2.9.1</code>과 보안 패치인 Nest 12.0.2·multer 2.3.0·uuid 11.1.1을 함께 보존하고 머지 커밋 <code>1477af1</code>을 생성했다.</dd>
+            <dt>다음 단계</dt><dd>업데이트된 브랜치 push 후 PR #7 mergeability·CI 확인 및 리뷰 대기</dd>
           </dl>
           <table>
             <caption>구현 단계별 완료 조건</caption>
@@ -160,9 +161,22 @@
               <tr><th scope="row">manifest·lockfile</th><td>승인된 패치 버전만 반영</td><td>완료</td></tr>
               <tr><th scope="row">security</th><td><code>npm audit --audit-level=moderate</code> 통과</td><td>완료 · 0 vulnerabilities</td></tr>
               <tr><th scope="row">quality</th><td>format, lint, typecheck, build, test, contracts, smoke 통과</td><td>완료 · 모든 게이트 통과</td></tr>
-              <tr><th scope="row">delivery</th><td>diff 검토·commit·push·main 대상 PR 생성</td><td>완료 · <a href="https://github.com/newtine-wanted/newtine-backend/pull/7">PR #7</a> open/ready</td></tr>
+              <tr><th scope="row">delivery</th><td>diff 검토·commit·push·main 대상 PR 생성</td><td>진행 · <a href="https://github.com/newtine-wanted/newtine-backend/pull/7">PR #7</a> open/ready, main 충돌 해소 커밋 생성·push 대기</td></tr>
             </tbody>
           </table>
+        </section>
+
+        <section id="merge-resolution">
+          <h2>main 충돌 해소</h2>
+          <table>
+            <caption>충돌 범위와 최종 선택</caption>
+            <thead><tr><th scope="col">파일</th><th scope="col">충돌 원인</th><th scope="col">해소 결과</th></tr></thead>
+            <tbody>
+              <tr><th scope="row"><code>package.json</code></th><td>main이 <code>yaml@2.9.1</code> direct dependency를 추가했고, 보안 브랜치는 <code>uuid</code> 패치를 반영했다.</td><td><code>uuid: ^11.1.1</code>과 <code>yaml: 2.9.1</code>을 모두 유지했다.</td></tr>
+              <tr><th scope="row"><code>package-lock.json</code></th><td>root dependency metadata와 <code>yaml</code> 패키지 엔트리가 양쪽 브랜치에서 달랐다.</td><td>lockfile을 JSON으로 재검증하고 <code>yaml@2.9.1</code> resolved entry와 보안 버전을 함께 유지했다.</td></tr>
+            </tbody>
+          </table>
+          <p><code>git diff --check</code>, conflict marker 검색, <code>npm ci</code>, audit, format, lint, typecheck, build, 106개 테스트, contract 검증과 HTTP smoke를 머지 결과 기준으로 통과했다. main에서 들어온 pipeline 변경은 그대로 보존했으며 보안 수정 외 런타임 변경은 추가하지 않았다.</p>
         </section>
 
         <section id="issue-register">
@@ -193,10 +207,10 @@
             <caption>실행할 게이트와 기록 위치</caption>
             <thead><tr><th scope="col">명령</th><th scope="col">목적</th><th scope="col">결과</th></tr></thead>
             <tbody>
-              <tr><th scope="row"><code>npm ci</code></th><td>clean install과 lockfile 재현성</td><td>통과 · 706 packages 설치, 0 vulnerabilities</td></tr>
+              <tr><th scope="row"><code>npm ci</code></th><td>clean install과 lockfile 재현성</td><td>통과 · 707 packages 설치, 0 vulnerabilities</td></tr>
               <tr><th scope="row"><code>npm audit --audit-level=moderate</code></th><td>취약 advisory 제거</td><td>통과 · found 0 vulnerabilities</td></tr>
               <tr><th scope="row"><code>npm run format:check</code> · <code>npm run lint</code> · <code>npm run typecheck</code></th><td>정적 품질과 타입 회귀</td><td>통과 · 모두 exit 0</td></tr>
-              <tr><th scope="row"><code>npm run build</code> · <code>npm test</code> · <code>npm run test:smoke</code></th><td>API/batch 빌드, unit/integration 회귀, 실제 HTTP 경계</td><td>통과 · build, 44 tests, health/search/failure/parser smoke</td></tr>
+              <tr><th scope="row"><code>npm run build</code> · <code>npm test</code> · <code>npm run test:smoke</code></th><td>API/batch 빌드, unit/integration 회귀, 실제 HTTP 경계</td><td>통과 · build, 106 tests(95 unit + 11 integration), health/search/failure/parser smoke</td></tr>
               <tr><th scope="row"><code>npm run contracts:check</code></th><td>SDK·e2e·OpenAPI 계약 재생성·검증</td><td>통과 · generator, contract 4 tests, generated typecheck</td></tr>
               <tr><th scope="row"><code>npm run test:smoke</code></th><td>실제 HTTP health/search/failure/parser 경계</td><td>통과</td></tr>
               <tr><th scope="row">최종 <code>git diff</code>·독립 검토</th><td>승인 범위와 외부 변경 확인</td><td>통과 · concrete finding 없음</td></tr>
@@ -212,7 +226,7 @@
             <caption>리뷰 판단</caption>
             <thead><tr><th scope="col">ID / 판단</th><th scope="col">근거</th><th scope="col">조치</th></tr></thead>
             <tbody>
-              <tr><th scope="row">F-001 · concrete finding 없음</th><td>lockfile 변경 집합이 root metadata와 승인된 Nest 4개, multer, uuid로 제한됨. <code>npm ls</code>는 Nest 12.0.2, multer 2.3.0, uuid 11.1.1을 확인했고 audit은 0 vulnerabilities였다.</td><td>수정 불필요. PR은 승인 범위와 검증 결과를 본문에 기록한다.</td></tr>
+              <tr><th scope="row">F-001 · concrete finding 없음</th><td>보안 변경과 main의 <code>yaml@2.9.1</code>을 함께 반영한 뒤에도 <code>npm ls</code>는 Nest 12.0.2, multer 2.3.0, uuid 11.1.1을 확인했고 audit은 0 vulnerabilities였다.</td><td>수정 불필요. PR은 승인 범위와 충돌 해소·검증 결과를 본문에 기록한다.</td></tr>
               <tr><th scope="row">R-001 · non-blocking risk</th><td><code>npm ci</code>에서 기존 dev tooling의 <code>inflight</code>, <code>glob</code>, <code>eslint</code> deprecation 경고가 남았다. 이번 audit 결과는 0 vulnerabilities이며 현재 PR의 보안 advisory 대상과는 별개다.</td><td>이번 PR에서는 범위를 넓히지 않는다. 후속 tooling 정리 시 별도 dependency review를 수행한다.</td></tr>
             </tbody>
           </table>
@@ -304,9 +318,9 @@
             <dt>developer-understanding</dt><dd>미실시</dd>
             <dt>issue-register</dt><dd>SEC-DEP-001 · 해결됨</dd>
             <dt>design-delta</dt><dd>없음</dd>
-            <dt>commit</dt><dd><code>chore: update vulnerable dependencies</code> 로컬 커밋 완료</dd>
-            <dt>PR</dt><dd><a href="https://github.com/newtine-wanted/newtine-backend/pull/7">#7 chore: update vulnerable dependencies</a> · base <code>main</code> · ready · open</dd>
-            <dt>다음 갱신 조건</dt><dd>리뷰·merge 또는 PR 상태 변경 시 실제 결과를 반영</dd>
+            <dt>commit</dt><dd><code>chore: update vulnerable dependencies</code> 및 <code>1477af1 merge: resolve main conflict</code> 완료</dd>
+            <dt>PR</dt><dd><a href="https://github.com/newtine-wanted/newtine-backend/pull/7">#7 chore: update vulnerable dependencies</a> · base <code>main</code> · ready · open · 충돌 해소 커밋 push 대기</dd>
+            <dt>다음 갱신 조건</dt><dd>충돌 해소 커밋 push 후 PR mergeability·CI 상태를 실제 결과로 갱신</dd>
           </dl>
         </section>
       </article>
