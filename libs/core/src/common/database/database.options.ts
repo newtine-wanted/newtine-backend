@@ -10,6 +10,7 @@ import { Migration202609130001Pipeline } from '../../pipeline/migrations/Migrati
 import { Migration202609130002PipelineEmbeddingTasks } from '../../pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
 import { Migration202609130003IssueCardQuery } from '../../pipeline/migrations/Migration202609130003IssueCardQuery.js';
 import { Migration202609130004IssueCardQueryReadModel } from '../../pipeline/migrations/Migration202609130004IssueCardQueryReadModel.js';
+import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '../../issue/persistence/issueQuery.persistence.entity.js';
 
 export function createDatabaseOptions(
   env: NodeJS.ProcessEnv = process.env,
@@ -36,8 +37,16 @@ export function createDatabaseOptions(
     dbName: required('DB_NAME', 'newtine'),
     user: required('DB_USER', 'postgres'),
     password: required('DB_PASSWORD', 'postgres'),
-    entities: [...ONBOARDING_PERSISTENCE_ENTITIES, AiUsageRecordEntity],
-    entitiesTs: [...ONBOARDING_PERSISTENCE_ENTITIES, AiUsageRecordEntity],
+    entities: [
+      ...ONBOARDING_PERSISTENCE_ENTITIES,
+      ...ISSUE_QUERY_PERSISTENCE_ENTITIES,
+      AiUsageRecordEntity,
+    ],
+    entitiesTs: [
+      ...ONBOARDING_PERSISTENCE_ENTITIES,
+      ...ISSUE_QUERY_PERSISTENCE_ENTITIES,
+      AiUsageRecordEntity,
+    ],
     extensions: [Migrator],
     migrations: {
       path: './dist/libs/core/src/pipeline/migrations',

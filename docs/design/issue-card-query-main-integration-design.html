@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="purpose" content="PR #3 issue-card-query를 최신 main과 통합해 충돌을 해소한다" />
     <meta name="audience" content="PR을 통합·검증하는 백엔드 개발자" />
-    <meta name="problem" content="pipeline/onboarding이 추가된 최신 main과 issue-card-query PR의 공통 파일·migration·생성 계약 충돌을 해소한다" />
-    <meta name="core-flow" content="최신 main 확인 → PR 브랜치 merge → 공통 경계 합집합 해소 → migration 등록 → 계약 재생성 → 게이트 검증" />
-    <title>PR #3 issue-card-query 최신 main 통합 설계</title>
+    <meta name="problem" content="PR #3의 issue-card-query가 PR #5 인증 principal이 포함된 최신 main과 충돌 없이 결합되고, raw x-user-id 신뢰 없이 회원·비회원 경계를 지키도록 한다" />
+    <meta name="core-flow" content="최신 main 인증 기준 확인 → PR 브랜치 merge → route별 공개·회원·게스트 정책 확정 → principal 연결·x-user-id 제거 → migration·계약·게이트 검증" />
+    <title>PR #3 issue-card-query·main 인증 principal 통합 설계</title>
     <style>
       :root { color-scheme: light; font-family: system-ui, sans-serif; line-height: 1.55; }
       body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #182230; }
@@ -30,14 +30,15 @@
   </head>
   <body>
     <header>
-      <h1>PR #3 issue-card-query 최신 main 통합</h1>
-      <p>설계 기준 문서 · <span class="status">설계 승인됨</span></p>
+      <h1>PR #3 issue-card-query·main 인증 principal 통합</h1>
+      <p>설계 기준 문서 · <span class="status">재승인 필요 · 인증 principal 통합 설계 중</span></p>
       <dl>
         <dt>목적</dt><dd>PR #3의 issue detail·personalized feed 기능을 최신 main의 pipeline/onboarding과 함께 유지한다.</dd>
         <dt>사용자</dt><dd>PR을 통합·검증하는 백엔드 개발자.</dd>
-        <dt>문제</dt><dd><code>origin/main=d4db486</code>가 PR 브랜치의 기준 <code>4634e1c</code>보다 전진했고, 공통 예외·생성 계약·core export·migration 경계에서 충돌한다.</dd>
-        <dt>핵심 흐름</dt><dd>최신 main 확인 → merge → 두 기능의 등록·export·계약 합집합 → feed schema를 ordered MikroORM migration으로 등록 → 생성 계약·테스트·게이트 검증.</dd>
-        <dt>강도</dt><dd>Standard: API·DB migration·생성 계약 경계를 함께 다루지만, 기존 승인 기능의 의미와 공개 endpoint는 변경하지 않는다.</dd>
+        <dt>문제</dt><dd><code>origin/main=1215526</code>에는 PR #5의 JWT 인증·principal 경계가 들어왔지만, PR 브랜치 <code>a43bfc0</code>의 issue/feed는 raw <code>x-user-id</code>를 읽고 기존 onboarding seam을 사용한다.</dd>
+        <dt>핵심 흐름</dt><dd>최신 main 인증 기준 확인 → merge → route별 공개·회원·게스트 정책 확정 → 검증된 principal 연결·raw <code>x-user-id</code> 제거 → migration·계약·테스트·게이트 검증.</dd>
+        <dt>강도</dt><dd>High-risk: 인증·인가, 개인화 데이터 소유권, 회원/게스트 혼합 흐름, API 계약과 기존 PR 통합을 함께 다룬다.</dd>
+        <dt>변경 관리</dt><dd>기존 최신 main merge·migration 통합 승인 범위는 보존하되, principal 연결·route 권한·credential 실패 동작은 새 설계 delta로 재승인받기 전 구현하지 않는다.</dd>
       </dl>
     </header>
 
@@ -49,16 +50,103 @@
           <li>최신 main의 onboarding·pipeline API, 상태 머신, provider·migration을 유지한다.</li>
           <li>feed 테이블 SQL은 <code>Migration202609130003IssueCardQuery</code>의 <code>addSql()</code>로 옮기고 <code>down()</code>은 데이터 삭제를 막기 위해 명시적으로 중단한다.</li>
           <li><code>generated/</code> 산출물은 controller/source 통합 후 <code>npm run contracts:all</code>로 재생성한다. 생성 파일을 손으로 합치지 않는다.</li>
-          <li>충돌 해소 목적을 넘어 인증 principal, 추천 정책, pipeline 상태, 공개 API 의미를 새로 설계하지 않는다.</li>
+          <li><code>origin/main</code>의 PR #5 인증 구현(<code>AuthPrincipal</code>, <code>JwtAuthGuard</code>, <code>CurrentUser</code>, DB current-role 조회)을 인증 기준선으로 재사용하고 JWT·refresh 정책은 변경하지 않는다.</li>
+          <li>현재 issue/feed의 raw <code>x-user-id</code>를 신뢰하지 않고, 회원 사용자 ID는 검증된 principal에서만 얻는다. 게스트용 <code>x-feed-guest-key</code>는 회원 ID 대체물이 아닌 별도 세션 소유 증명으로만 남긴다.</li>
+          <li>공개·회원·게스트 route 정책과 pipeline 접근 정책을 명시한 뒤에만 controller·module·생성 계약을 통합한다.</li>
         </ul>
+      </section>
+
+      <section id="auth-principal-delta">
+        <h2>인증 principal 통합 초안 · 재승인 대상</h2>
+        <p>
+          최신 <code>origin/main</code>의 PR #5는 이미 service access JWT를 검증하고
+          <code>AuthPrincipal { userId, role }</code>를 request에 주입한다. 따라서 이 작업은 새 JWT·refresh
+          구현이 아니라, issue/feed consumer를 그 기준선에 연결하는 통합이다. 현재 PR 브랜치의
+          <code>@Headers('x-user-id')</code>와 이전 <code>authenticatedUserId</code> seam은 신뢰 경계에서 제거한다.
+        </p>
+        <figure>
+          <div class="flow">
+            <span><code>Authorization: Bearer</code></span><b>→</b>
+            <span>기존 <code>JwtAuthGuard</code> 정책 판정</span><b>→</b>
+            <span><code>AccessPrincipalService</code><br />JWT + DB current role</span><b>→</b>
+            <span><code>request.principal</code></span><b>→</b>
+            <span>issue/feed/onboarding controller</span>
+          </div>
+          <figcaption>
+            텍스트 등가: 기존 guard가 인증 헤더를 검증하고 DB의 현재 사용자·role을 확인한 뒤 principal을
+            주입한다. 익명 허용 route에서는 헤더가 없을 때만 principal 없이 계속하고, 헤더가 있으면 반드시
+            검증한다.
+          </figcaption>
+        </figure>
+        <table>
+          <caption>현재 route별 목표 정책 초안</caption>
+          <thead>
+            <tr><th>경로</th><th>정책</th><th>사용자 식별 경계</th><th>실패·소유 증명</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/health</code>, <code>/auth/*</code>, <code>/onboarding/options</code>, <code>/onboarding/entities</code>, <code>/issues/search</code></td>
+              <td>PUBLIC</td>
+              <td>principal을 사용하지 않음</td>
+              <td>기존 공개 route 계약 유지</td>
+            </tr>
+            <tr>
+              <td><code>/me/onboarding*</code></td>
+              <td>REQUIRED USER</td>
+              <td>기존 main의 <code>JwtAuthGuard + CurrentUser().userId</code></td>
+              <td>토큰 없음·무효는 401</td>
+            </tr>
+            <tr>
+              <td><code>GET /issues/:issueId</code></td>
+              <td>PUBLIC + optional principal</td>
+              <td>Bearer가 있으면 principal의 userId로만 개인 영향 계산</td>
+              <td>헤더 없음은 익명, 잘못된 Bearer는 401</td>
+            </tr>
+            <tr>
+              <td><code>POST /feed-sessions</code><br /><code>POST /feed-sessions/:sessionId/batches</code></td>
+              <td>MEMBER 또는 GUEST</td>
+              <td>회원은 principal userId, 익명은 guest key만 사용</td>
+              <td>회원/guest credential 혼합은 거절; 소유자 불일치는 기존 404 경계 유지</td>
+            </tr>
+            <tr>
+              <td><code>/pipeline/runs*</code></td>
+              <td>ADMIN</td>
+              <td>main의 <code>JwtAuthGuard + Roles(AuthRole.Admin)</code></td>
+              <td>토큰 없음·무효는 401, USER role은 403</td>
+            </tr>
+          </tbody>
+        </table>
+        <aside>
+          <strong>중요:</strong> “optional”은 두 번째 인증 체계를 뜻하지 않는다. 회원/게스트를 같은 endpoint에서
+          지원해야 한다는 기존 계약 때문에 익명 요청을 허용하는 route 정책이 필요하다는 뜻이다. 실제 구현은
+          별도 <code>OptionalJwtAuthGuard</code>를 만들지 않고 기존 guard의 명시적 route policy로 처리한다.
+        </aside>
+      </section>
+
+      <section id="failure-recovery">
+        <h2>실패·복구 경계</h2>
+        <table>
+          <caption>인증·소유권 실패와 안전한 결과</caption>
+          <thead><tr><th>상황</th><th>판정</th><th>결과·복구</th></tr></thead>
+          <tbody>
+            <tr><td>strict route에 Bearer 없음·형식 오류·서명/issuer/audience/만료 오류</td><td>인증 실패</td><td>기존 guard가 401을 반환하고 controller/service로 진입하지 않는다. raw user ID로 대체하지 않는다.</td></tr>
+            <tr><td>optional route에 Bearer 없음</td><td>익명 흐름</td><td>principal 없이 public/guest 경로를 실행한다. 회원 사용자 행·행동·선호를 생성하지 않는다.</td></tr>
+            <tr><td>optional route에 Bearer가 있으나 검증 실패</td><td>인증 실패</td><td>401로 종료한다. 잘못된 토큰을 guest로 강등하지 않는다.</td></tr>
+            <tr><td>회원 principal과 guest key 동시 입력</td><td>credential 충돌</td><td>400으로 거절한다. 어느 소유자도 임의로 선택하지 않는다.</td></tr>
+            <tr><td>세션은 존재하지만 principal/guest 소유자가 다름</td><td>소유권 불일치</td><td>기존 404 경계를 유지해 세션 존재 여부를 노출하지 않는다.</td></tr>
+            <tr><td>pipeline route에 USER principal</td><td>인가 실패</td><td>RolesGuard가 403을 반환한다. ADMIN role은 JWT claim이 아니라 DB의 현재 role에서 읽는다.</td></tr>
+            <tr><td>인증 저장소·DB 장애</td><td>의존성 실패</td><td>500으로 관찰하고 인증 우회·header fallback·guest 강등을 하지 않는다.</td></tr>
+          </tbody>
+        </table>
       </section>
 
       <section id="flow">
         <h2>통합 흐름</h2>
         <figure>
           <div class="flow">
-            <span><code>origin/main d4db486</code></span><b>→</b>
+            <span><code>origin/main 1215526</code><br />PR #5 auth baseline</span><b>→</b>
             <span>PR branch merge</span><b>→</b>
+            <span>route auth policy·principal 연결</span><b>→</b>
             <span>공통 등록·export 합집합</span><b>→</b>
             <span>ordered migration</span><b>→</b>
             <span>Nestia 계약 재생성</span><b>→</b>
@@ -70,7 +158,7 @@
 
       <section id="grilling-state">
         <h2>설계 의사결정 질문 (grilling)</h2>
-        <p>진행 상태: <strong>완료</strong>. 사용자가 <code>G1-A / G2-A</code>를 선택해 통합 경계를 확정했다.</p>
+        <p>진행 상태: <strong>완료</strong>. 기존 <code>G1-A / G2-A</code> 통합 결정과 이번 인증 principal delta의 frontier를 모두 닫았다.</p>
         <table>
           <caption>현재 frontier</caption>
           <thead><tr><th>ID</th><th>결정</th><th>선택지</th><th>권고와 트레이드오프</th></tr></thead>
@@ -87,27 +175,66 @@
               <td>A. ordered MikroORM TypeScript migration으로 편입<br />B. raw SQL 파일을 별도 수동 적용</td>
               <td><strong>사용자 선택: A</strong>. 현재 main의 <code>db:migrate</code>·history·transaction을 재사용한다. migration 파일을 변환·등록해야 하는 작업량은 늘어난다.</td>
             </tr>
+            <tr>
+              <td>AUTH-G1</td>
+              <td>익명 허용 route의 인증 정책을 기존 guard에 어떻게 표현할지</td>
+              <td>A. 별도 <code>OptionalJwtAuthGuard</code><br />B. 기존 <code>JwtAuthGuard</code>에 명시적 route policy metadata를 추가<br />C. 회원/게스트 route를 경로로 분리</td>
+              <td><strong>사용자 선택: B · 권고 채택</strong>. 인증 검증 경계를 하나로 유지하고, route가 명시한 optional 정책에서만 헤더 부재를 허용한다. A는 guard 분기 중복, C는 기존 API 계약·게스트 흐름 변경 비용이 크다.</td>
+            </tr>
+            <tr>
+              <td>AUTH-G2</td>
+              <td>issue detail/feed의 회원·게스트 동작과 credential 충돌</td>
+              <td>A. Bearer 없음은 익명/게스트, 유효 Bearer는 principal, 무효 Bearer는 401; 회원 principal과 guest key 동시 입력은 거절<br />B. 모든 feed/detail을 회원 필수로 변경<br />C. 무효 Bearer도 게스트로 처리</td>
+              <td><strong>사용자 선택: A · 권고 채택</strong>. 기존 비회원 피드 계약을 보존하면서 위조·모호한 credential을 fail-closed한다. B는 제품 계약을 깨고 C는 잘못된 토큰을 우회시킨다.</td>
+            </tr>
+            <tr>
+              <td>AUTH-G3</td>
+              <td><code>/pipeline/runs*</code>의 접근 정책</td>
+              <td>A. <code>JwtAuthGuard + Roles(AuthRole.Admin)</code><br />B. internal transport/network ACL을 전제로 무인증 유지<br />C. 이번 PR에서는 보류하고 운영 배포 blocker로 기록</td>
+              <td><strong>사용자 선택: A · 권고 채택</strong>. 실행·재시도·중단은 provider 비용과 상태를 변경한다. B는 별도 네트워크 인증 증거가 없고, C는 노출 위험을 남긴다.</td>
+            </tr>
+            <tr>
+              <td>AUTH-G4</td>
+              <td>principal consumer 통합을 PR #3에 포함할지</td>
+              <td>A. 최신 main merge 후 PR #3에 issue/feed/onboarding 연결까지 포함<br />B. 별도 후속 PR로 분리</td>
+              <td><strong>사용자 선택: A · 권고 채택</strong>. 인증 foundation은 이미 main에 있고, 현재 PR이 새 issue/feed endpoint를 추가한다. raw header 상태로 PR #3을 먼저 배포하지 않는 편이 review·운영 경계가 명확하다.</td>
+            </tr>
           </tbody>
         </table>
         <p>G3(생성 계약)는 소스가 확정되면 <code>npm run contracts:all</code> 재생성으로 고정한다. 수동 병합은 재현성과 endpoint 누락 검증을 잃으므로 독립적인 사용자 선택지로 두지 않는다.</p>
-        <p>현재 frontier: 없음. 남은 단계는 공유 이해 확인 → design-control self-check → 별도 구현 승인이다.</p>
+        <p>결정 반영: <code>AUTH-G1-B</code>로 기존 guard 하나와 명시적 route policy를 사용하고, <code>AUTH-G2-A</code>로 익명/회원 혼합 계약과 fail-closed credential 처리를 유지하며, <code>AUTH-G3-A</code>로 pipeline 전체를 ADMIN route로 보호한다. <code>AUTH-G4-A</code>로 선택된 principal consumer와 pipeline 권한 변경을 PR #3에 포함한다. 별도 optional guard나 별도 consumer PR은 만들지 않는다.</p>
+        <p>현재 frontier: 없음. 다음 단계는 최종 설계 요약 → 설계 이해·통제 점검 → 별도 구현 승인이다.</p>
       </section>
 
       <section id="shared-understanding">
         <h2>공유 이해 확인</h2>
-        <p>이 설계는 PR 브랜치에 최신 <code>origin/main</code>을 merge해 기존 이력을 보존하고, pipeline/onboarding과 issue-card-query의 등록·export·공개 계약을 모두 남긴다는 뜻이다. feed SQL은 <code>Migration202609130003IssueCardQuery</code>로 옮겨 onboarding → pipeline → embedding-task → issue-card-query 순서의 MikroORM migration history에 등록한다. 생성 SDK·e2e·OpenAPI는 source 통합 뒤 재생성하며, API 의미·추천 규칙·pipeline 상태 머신은 변경하지 않는다.</p>
-        <p><strong>잔여 가정:</strong> 실제 PostgreSQL 왕복과 migration up/down은 로컬 환경에서 가능한 범위만 검증하고, 연결되지 않는 운영 검증은 잔여 위험으로 기록한다.</p>
-        <p><strong>확인 상태:</strong> <time datetime="2026-09-14">2026-09-14 KST</time> 사용자 <code>ㄱㄱㄱㄱ</code> 응답으로 공유 이해를 확인했다.</p>
+        <p>기존 승인 범위는 PR 브랜치에 최신 <code>origin/main</code>을 merge해 pipeline/onboarding과 issue-card-query를 함께 유지하는 것이다. 이번 재승인 delta는 main의 PR #5 인증을 기준선으로 삼아 issue/feed의 raw <code>x-user-id</code>를 제거하고, 회원/게스트 route 정책을 명시하는 것이다.</p>
+        <p><strong>결정 반영:</strong> strict 회원 route는 main의 <code>JwtAuthGuard + CurrentUser</code>를 그대로 사용한다. 익명 허용 route도 같은 guard를 사용하되 명시적 route policy에서만 헤더 부재를 허용하며, 존재하는 Bearer는 반드시 검증한다. guest batch는 <code>x-feed-guest-key</code>만 소유 증명으로 사용하고, pipeline run·retry·interrupt는 ADMIN principal을 요구한다.</p>
+        <p><strong>잔여 가정:</strong> main의 service JWT(<code>sub=UUIDv7</code>, issuer/audience 검증)를 API access token 계약으로 재사용한다. 실제 production DB·role seed·pipeline network ACL은 구현 전 확인한다.</p>
       </section>
 
       <section id="design-control-state">
         <h2>설계 이해·통제 점검</h2>
         <dl>
-          <dt>design-control-state</dt><dd>확인 중. migration 순서·down 안전성·계약 재생성 결과를 예측하는 self-check를 구성한다.</dd>
-          <dt>approval-state</dt><dd>설계 승인됨. <time datetime="2026-09-14">2026-09-14 KST</time> 사용자 <code>ㄱ</code> 응답으로 승인했다. 승인 범위는 최신 main merge, 두 기능 보존, feed TypeScript migration 편입, 계약 재생성, 검증이다.</dd>
+          <dt>design-control-state</dt><dd>확인 중. high-risk coverage self-check <code>C1~C12</code>를 구성했으며, route 정책·소유권·실패 복구·운영 검증을 예측하는 문항을 포함한다.</dd>
+          <dt>approval-state</dt><dd>설계 승인 대기. 기존 승인 범위와 <code>AUTH-G1-B / AUTH-G2-A / AUTH-G3-A / AUTH-G4-A</code> principal 통합 delta를 합친 설계를 별도로 승인받아야 한다.</dd>
+          <dt>답변 전달</dt><dd>아래 self-check는 HTML 안에서만 상태를 기록한다. 브라우저 결과가 Codex에 자동 전달된다고 가정하지 않으며, 구현 승인은 별도 질문으로 받는다.</dd>
         </dl>
+        <table>
+          <caption>High-risk coverage ledger</caption>
+          <thead><tr><th>축</th><th>문항</th><th>점검 대상</th></tr></thead>
+          <tbody>
+            <tr><td>목표·범위</td><td>C1, C5</td><td>PR #3 통합 범위와 route별 공개·회원·게스트 분류</td></tr>
+            <tr><td>결정·대안</td><td>C6, C7</td><td>단일 guard policy, raw header 제거, credential 충돌</td></tr>
+            <tr><td>불변식·경계</td><td>C8, C9</td><td>principal 소유권, guest proof, DB current role</td></tr>
+            <tr><td>실패·복구</td><td>C2, C10</td><td>401/403/404/400과 인증 장애 시 우회 금지</td></tr>
+            <tr><td>권한·외부 효과</td><td>C11</td><td>pipeline 비용·상태 변경과 ADMIN 경계</td></tr>
+            <tr><td>관찰·운영</td><td>C12</td><td>credential redaction, route matrix, release gate</td></tr>
+            <tr><td>검증·잔여 위험</td><td>C3, C4</td><td>migration·generated contract와 auth/impersonation smoke</td></tr>
+          </tbody>
+        </table>
         <article id="design-control-quiz" class="quiz">
-          <p id="quiz-progress" aria-live="polite">문항 1 / 4 · 답변 0 / 4</p>
+          <p id="quiz-progress" aria-live="polite">문항 1 / 12 · 답변 0 / 12</p>
           <div class="quiz-slide" data-answer="b">
             <fieldset>
               <legend>C1 · 통합 후 반드시 보존해야 하는 범위는?</legend>
@@ -144,6 +271,86 @@
               <label><input type="radio" name="c4" value="a" /> 충돌난 generated 파일을 손으로 이어 붙인다.</label><br />
               <label><input type="radio" name="c4" value="b" /> source 통합 후 <code>npm run contracts:all</code>로 재생성하고 계약/typecheck를 확인한다.</label><br />
               <label><input type="radio" name="c4" value="c" /> 기존 generated 파일을 모두 삭제하고 검증하지 않는다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="c" hidden>
+            <fieldset>
+              <legend>C5 · issue/feed route의 최종 인증 동작은?</legend>
+              <label><input type="radio" name="c5" value="a" /> 모든 issue detail과 feed session을 회원 전용으로 바꾸고 guest 흐름을 제거한다.</label><br />
+              <label><input type="radio" name="c5" value="b" /> Bearer가 없거나 검증에 실패해도 항상 guest로 처리한다.</label><br />
+              <label><input type="radio" name="c5" value="c" /> Bearer 없음은 익명/게스트, 유효 Bearer는 principal, 무효 Bearer는 401로 처리한다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="b" hidden>
+            <fieldset>
+              <legend>C6 · optional route는 어떤 방식으로 표현하는가?</legend>
+              <label><input type="radio" name="c6" value="a" /> <code>OptionalJwtAuthGuard</code>를 새로 만들고 route마다 다른 검증 로직을 둔다.</label><br />
+              <label><input type="radio" name="c6" value="b" /> 기존 <code>JwtAuthGuard</code>에 명시적 route policy metadata를 두고 헤더 부재만 허용한다.</label><br />
+              <label><input type="radio" name="c6" value="c" /> 각 controller에서 Authorization header를 직접 읽고 service에 userId를 넘긴다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="a" hidden>
+            <fieldset>
+              <legend>C7 · 회원 principal과 guest key가 동시에 들어오면?</legend>
+              <label><input type="radio" name="c7" value="a" /> credential 충돌로 400을 반환하고 어느 소유자도 임의로 선택하지 않는다.</label><br />
+              <label><input type="radio" name="c7" value="b" /> 항상 Bearer principal을 우선하고 guest key는 조용히 무시한다.</label><br />
+              <label><input type="radio" name="c7" value="c" /> 항상 guest key를 우선해 회원 principal을 무시한다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="c" hidden>
+            <fieldset>
+              <legend>C8 · 회원 사용자의 소유자 ID는 어디서 얻는가?</legend>
+              <label><input type="radio" name="c8" value="a" /> 요청 body의 <code>userId</code>를 검증 없이 사용한다.</label><br />
+              <label><input type="radio" name="c8" value="b" /> query/header의 <code>x-user-id</code>를 controller가 읽어 사용한다.</label><br />
+              <label><input type="radio" name="c8" value="c" /> guard가 주입한 <code>request.principal.userId</code>만 사용한다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="b" hidden>
+            <fieldset>
+              <legend>C9 · 다른 사용자가 feed session을 요청하면?</legend>
+              <label><input type="radio" name="c9" value="a" /> session 존재 여부를 먼저 알려주고 소유권 검증은 나중에 한다.</label><br />
+              <label><input type="radio" name="c9" value="b" /> 기존 404 경계를 유지하고, guest는 guest key로만 소유권을 증명한다.</label><br />
+              <label><input type="radio" name="c9" value="c" /> 요청에 담긴 다른 userId로 session owner를 교체한다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="a" hidden>
+            <fieldset>
+              <legend>C10 · strict와 optional route의 Bearer 실패 경계는?</legend>
+              <label><input type="radio" name="c10" value="a" /> strict는 없음/무효 Bearer 모두 401, optional은 없음만 허용하고 제시된 무효 Bearer는 401이다.</label><br />
+              <label><input type="radio" name="c10" value="b" /> 두 route 모두 무효 Bearer를 guest로 강등한다.</label><br />
+              <label><input type="radio" name="c10" value="c" /> optional route는 어떤 인증 실패도 무시하고 익명으로 계속한다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="c" hidden>
+            <fieldset>
+              <legend>C11 · pipeline run·retry·interrupt의 접근 정책은?</legend>
+              <label><input type="radio" name="c11" value="a" /> 내부 경로라는 가정만으로 무인증을 유지한다.</label><br />
+              <label><input type="radio" name="c11" value="b" /> 유효한 USER token이면 provider 비용을 발생시키는 작업도 허용한다.</label><br />
+              <label><input type="radio" name="c11" value="c" /> ADMIN principal만 허용하고 USER는 403; 현재 role은 DB에서 확인한다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="b" hidden>
+            <fieldset>
+              <legend>C12 · 이 통합의 release gate와 운영 검증으로 충분한 것은?</legend>
+              <label><input type="radio" name="c12" value="a" /> unit test 몇 개만 통과하면 generated 계약과 실제 PostgreSQL 검증은 생략한다.</label><br />
+              <label><input type="radio" name="c12" value="b" /> auth route/role/ownership matrix, fresh Compose smoke, generated contract, credential redaction을 확인한다.</label><br />
+              <label><input type="radio" name="c12" value="c" /> 로그에 Authorization과 guest key를 남겨 디버깅 가능성을 우선한다.</label>
             </fieldset>
             <button type="button" data-submit>제출</button>
             <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
@@ -196,6 +403,9 @@
           <li><code>npm run contracts:all</code>, <code>npm run test:contracts</code>, <code>npm run typecheck:generated</code></li>
           <li><code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code></li>
           <li>관련 unit/integration test와 전체 <code>npm test</code>, <code>npm run build</code></li>
+          <li>main auth의 JWT·principal·role 테스트와 fresh Compose auth smoke 재실행</li>
+          <li>issue/feed route matrix: 인증 없음, 유효 Bearer, 무효 Bearer, raw <code>x-user-id</code> 무시/거절, 회원·guest credential 혼합, 사용자 간 세션 소유권 확인</li>
+          <li>pipeline route의 선택된 권한 정책과 일반 USER의 실행·재시도·중단 거부 확인</li>
           <li>가능한 환경에서 migration up 재실행과 안전한 down 실패 경계 확인</li>
         </ol>
         <p>검증 실패·환경 미충족·실제 PostgreSQL 미연결은 통과로 표현하지 않고 잔여 위험으로 기록한다.</p>

@@ -1,5 +1,3 @@
-import { Injectable } from '@nestjs/common';
-
 import {
   generateUuidV7,
   IssueException,
@@ -23,11 +21,9 @@ export interface InMemoryIssueQuerySeed {
 }
 
 /**
- * A deterministic adapter used while the production issue schema is being connected.
- * It intentionally mirrors the repository port so recommendation rules can be tested
- * without inventing a second domain model or requiring a local PostgreSQL instance.
+ * A deterministic test fixture for the repository port. It is intentionally kept
+ * outside the application source tree so production wiring cannot select it.
  */
-@Injectable()
 export class InMemoryIssueQueryRepository implements IssueQueryRepository {
   private readonly issues: IssueRecord[];
   private readonly contexts = new Map<string, UserRecommendationContext>();

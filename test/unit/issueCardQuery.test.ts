@@ -4,7 +4,8 @@ import { test } from '@jest/globals';
 import { IssueDetailService } from '@newtine/api/issue/issueDetail.service.js';
 import { IssueFeedService } from '@newtine/api/issue/issueFeed.service.js';
 import { recommendFeed } from '@newtine/api/issue/recommendation/issueRecommendation.js';
-import { InMemoryIssueQueryRepository } from '@newtine/api/issue/repository/inMemoryIssueQuery.repository.js';
+import { InMemoryIssueQueryRepository } from '../fixtures/issue/inMemoryIssueQuery.repository.js';
+import { testTransactionManager } from '../fixtures/transactionManager.js';
 import { toIssueDetailResponse } from '@newtine/api/issue/type/issueDetail.mapper.js';
 import type {
   IssueRecord,
@@ -20,7 +21,7 @@ test('feed returns at most ten unique cards and reuses the same batch on retry',
   const repository = new InMemoryIssueQueryRepository({
     issues: Array.from({ length: 12 }, (_, index) => issue(index + 1)),
   });
-  const service = new IssueFeedService(repository);
+  const service = new IssueFeedService(repository, testTransactionManager);
   const session = await service.createSession({ userId: null, guestKey: null });
   assert.ok(session.guestKey);
   const owner = { userId: null, guestKey: session.guestKey };
@@ -102,7 +103,7 @@ test('connected cards require a verified later FOLLOW_UP event', async () => {
     interactions: [interaction(source.id)],
     relations: [relation(source.id, later.id), relation(source.id, sameTime.id)],
   });
-  const service = new IssueFeedService(repository);
+  const service = new IssueFeedService(repository, testTransactionManager);
   const session = await service.createSession({ userId: USER_ID, guestKey: null });
   const result = await service.getBatch({
     owner: { userId: USER_ID, guestKey: null },
@@ -243,7 +244,7 @@ test('limited batch can be retried but cannot create a new batch', async () => {
   const repository = new InMemoryIssueQueryRepository({
     issues: Array.from({ length: 3 }, (_, index) => issue(index + 1, { mainTopic: 'same-topic' })),
   });
-  const service = new IssueFeedService(repository);
+  const service = new IssueFeedService(repository, testTransactionManager);
   const session = await service.createSession({ userId: null, guestKey: null });
   const owner = { userId: null, guestKey: session.guestKey! };
 

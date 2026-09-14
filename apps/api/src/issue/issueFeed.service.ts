@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 
 import {
@@ -26,9 +26,6 @@ import type { FeedBatchInput, FeedOwnerInput } from './type/feed.input.js';
 import type { FeedBatchResult, FeedCardResult, FeedSessionResult } from './type/feed.output.js';
 
 const DEFAULT_LIMIT = DEFAULT_CANDIDATE_BUDGET;
-const PASSTHROUGH_TRANSACTION_MANAGER: TransactionManager = {
-  execute: (work) => work(),
-};
 
 @Injectable()
 export class IssueFeedService {
@@ -46,16 +43,10 @@ export class IssueFeedService {
     1,
   );
 
-  private readonly transactionManager: TransactionManager;
-
   constructor(
     @Inject(ISSUE_QUERY_REPOSITORY) private readonly repository: IssueQueryRepository,
-    @Inject(TRANSACTION_MANAGER) @Optional() transactionManager?: TransactionManager,
-  ) {
-    // Direct unit tests use the deterministic in-memory adapter without Nest's CoreModule. The
-    // production module always supplies MikroOrmTransactionManager through this token.
-    this.transactionManager = transactionManager ?? PASSTHROUGH_TRANSACTION_MANAGER;
-  }
+    @Inject(TRANSACTION_MANAGER) private readonly transactionManager: TransactionManager,
+  ) {}
 
   async createSession(ownerInput: FeedOwnerInput): Promise<FeedSessionResult> {
     // A guest session is always bound to a fresh, high-entropy bearer secret. The

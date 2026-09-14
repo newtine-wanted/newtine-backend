@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from '@jest/globals';
 
-import { InMemoryIssueQueryRepository } from '@newtine/api/issue/repository/inMemoryIssueQuery.repository.js';
+import { InMemoryIssueQueryRepository } from '../fixtures/issue/inMemoryIssueQuery.repository.js';
 import type {
   FeedBatchRecord,
   FeedSessionRecord,

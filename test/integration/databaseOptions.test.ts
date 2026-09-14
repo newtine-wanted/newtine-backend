@@ -11,12 +11,17 @@ import { Migration202609130001Pipeline } from '@newtine/core/pipeline/migrations
 import { Migration202609130002PipelineEmbeddingTasks } from '@newtine/core/pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
 import { Migration202609130003IssueCardQuery } from '@newtine/core/pipeline/migrations/Migration202609130003IssueCardQuery.js';
 import { Migration202609130004IssueCardQueryReadModel } from '@newtine/core/pipeline/migrations/Migration202609130004IssueCardQueryReadModel.js';
+import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '@newtine/core/issue/persistence/issueQuery.persistence.entity.js';
 
 test('database options never enable automatic database creation', () => {
   const options = createDatabaseOptions({ NODE_ENV: 'test' });
 
   assert.equal(options.ensureDatabase, false);
-  assert.deepEqual(options.entities, [...ONBOARDING_PERSISTENCE_ENTITIES, AiUsageRecordEntity]);
+  assert.deepEqual(options.entities, [
+    ...ONBOARDING_PERSISTENCE_ENTITIES,
+    ...ISSUE_QUERY_PERSISTENCE_ENTITIES,
+    AiUsageRecordEntity,
+  ]);
   assert.ok(options.extensions?.length);
   assert.equal(options.migrations?.transactional, true);
   assert.equal(options.migrations?.snapshot, false);

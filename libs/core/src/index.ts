@@ -25,7 +25,6 @@ export {
 export { exceptionDiagnostic } from './common/logging/exceptionDiagnostic.js';
 export type { LogLevel, LogService } from './common/logging/logging.options.js';
 export { MikroOrmTransactionManager } from './common/transaction/mikroOrm/mikroOrm.transactionManager.js';
-export { InMemoryTransactionManager } from './common/transaction/inMemoryTransactionManager.js';
 export { NestedTransactionException } from './common/transaction/transaction.exception.js';
 export { TRANSACTION_MANAGER } from './common/transaction/transaction.manager.js';
 export type { TransactionManager } from './common/transaction/transaction.manager.js';

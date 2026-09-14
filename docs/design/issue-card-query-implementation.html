@@ -82,7 +82,7 @@
   </head>
   <body>
     <header>
-      <p>구현 제어 · <span class="status">후속 리뷰 개선 구현 완료 / 운영 제어 보류</span></p>
+      <p>구현 제어 · <span class="status">G28~G31·CQ-REV-011 보완 완료 / 운영 제어 보류</span></p>
       <h1>이슈 상세·개인화 카드 조회</h1>
       <p>
         승인된 설계의 실제 변경과 검증 증거를 기록한다. 설계 기준은
@@ -107,6 +107,9 @@
           <time datetime="2026-09-14">2026-09-14 KST</time> CQ-REV-001-A/002-A와 bounded replacement
           execution contract를 사용자 ‘개선 ㄱㄱ’로 승인. 같은 날 후속 G24-A/G25-A/G26-A/G27-A와
           adapter parity·bulk-load 실행 계약도 ‘승인 — 구현 시작’으로 승인.
+          <time datetime="2026-09-15">2026-09-15 KST</time> G28~G31 production wiring·ORM 경계
+          재설계를 사용자 ‘개선 ㄱ’으로 승인.
+          같은 날 CQ-REV-011 후보 조회 bounded ORM 보완을 사용자 ‘보완 ㄱ’으로 승인했다.
         </dd>
       </dl>
     </header>
@@ -123,6 +126,7 @@
           <h2>승인 기준선</h2>
           <p>
             사용자는 통합 설계안과 후속 G24-A~G27-A 선택을 확인한 뒤 “승인 — 구현 시작”으로 직접
+            승인했고, G28~G31 production wiring·ORM 경계 재설계도 2026-09-15 KST “개선 ㄱ”으로
             승인했다. 기존 설계 정책은 유지하고, 인증 principal·온보딩 사용자 context·member
             <code>x-user-id</code>·공통 점수/대표 대상 producer 연결·행동 이벤트 쓰기·최초 생성 멱등
             키는 이번 실행에서 제외한다.
@@ -185,8 +189,9 @@
           </p>
           <aside>
             현재 저장소에는 실제 업무 schema·인증 principal·이슈 생성 측 점수/대표 대상 데이터가
-            없다. 인메모리 adapter는 API와 순수 규칙을 검증하기 위한 대체 구현이며, 운영 PostgreSQL
-            adapter 연결은 잔여 위험으로 추적한다.
+            없다. production API는 MikroORM adapter만 사용하고, 인메모리 adapter와 passthrough
+            transaction manager는 <code>test/fixtures</code>에서만 명시적으로 주입한다. 실제 PostgreSQL
+            왕복·lock 경쟁·운영 schema 연결은 잔여 위험으로 추적한다.
           </aside>
         </section>
         <section id="current-implementation">
@@ -194,7 +199,8 @@
           <p>
             승인 기준선의 API·추천 규칙·상태 경계와 후속 리뷰 개선을 구현했다. PostgreSQL 계약
             정합성, 공개 기사 상태 predicate, transaction/만료 경계, 이전 batch bulk-load,
-            InMemory scope parity를 반영했다. 기존 검색 계약과 인증·사용자 정보 경계는 보존한다.
+            InMemory scope parity, production ORM provider 경계를 반영했다. 기존 검색 계약과
+            인증·사용자 정보 경계는 보존한다.
           </p>
           <ul>
             <li>
@@ -217,10 +223,10 @@
               운영 기본값은 외부 점수 계약 확인 전 최종 정책이 아니다.
             </li>
             <li>
-              인메모리 테스트 adapter와 ERD v1.3용 PostgreSQL raw adapter, feed 상태 migration,
-              read-model 보완 migration을 추가했다. 새 migration은 issues의 event_at/sub_category/
-              score, issue_articles.sort_order, issue_entities, issue_relations를 보장하고 완료 후
-              필수 컬럼을 검증한다.
+              테스트 전용 InMemory adapter와 passthrough transaction fixture를
+              <code>test/fixtures</code>로 이동하고, production에는 <code>IssueCardQueryRepository</code>
+              하나만 등록했다. 이슈·상세·기사·관계·feed 상태 EntitySchema를 database options에
+              등록하고, feed/read-model migration은 schema evolution 책임으로 유지한다.
             </li>
             <li>
               게스트 세션은 서버가 발급한 고엔트로피 bearer key를 생성 응답으로 한 번 전달하고,
@@ -241,12 +247,12 @@
             <li>
               batch 계산은 use case의 <code>TransactionManager</code> 경계에서 후보 조회부터 저장까지
               수행한다. PostgreSQL adapter는 ambient transaction만 사용하고, 저장 직전
-              <code>clock_timestamp()</code>로 만료를 재확인한다.
+              잠금 후 ORM criteria에서 database clock으로 세션 만료를 재확인한다.
             </li>
             <li>
-              이전 batch item은 한 번에 bulk-load한다. InMemory adapter도 personalized/major/
+              이전 batch item은 한 번에 bulk-load한다. test fixture adapter도 personalized/major/
               connected/exploration/mismatch slice, 제외 ID, limit, global fill semantics를
-              PostgreSQL과 맞춘다.
+              production ORM adapter와 맞춘다.
             </li>
             <li>
               공개 기사·개수·reference는 <code>source_status = 'AVAILABLE'</code>만 사용한다. 현재
@@ -271,8 +277,9 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
         <section id="implementation-status">
           <h2>구현 상태</h2>
           <p>
-            기준선과 후속 리뷰 개선의 기술 구현 및 로컬 게이트는 완료했다. 실제 운영 PostgreSQL
-            업무 schema 왕복·lock 경쟁·인증·온보딩·점수 생산 계약이 연결되지 않아 운영 제어는
+            기준선과 후속 리뷰 개선, G28~G31 및 CQ-REV-011의 기술 구현과 로컬 게이트는 완료했다. Compose
+            PostgreSQL에 검증용 최소 base schema를 준비한 뒤 6개 migration·ORM 왕복·API smoke도 통과했다.
+            실제 업무 schema lock 경쟁·EXPLAIN/p95·인증·온보딩·점수 생산 계약이 연결되지 않아 운영 제어는
             계속 보류한다.
           </p>
           <table>
@@ -290,12 +297,12 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
               <tr>
                 <td>API·순수 추천</td>
                 <td>완료</td>
-                <td>unit 20 suites/113 tests, integration 2 suites/11 tests, typecheck/build 및 API 계약 생성 통과</td>
+                <td>unit 20 suites/114 tests, integration 2 suites/11 tests, typecheck/build 통과</td>
               </tr>
               <tr>
-                <td>PostgreSQL 실 adapter</td>
-                <td>코드·read-model migration 준비, 운영 schema 미연결</td>
-                <td>migration 004가 query 필드·관계 테이블을 보장하고, 외부 base-schema stub을 둔 ephemeral PostgreSQL migration chain·schema smoke와 fixture adapter 조회/feed 왕복도 통과. 실제 업무 schema lock·EXPLAIN은 별도 검증 필요</td>
+                <td>ORM issue-card adapter</td>
+                <td>코드·EntitySchema 등록·Compose DB smoke 완료, 업무 성능 보류</td>
+                <td>EntityManager 기반 focused ORM boundary 테스트, 6개 migration, 실제 databaseCheck와 API smoke, 전체 unit/integration/build 통과. 업무 schema lock·EXPLAIN/p95는 별도 실행 필요</td>
               </tr>
               <tr>
                 <td>인증·온보딩·이벤트</td>
@@ -387,40 +394,53 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
                   없다. 실제 PostgreSQL lock/rollback/운영 오류 계약도 아직 입증하지 않았다.
                 </td>
                 <td>
-                  인메모리 adapter와 ERD용 raw PostgreSQL adapter를 분리했다. 외부 계약을 임의로
-                  채우지 않는다.
+                  production ORM adapter와 test fixture를 분리했다. 외부 계약을 임의로 채우지
+                  않는다.
                 </td>
                 <td>격리 PostgreSQL 왕복·EXPLAIN 및 인증/온보딩 연결 후 운영 제어 재개.</td>
               </tr>
               <tr>
-                <td>최종 no-write 검토·완료</td>
-                <td>승인된 비인증 범위에서 concrete blocker/P2는 추가로 확인되지 않았다.</td>
-                <td>G24~G27 구현·회귀와 base-schema stub fixture의 PostgreSQL 조회/feed 왕복을 확인했고, 인증 principal·사용자 context·실제 업무 lock/p95는 보류 항목으로 분리했다.</td>
-                <td>최종 local gate 통과. 운영 schema·lock·p95는 외부 검증 후 재개.</td>
+                <td>최종 no-write 검토·보완 완료</td>
+                <td>production wiring·ORM boundary와 후보 조회의 DB-side 상한 부재(CQ-REV-011 P1)를 모두 보완했다.</td>
+                <td>가중치 slice별 ORM root query에 공개·scope·제외 predicate, 결정적 정렬, LIMIT을 적용하고 선택된 ID만 상세 projection으로 bulk-load한다. 인증 principal·사용자 context·실제 업무 lock/p95는 보류 항목으로 분리했다.</td>
+                <td>focused ORM boundary 회귀와 전체 local gate 통과. 운영 schema·EXPLAIN·lock·p95는 외부 검증 후 재개.</td>
+              </tr>
+              <tr>
+                <td>G28~G31 · 해결됨 / 운영 검증 보류</td>
+                <td>production module이 환경값에 따라 InMemory fake를 선택하고, EntityManager 주입 후에도 raw SQL로 runtime persistence를 수행하던 구현 오류.</td>
+                <td><code>IssueModule</code>을 ORM adapter의 <code>useExisting</code> 단일 provider로 고정하고 CoreModule의 transaction manager를 사용한다. fake와 passthrough transaction manager는 <code>test/fixtures</code>로 이동했다. issue-card EntitySchema를 database options에 등록하고 adapter의 SQL connection 실행·projection helper를 제거했다.</td>
+                <td>ORM boundary unit 6개 포함 전체 unit 20 suites/114 tests, integration 2 suites/11 tests, format/lint/typecheck/build 통과. Compose <code>db</code> health·6개 migration·batch <code>databaseCheck</code>·호스트 API DB-backed smoke도 통과했다. Docker API image build는 ttsc native plugin 단계에서 Docker Desktop 메모리 부족으로 실패했다.</td>
+              </tr>
+              <tr>
+                <td>CQ-REV-011 · fixed · P1 addressed</td>
+                <td><code>findCandidates</code>가 <code>loadIssueRecords(undefined, false)</code>를 호출해 issue·detail·impact·entity/article link·article·publisher 전체를 읽은 뒤 애플리케이션에서 공개 여부·제외·정렬·scope를 처리한다. <code>candidateBudget</code>은 최대 500개 결과를 자르는 값일 뿐 DB 읽기량의 상한이 아니다.</td>
+                <td>후보 전용 ORM root query에 공개 detail subquery·scope relation subquery·제외 ID·결정적 정렬·LIMIT을 적용하고, 상세/기사 데이터는 최종 후보 ID에 한해 별도 bulk-load한다. runtime direct SQL 실행은 추가하지 않았다.</td>
+                <td>애플리케이션 full-table materialization과 후보 예산 무관한 연관 projection 로드는 제거됐다. production-like dataset의 EXPLAIN·p95·메모리 측정은 CQ-REV-010 운영 검증으로 남긴다.</td>
               </tr>
             </tbody>
           </table>
         </section>
         <section id="verification-evidence">
           <h2>검증 증거</h2>
-          <p>2026-09-14 KST 개선 구현 후 로컬 검증을 실행했고 아래 명령이 모두 통과했다.</p>
+          <p>2026-09-15 KST G28~G31 및 CQ-REV-011 bounded query 보완 후 로컬 검증을 실행했다.</p>
           <pre><code>npm run format:check
 npm run lint
 npm run typecheck
 npm test
 npm run build
 npm run contracts:check
-API_PORT=0 npm run test:smoke</code></pre>
+npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
           <p>
-            결과: format, lint, typecheck, build, 계약 검증, unit 20 suites/113 tests, integration 2
-            suites/11 tests, contract 1 suite/4 tests, API smoke가 통과했다. <code>git diff --check</code>도
-            통과했다. 추가로 외부 base-schema 최소 stub을 둔 ephemeral PostgreSQL에서 migration chain·schema
-            smoke와 실제 adapter 조회/feed 왕복도 통과했다. 이 결과는 fixture 검증이며 운영 schema·p95
-            보장이 아니다.
+            결과: format, lint, typecheck, build, contracts:check(contract 1 suite/4 tests 포함), unit 20
+            suites/114 tests, integration 2 suites/11 tests, ORM boundary focused tests가 통과했고
+            <code>git diff --check</code>도 통과했다. Compose <code>db</code> health, 검증용 최소 base
+            schema 생성 후 6개 migration, 실제 batch <code>databaseCheck</code>(select 1), 호스트 API의
+            DB-backed <code>test:smoke</code>도 통과했다. Docker API image build는 ttsc native plugin
+            단계에서 메모리 부족으로 실패해 호스트 build 산출물로 API smoke를 실행했다.
           </p>
         </section>
         <section id="review">
-          <h2>코드 리뷰·재검토 — 2026-09-14 KST</h2>
+          <h2>코드 리뷰·재검토 — 2026-09-15 KST</h2>
           <p>
             자기 변경 read-only 리뷰 · 작성자/리뷰어: Codex · 저장소
             <code>newtine-backend</code> · 브랜치 <code>codex/issue-card-query</code> · 기준
@@ -433,9 +453,17 @@ API_PORT=0 npm run test:smoke</code></pre>
             accepted 항목은 승인된 외부 분기 범위에 남긴 위험이다.
           </p>
           <p>
-            최종 no-write 재검토에서 승인된 비인증 범위 내 concrete blocker/P2는 확인되지 않았다. G24~G27과
-            CQ-REV-006~009는 수정·회귀·문서 갱신으로 닫았고, CQ-REV-003·005·010은 외부 계약·운영
-            검증 공백으로 유지한다.
+            최종 no-write 재검토와 후속 보완 확인에서 production wiring·ORM boundary의 concrete blocker는
+            확인되지 않았다. G24~G27과 CQ-REV-006~009는 수정·회귀·문서 갱신으로 닫았고, CQ-REV-011은
+            DB-side bounded ORM query와 선택 ID bulk-load 적용으로 닫았다. CQ-REV-003·005·010은 외부
+            계약·운영 검증 공백으로 유지한다.
+          </p>
+          <p>
+            G28~G31 재검토에서는 production source graph의 InMemory/fallback provider와
+            <code>getConnection().execute()</code> runtime 경로가 제거된 것을 확인했다. 테스트 double은
+            <code>test/fixtures</code>에만 남고, <code>IssueModule</code>은 ORM adapter와 CoreModule
+            transaction manager를 사용한다. Compose PostgreSQL에서 migration·adapter·API smoke는
+            통과했으며, 실제 업무 데이터 lock 경쟁·EXPLAIN/p95는 운영 검증 공백으로 유지한다.
           </p>
           <table>
             <caption>발견 사항</caption>
@@ -577,39 +605,44 @@ API_PORT=0 npm run test:smoke</code></pre>
               <tr>
                 <th scope="row">CQ-REV-009 · fixed · Non-blocking</th>
                 <td>설계·구현 문서의 개선 상태와 테스트 수치가 구현 완료 후에도 이전 값으로 남아 있었다.</td>
-                <td>두 문서의 후속 구현 완료·운영 검증 보류 상태와 unit 20 suites/113 tests, integration 2 suites/11 tests 증거를 갱신했다.</td>
+                <td>두 문서의 후속 구현 완료·운영 검증 보류 상태와 unit 20 suites/114 tests, integration 2 suites/11 tests 증거를 갱신했다.</td>
               </tr>
               <tr>
                 <th scope="row">CQ-REV-010 · accepted verification gap · Non-blocking</th>
-                <td>migration chain·schema smoke와 base-schema stub fixture의 실제 adapter 조회/feed 왕복은 통과했지만, 실제 업무 데이터 lock 경쟁·운영 p95는 아직 입증하지 않았다.</td>
+                <td>Compose PostgreSQL에 검증용 최소 external base schema를 준비하고 migration chain·schema·adapter 조회/feed 왕복을 통과했지만, 실제 업무 데이터 lock 경쟁·EXPLAIN·운영 p95는 아직 입증하지 않았다.</td>
                 <td>실제 업무 schema와 연결된 격리 PostgreSQL에서 query·rollback·lock·EXPLAIN·p95를 측정한다. 현재 배포 완료로 판정하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">CQ-REV-011 · fixed · P1 addressed</th>
+                <td>기존 <code>findCandidates</code>는 후보 예산과 무관하게 issue와 연관 projection을 전체 로드하고 애플리케이션에서 필터링했다. 요청당 DB work·메모리 사용량이 데이터 크기에 비례해 증가하며, DB-side LIMIT 경계가 없었다.</td>
+                <td>후보 전용 ORM root query에 public detail·scope relation·제외 predicate, 결정적 정렬·LIMIT을 적용하고 최종 후보 ID만 상세/기사 bulk-load한다. 실제 planner scan·sort·p95·메모리 측정은 CQ-REV-010으로 남긴다.</td>
               </tr>
             </tbody>
           </table>
           <h3>검증 증거와 공백</h3>
           <p>
-            개선 후 <code>npm test</code>를 재실행해 unit 20 suites/113 tests와 integration 2 suites/11
-            tests가 통과했다. <code>format:check</code>, lint, typecheck, build,
-            <code>contracts:check</code>(contract 1 suite/4 tests), smoke, <code>git diff --check</code>도 통과했다.
-            PostgreSQL raw <code>get</code> row 정규화·transaction guard·scope parity는 fake/in-memory 회귀로
-            보강했고, 외부 base-schema stub을 둔 ephemeral PostgreSQL에서 전체 migration chain·schema
-            smoke와 fixture adapter 조회/feed 왕복도 통과했다. 실제 업무 데이터 왕복·rollback·lock
-            대기·EXPLAIN·인증 격리는 아직 검증하지 않았다.
+            CQ-REV-011 보완 후 <code>findCandidates</code>의 root query LIMIT과 DB-side subquery 경계를
+            focused 회귀로 확인하고, <code>npm test</code>·<code>format:check</code>·lint·typecheck·build·
+            <code>contracts:check</code>·<code>git diff --check</code> 전체 게이트를 통과했다. Compose
+            PostgreSQL의 migration·adapter·API smoke와 호스트 batch <code>databaseCheck</code>도
+            통과했다. 실제 업무 데이터 왕복·rollback·lock 대기·EXPLAIN/p95·인증 격리는 아직 검증하지
+            않았다.
           </p>
           <aside>
-            리뷰 판단: CQ-REV-001·002와 G24~G27은 승인 범위 내 수정·회귀 검증으로 해소됐다.
+            리뷰 판단: CQ-REV-001·002와 G24~G27, G28~G31은 승인 범위 내 수정·회귀 검증으로 해소됐다.
             CQ-REV-003은 인증·외부 producer/온보딩 연결 전 운영 blocker로 남고, CQ-REV-004는
             AVAILABLE-only 정책으로 해소됐다. CQ-REV-005는 인증 principal과 함께 API 계약을 보완해야
             하는 P2다. CQ-REV-006·007·008은 수정·재검증으로, CQ-REV-009는 문서 갱신으로 닫혔다.
+            CQ-REV-011 P1은 DB-side bounded ORM query와 최종 후보 bulk-load 보완으로 닫혔다. 다만
             CQ-REV-010의 실제 PostgreSQL·인증·성능 실측 전에는 배포 완료로 판정하지 않는다.
           </aside>
         </section>
         <section id="implementation-control-state">
           <h2>구현 이해·통제 점검</h2>
           <p>
-            상태: 기술 구현·로컬 게이트 완료, 운영 제어 보류. 후속 G24~G27 구현은 승인된 범위로
-            반영했지만, 실제 PostgreSQL·인증 principal·온보딩 지역/나이대·점수/대표 대상 producer
-            계약에 대한 운영 이해 점검은 아직 실시하지 않았다. 운영 연결 전에 요청 소유권, 같은
+            상태: 기술 구현·로컬 게이트 및 Compose DB smoke 완료, 운영 제어 보류. 후속 G24~G27·G28~G31 및
+            CQ-REV-011 보완은 승인된 범위로 반영했지만, 실제 업무 PostgreSQL lock/EXPLAIN/p95·인증 principal·온보딩 지역/나이대·점수/대표
+            대상 producer 계약에 대한 운영 이해 점검은 아직 실시하지 않았다. 운영 연결 전에 요청 소유권, 같은
             묶음 재시도/동시성, 24시간 만료 race, 후보 탐색 상한과 빈 피드 구분, AVAILABLE 기사
             정책을 담당자가 설명하고 격리 환경 증거로 재검증해야 한다. 이 점검은 기술 완료나
             설계 승인과 별개다.
