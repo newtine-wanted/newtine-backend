@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="마이페이지에서 회원의 관심 이슈 분포와 목록 조회 계약 설계">
+  <meta name="audience" content="NEWTINE 회원, 프론트엔드·백엔드 개발자">
+  <meta name="problem" content="관심 분석 그래프와 관심 뉴스 목록을 실제 행동 기준으로 제공할 API 부재">
+  <meta name="core-flow" content="회원 인증 → 관심 행동 조회 → 공개 이슈 집계 → 분야별 건수 및 관심 목록 표시">
+  <title>마이페이지 관심 분석 API 설계 초안</title>
+  <style>
+    :root{font-family:system-ui,sans-serif;color:#1e293b;background:#f1f5f9;line-height:1.65}
+    body{max-width:1060px;margin:auto;padding:32px 20px}header,section{background:white;padding:24px;margin:18px 0;border:1px solid #dbe2ea;border-radius:12px}h1,h2,h3{line-height:1.3}h1{font-size:30px}h2{font-size:22px}h3{font-size:17px}a{color:#075985}nav{display:flex;gap:16px;flex-wrap:wrap}table{width:100%;border-collapse:collapse}caption{text-align:left;font-weight:700;margin-bottom:8px}th,td{border-bottom:1px solid #e2e8f0;padding:10px;text-align:left;vertical-align:top}pre{overflow:auto;padding:16px;background:#f1f5f9}code{font-size:.9em}dt{font-weight:700}dd{margin:0 0 10px}aside{border-left:4px solid #d97706;padding:8px 16px;background:#fffbeb}.flow{padding:20px;background:#e0f2fe;text-align:center;font-weight:700}small{color:#475569}
+  </style>
+</head>
+<body>
+<header>
+  <p>설계 기준선 · Standard · <strong>설계 승인됨</strong></p>
+  <h1>마이페이지 관심 분석 API</h1>
+  <p>관심을 표시한 이슈를 분야별 건수로 보여주고, 현재 관심 뉴스 목록으로 이어지는 조회 계약이다. 아래 JSON과 경로는 제안이며 배포된 API가 아니다.</p>
+  <dl>
+    <dt>목적</dt><dd>마이페이지에서 회원의 관심 이슈 분포와 목록 조회 계약 설계</dd>
+    <dt>사용자</dt><dd>NEWTINE 회원, 프론트엔드·백엔드 개발자</dd>
+    <dt>문제</dt><dd>관심 분석 그래프와 관심 뉴스 목록을 실제 행동 기준으로 제공할 API 부재</dd>
+    <dt>핵심 흐름</dt><dd>회원 인증 → 관심 행동 조회 → 공개 이슈 집계 → 분야별 건수 및 관심 목록 표시</dd>
+    <dt>작성·갱신</dt><dd><time datetime="2026-09-15">2026-09-15 KST</time></dd>
+    <dt>추적</dt><dd>사용자 요청: Figma 마이페이지 관심 정보 API 설계. 목적 지문이 다른 온보딩 문서는 대체하지 않고 새 문서 생성.</dd>
+  </dl>
+</header>
+<nav aria-label="설계 탐색"><a href="#evidence">근거</a><a href="#contract">API 초안</a><a href="#system-model">집계</a><a href="#grilling-state">미확정 결정</a><a href="#verification-plan">검증</a></nav>
+<main><article>
+<section id="goal"><h2>목표와 범위</h2>
+  <p>‘내 관심 분석’에 기간·분야별 건수·표본 상태를 제공한다. 마이페이지의 ‘관심 뉴스’ 전체 건수와 별도 목록 조회도 연계 초안으로 제시한다. 온보딩 선호 점수나 정치적 찬반·성향을 분석하지 않는다.</p>
+  <p id="non-goals">비범위: 회원탈퇴·로그아웃·프로필, 주간 진단보고서 생성, 추천 알고리즘, 분류 개편. 관심 등록·해제 쓰기 API는 선행 의존성이며, 이번에 함께 설계할지는 G2에서 결정한다.</p>
+</section>
+<section id="evidence"><h2>화면과 저장소에서 확인한 사실</h2>
+<table><caption>화면 근거와 현재 구현의 차이</caption><thead><tr><th>출처</th><th>확인 내용</th><th>설계 반영</th></tr></thead><tbody>
+<tr><td><a href="https://www.figma.com/design/dcYgzHJYlrHNFNPpFEQGtE?node-id=12-117">마이페이지 스펙 12:117</a></td><td>우측 스와이프 관심만 집계, 단위는 건수. 최근 7일은 미확정 서버 설정. 그래프는 읽기 전용.</td><td>LIKE 이슈 집계, 기간은 응답에 명시. 막대 픽셀 크기는 프론트 책임.</td></tr>
+<tr><td><a href="https://www.figma.com/design/dcYgzHJYlrHNFNPpFEQGtE?node-id=12-261">저표본 12:261</a></td><td>1~2건도 표시. 임계값 예시 10건, 서버 설정. 진단보고서 진입 잠금 없음.</td><td>EMPTY / LOW_SAMPLE / READY와 임계값 제공. READY는 통계적 정확도를 보증하지 않음.</td></tr>
+<tr><td><a href="https://www.figma.com/design/dcYgzHJYlrHNFNPpFEQGtE?node-id=12-359">0건 12:359</a></td><td>그래프 대신 안내. 관심 목록 진입 유지.</td><td>0건도 HTTP 200. 선택 기간 0건과 평생 기록 0건은 구별해야 함.</td></tr>
+<tr><td><a href="https://www.figma.com/design/dcYgzHJYlrHNFNPpFEQGtE?node-id=12-455">관심 목록 12:455</a></td><td>단일 분야 필터, 관심 표시 최신순, 20건. 제목·일자·선택 썸네일. 해제 시 interaction 삭제·가중치 롤백 없음.</td><td>목록은 기간 제한 없이 현재 관심 상태. 해제 정책은 불변 이벤트 문서와 충돌하므로 별도 결정 필요.</td></tr>
+<tr><td><a href="../../libs/core/src/common/category/category.catalog.ts">공통 분류 코드</a>, <a href="onboarding-api-design.html#current-category-contract">온보딩 설계 보완</a></td><td>현재 공통 계약은 housing부터 politics까지 10개. Figma 12종 문구와 다름.</td><td>최신 서버 계약의 10개 코드·표시명·순서를 재사용. 임의로 분류를 추가하지 않음.</td></tr>
+<tr><td><a href="../policies/data-contracts.md">데이터 계약</a>, <a href="erd.md">ERD</a></td><td>최신 LIKE가 현재 관심. SKIP/PASS는 제외. 이벤트는 불변. 주간 보고서는 지난주 월요일 경계.</td><td>현재 상태와 과거 보고서 집계를 구분. 이벤트 물리 삭제는 채택하지 않은 대안.</td></tr>
+<tr><td><code>apps/api/src</code>, <code>libs/core/src</code></td><td>관심 조회 controller와 user_interaction_events 구현·migration 없음. 인증과 이슈·분류 저장은 존재.</td><td>조회 API만 붙여 실제 데이터를 얻을 수 없음. 행동 수용·저장 선행 구현이 필요.</td></tr>
+</tbody></table>
+</section>
+<section id="contract"><h2>API 계약 초안</h2>
+<table><caption>화면 단위 조회 경계</caption><thead><tr><th>메서드·경로</th><th>역할</th><th>입력</th></tr></thead><tbody>
+<tr><td><code>GET /me/interest-analysis</code></td><td>분야별 그래프와 현재 관심 목록 전체 건수</td><td>없음. 서버 기간 정책 적용.</td></tr>
+<tr><td><code>GET /me/liked-issues</code></td><td>관심 뉴스 목록</td><td><code>categoryCode?</code>, <code>cursor?</code>, <code>limit?</code> (기본 20, 1~50)</td></tr>
+</tbody></table>
+<p>공통: Bearer 인증, 기존 <code>JwtAuthGuard</code> + <code>CurrentUser</code>. userId를 클라이언트 입력으로 받지 않는다. camelCase DTO, Nestia·Typia 런타임 검증, 기존 ProblemDetails 사용. 개인 응답에는 <code>Cache-Control: private, no-store</code>를 제안한다.</p>
+<h3>분석 응답 예시 — 피그마 표시대로 최근 7일 적용</h3>
+<pre><code>{
+  "asOf": "2026-09-15T03:00:00.000Z",
+  "period": {
+    "type": "ROLLING_DAYS", "days": 7,
+    "startAt": "2026-09-08T03:00:00.000Z",
+    "endAt": "2026-09-15T03:00:00.000Z",
+    "timeZone": "Asia/Seoul"
+  },
+  "sampleStatus": "LOW_SAMPLE",
+  "minimumSampleSize": 10,
+  "issueCount": 3,
+  "likedIssueCount": 12,
+  "categoryCounts": [
+    { "code": "housing", "name": "주거", "count": 2 },
+    { "code": "labor", "name": "일자리", "count": 1 }
+  ]
+}</code></pre>
+<p>예시의 <code>categoryCounts</code>는 표시할 0 초과 분야만 반환한다. 건수 내림차순, 동률은 공통 분류의 displayOrder. 전체 필터 선택지는 기존 <code>GET /onboarding/options</code>의 공통 분류를 재사용한다. <code>issueCount</code>는 기간 내 서로 다른 이슈 수, <code>likedIssueCount</code>는 기간 제한 없는 현재 공개 관심 이슈 수다. 두 값은 같을 필요가 없다.</p>
+<p>제안 상태: 0건 EMPTY, 1~9건 LOW_SAMPLE, 10건 이상 READY. 임계값 10은 화면의 예시를 따른 제안이며 보고서의 5건 기준과 공유하지 않는다. 기간 내 0건이면 안내는 ‘이 기간에 관심 표시한 뉴스가 없어요’로 표시해 과거 기록이 없다는 오해를 피한다.</p>
+<h3>목록 응답 예시</h3>
+<pre><code>{
+  "items": [{
+    "issueId": "01994508-0000-7000-8000-000000000001",
+    "title": "청년 주거 지원 정책 개편",
+    "category": { "code": "housing", "name": "주거" },
+    "likedAt": "2026-09-14T12:00:00.000Z",
+    "thumbnailUrl": null
+  }],
+  "totalCount": 1,
+  "nextCursor": null
+}</code></pre>
+<p><code>totalCount</code>는 선택한 분야 필터를 적용한 전체 건수, <code>nextCursor: null</code>은 마지막 페이지. 제목은 뉴스 기사 대신 이슈 제목이다. 현재 이슈 스키마에는 썸네일 필드가 없어 초기에는 null을 반환하는 제안이다. 상세 조회 구현은 별도 의존성이다.</p>
+<p>순서는 <code>likedAt DESC, issueId DESC</code>. 커서는 마지막 정렬 키와 필터를 담는 검증 가능한 불투명 값으로 제안한다. 다른 필터의 커서는 400, 필터 변경 시 첫 페이지부터 요청한다. 매 페이지는 현재 상태 기준이므로 페이지 사이 관심 변경 시 이동·누락이 가능하며 고정 스냅샷을 보장하지 않는다. 해제 후 프론트는 분석과 목록 첫 페이지를 재조회한다.</p>
+</section>
+<section id="system-model"><h2>집계 모델과 데이터 의존성</h2>
+<figure><div class="flow">프론트 → 인증된 회원 → 관심 조회 서비스 → 행동 이벤트 + 공개 이슈 → 집계 응답</div><figcaption>한 요청에서 동일 기준 시각과 DB 읽기 스냅샷으로 건수와 목록 관련 값을 계산한다. GET은 행동 이벤트나 선호 점수를 변경하지 않는다.</figcaption></figure>
+<ol id="change-model">
+<li>요청의 인증 주체와 조회 기준 시각 asOf를 정한다.</li>
+<li>해당 회원의 이슈별 최신 행동을 결정한다. 기간으로 먼저 자른 뒤 최신 상태를 고르면 안 된다.</li>
+<li>최신 행동이 LIKE이고 이슈가 PUBLISHED인 경우만 현재 관심 집합으로 남긴다.</li>
+<li>현재 관심 집합 중 최근 LIKE 서버 수용 시각이 <code>[startAt, endAt)</code>인 이슈를 한 번씩 센다.</li>
+<li>공통 분류로 집계한다. 중복 LIKE 이벤트 수, 온보딩 선택 수, 추천 weight는 사용하지 않는다.</li>
+</ol>
+<p>제안 기본안의 likedAt은 최신 LIKE 이벤트의 서버 created_at이다. 같은 LIKE를 새 이벤트 ID로 다시 보내면 건수는 늘지 않지만 likedAt·정렬·집계 기간은 바뀔 수 있다. 이 정책은 행동 수용 계약을 확정할 때 함께 검토한다. 동일 ID 재전송은 새 이벤트가 아니므로 시각도 바꾸지 않는다.</p>
+<p>조회 모듈 후보: <code>apps/api/src/interest/</code>의 controller/service/type, <code>libs/core/src/interaction/</code>의 domain/repository. 기존 이슈·분류를 참조하고 별도 bookmark 테이블을 임의 도입하지 않는다. 이벤트 persistence가 먼저 준비되어야 하며 현재 ERD만으로 배포 가능하다고 판단하지 않는다.</p>
+<p>인덱스 후보는 <code>(user_id, issue_id, created_at DESC)</code>. 최종 동률 순서와 보존 정책은 행동 저장 설계의 선행 결정이다. 임의 UUID로 서버 수용 순서를 대체하지 않는다. 실측 EXPLAIN으로 확인한 뒤 필요한 인덱스만 채택한다.</p>
+<h3 id="invariants">불변식</h3><ul>
+<li>타인의 행동·관심 집합은 결과에 포함되지 않는다.</li><li>각 이슈는 한 분류에 한 번만 집계하고 categoryCounts 합은 issueCount와 같다.</li>
+<li>온보딩만 완료한 회원은 실제 관심 행동이 없으면 EMPTY다.</li><li>공개 중단 이슈는 목록·건수에서 제외한다. 로그로 해당 회원의 관심 제목·분야 목록을 남기지 않는다.</li>
+<li>현재 관심 취소가 지난주에 고정된 진단보고서 입력을 물리적으로 삭제하면 안 된다.</li></ul>
+</section>
+<section id="failure-recovery"><h2>경계와 실패 처리</h2><table><caption>조회 실패 응답</caption><thead><tr><th>상황</th><th>응답·복구</th></tr></thead><tbody>
+<tr><td>토큰 없음·만료</td><td>401, 기존 refresh 흐름 후 재조회. 임의 userId 대체 금지.</td></tr>
+<tr><td>유효하지 않은 분류·커서·limit</td><td>400 ProblemDetails. 마지막 정상 화면 유지 후 입력 수정.</td></tr>
+<tr><td>표본 없음·적음</td><td>200 정상 데이터. 그래프/안내 상태만 변경, 진단보고서 진입은 유지.</td></tr>
+<tr><td>DB 오류</td><td>500 기존 오류 계약. 빈 관심으로 위장하지 않고 재시도 UI.</td></tr>
+<tr><td>이슈 공개 중단</td><td>다음 조회에서 제외. 이전 화면과 건수 차이는 정상. 공유 캐시를 사용하지 않음.</td></tr>
+</tbody></table><p>현재 별도 집계 캐시·배치·AI 호출은 제안하지 않는다. 요청 지연과 오류율을 기존 요청 로깅으로 관측하고 개인별 관심 내용 로깅은 피한다.</p></section>
+<section id="grilling-state"><h2>설계 의사결정 기록 (grilling)</h2><p><strong>완료·G2 보류 수용</strong> — G1은 사용자 지시로 해결했고, G2의 쓰기·해제 정책은 승인 범위에서 제외했다.</p>
+<dl><dt>결정 트리</dt><dd>G1 집계 기간 → 기간 경계·빈 상태 → 최종 분석 DTO. G2 범위 → 해제·이벤트 저장 정책 → 최신 상태·정렬 계약.</dd>
+<dt>현재 경계</dt><dd>G1은 사용자 지시로 해결했다. G2 범위와 해제 이벤트 형식·가중치 처리는 별도 미확정 상태다. 이번 기간 선택을 등록·해제 구현 승인으로 확대하지 않는다.</dd>
+<dt>확인된 결정 근거</dt><dd>건수 기반·본인 인증·공통 10개 분류·관심과 북마크 통합. 최신 서버 분류 보완을 우선한다.</dd></dl>
+<h3>G1 — 그래프 집계 기간</h3><p>해결 — 사용자가 “그러면 피그마 설계대로 해”라고 지시해 화면에 표시된 최근 7일을 채택했다. 서버 설정 기본값은 7일이며 실제 기간을 응답에 포함한다. 구현 해석은 조회 기준 시각 직전 7×24시간의 [startAt, endAt)이다. 이 시간 경계는 피그마에 명시된 사실이 아니라 본 설계의 구체화다. 지난주 월요일~일요일 기준 진단보고서와는 집계 기간이 다르다.</p>
+<h3>G2 — 이번 설계 범위와 해제 충돌 처리</h3><p>권고는 분석·목록 조회 계약까지 우선 설계하고 행동 저장·해제는 선행 후속 설계로 명시적으로 보류하는 것이다. 대안은 등록·해제 쓰기 계약까지 이번에 함께 확정하는 것이다. 후자는 실제 연결 가능한 전체 흐름을 확보하지만 이벤트 삭제 여부·취소 시 점수·재요청 정책까지 설계해야 한다. 조회만 확정해도 이벤트 저장 없이 기능을 출시할 수는 없다.</p>
+<aside id="key-risk">미확정 분기를 승인된 기본값으로 취급하지 않는다. 최근 7일 기간은 사용자 선택으로 반영했다. 임계값·likedAt·페이지네이션은 검토용 제안이다. 이벤트 물리 삭제는 이전 행동을 되살리거나 과거 보고서 근거를 바꿀 수 있어 권고하지 않는다.</aside>
+<h3 id="rejected-alternatives">채택하지 않은 접근</h3><p>추천 weight를 그래프로 사용, 기사 수나 반복 LIKE 수 집계, 별도 북마크 이원화, 화면 문구만으로 12개 분류 추가, GET에서 이벤트 생성. 최근 7일과 집계 기간이 다른 주간 보고서 응답을 그대로 그래프로 재사용하지 않는다.</p>
+</section>
+<section id="verification-plan"><h2>승인 후 검증 계획</h2><p>현재 수행한 검증은 Figma 네 가지 스펙과 controller·카테고리·migration·데이터 문서의 읽기 비교다. 구현이나 테스트 실행은 하지 않았다.</p>
+<table><caption>필수 시나리오</caption><thead><tr><th>축</th><th>기대 결과</th></tr></thead><tbody>
+<tr><td>집계</td><td>온보딩만 존재: 0건. 중복 LIKE: 이슈 한 번. 분류 합계 일치.</td></tr>
+<tr><td>시간</td><td>startAt 포함/endAt 제외, 경계 전후, 이전 기간 LIKE, 취소 후 재LIKE, 서버 지연 수용.</td></tr>
+<tr><td>상태</td><td>0/1/9/10건 분기, 최근 0건·전체 12건 구별, 취소된 이슈 제외.</td></tr>
+<tr><td>인증·공개</td><td>타인 이벤트 배제, 토큰 누락 401, WITHDRAWN 제외.</td></tr>
+<tr><td>목록</td><td>20건 페이지 경계, 정렬 동률, 단일 분류, totalCount 기준, 잘못된 커서 400.</td></tr>
+<tr><td>원자성·실패</td><td>한 응답의 집계 일관성, DB 실패를 EMPTY로 반환하지 않음, GET 전후 이벤트·weight 불변.</td></tr>
+</tbody></table>
+<p>명령 후보: <code>npm run test:jest -- test/unit/interest test/integration/interest</code> (신규 테스트 경로 제안, 현재 없음), <code>npm run typecheck</code>, <code>npm run contracts:check</code>. 이벤트 계약과 테스트 파일 범위 확정 후 정확한 실행 계약으로 전환한다.</p></section>
+<section id="design-control-state"><h2>설계 이해·통제 점검</h2><p><strong>미실시</strong>. 아래는 승인된 설계를 예측하는 비차단 점검이다. 구현 승인과 별개이며, 로컬 결과는 Codex에 자동 전달되지 않는다.</p>
+<p>대상 축: 목표·범위, 기간·최신 상태, 건수 불변식, 인증·공개 경계, 조회 실패 복구, 관측, 검증 공백. 외부 AI·결제는 비범위이므로 질문을 면제했다.</p>
+<form id="design-control-form"><p id="design-control-progress" role="status">질문 1/5 · 응답 0/5</p><fieldset><legend>DC-01 · 분석 기간</legend><p>최근 7일 관심 분석은 어떤 시간 범위를 사용하는가?</p><label><input type="radio" name="dc01" value="a"> 지난주 월요일~일요일 고정</label><br><label><input type="radio" name="dc01" value="b"> 기준 시각 직전 7×24시간, [startAt,endAt)</label><br><output data-result="dc01" hidden><span data-status></span> · <span data-explanation></span> · <span data-next></span></output></fieldset>
+<fieldset><legend>DC-02 · 최신 상태</legend><p>기간 안 LIKE 뒤 SKIP이 있으면 해당 이슈는 어떻게 되는가?</p><label><input type="radio" name="dc02" value="a"> LIKE와 SKIP을 모두 건수에 더한다</label><br><label><input type="radio" name="dc02" value="b"> 종료 시점 최신 SKIP이므로 제외한다</label><br><output data-result="dc02" hidden><span data-status></span> · <span data-explanation></span> · <span data-next></span></output></fieldset>
+<fieldset><legend>DC-03 · 집계 기준</legend><p>온보딩의 category preference weight가 관심 분석 건수를 바꾸는가?</p><label><input type="radio" name="dc03" value="a"> weight에 비례해 바꾼다</label><br><label><input type="radio" name="dc03" value="b"> 바꾸지 않고 서로 다른 공개 이슈를 한 번씩 센다</label><br><output data-result="dc03" hidden><span data-status></span> · <span data-explanation></span> · <span data-next></span></output></fieldset>
+<fieldset><legend>DC-04 · 빈 상태</legend><p>기간 내 관심 이슈가 0건이면 API는 어떻게 응답하는가?</p><label><input type="radio" name="dc04" value="a"> 500 오류로 처리한다</label><br><label><input type="radio" name="dc04" value="b"> 200과 EMPTY 상태·0건을 반환한다</label><br><output data-result="dc04" hidden><span data-status></span> · <span data-explanation></span> · <span data-next></span></output></fieldset>
+<fieldset><legend>DC-05 · 목록 경계</legend><p>관심 목록 API가 제공하는 커서는 무엇을 고정하는가?</p><label><input type="radio" name="dc05" value="a"> offset 숫자만 고정한다</label><br><label><input type="radio" name="dc05" value="b"> likedAt·issueId 정렬 키와 동일 필터를 불투명 값으로 전달한다</label><br><output data-result="dc05" hidden><span data-status></span> · <span data-explanation></span> · <span data-next></span></output></fieldset><div class="control-actions"><button type="button" id="design-control-prev">이전</button><button type="button" id="design-control-next">다음</button><button type="button" id="submit-design-control">점검 결과 제출</button></div><output id="design-control-summary" aria-live="polite" hidden></output></form>
+<script>
+(() => {
+  const form = document.getElementById('design-control-form');
+  if (!form) return;
+  const slides = [...form.querySelectorAll('fieldset')];
+  const progress = document.getElementById('design-control-progress');
+  const summary = document.getElementById('design-control-summary');
+  const previous = document.getElementById('design-control-prev');
+  const next = document.getElementById('design-control-next');
+  const submit = document.getElementById('submit-design-control');
+  const answers = {dc01:'b',dc02:'b',dc03:'b',dc04:'b',dc05:'b'};
+  let current = 0;
+
+  const render = () => {
+    slides.forEach((slide, index) => {
+      slide.hidden = index !== current;
+      slide.setAttribute('aria-current', index === current ? 'step' : 'false');
+    });
+    const answered = slides.filter((slide) => slide.querySelector('input:checked')).length;
+    if (progress) progress.textContent = `질문 ${current + 1}/${slides.length} · 응답 ${answered}/${slides.length}`;
+    if (previous) previous.disabled = current === 0;
+    if (next) next.disabled = current === slides.length - 1;
+  };
+
+  previous?.addEventListener('click', () => {
+    if (current > 0) { current -= 1; render(); }
+  });
+  next?.addEventListener('click', () => {
+    if (current < slides.length - 1) { current += 1; render(); }
+  });
+  submit?.addEventListener('click', () => {
+    const missing = [];
+    for (const [id, answer] of Object.entries(answers)) {
+      const selected = form.querySelector(`input[name="${id}"]:checked`);
+      const output = form.querySelector(`[data-result="${id}"]`);
+      if (!selected) missing.push(id);
+      if (!output) continue;
+      output.hidden = false;
+      const ok = selected?.value === answer;
+      output.querySelector('[data-status]').textContent = ok ? '확립' : '보류';
+      output.querySelector('[data-explanation]').textContent = ok ? '기준선과 일치' : '관련 경계를 다시 확인';
+      output.querySelector('[data-next]').textContent = ok ? '다음 질문' : '작은 범위의 재점검';
+    }
+    if (summary) {
+      summary.hidden = false;
+      summary.textContent = missing.length === 0
+        ? '점검 결과가 각 문항에 표시되었습니다.'
+        : `미응답 문항: ${missing.join(', ')}. 해당 문항을 선택한 뒤 다시 제출하세요.`;
+    }
+    render();
+  });
+  render();
+})();
+</script></section>
+<section id="approval-state"><h2>승인 상태</h2><p><strong>설계 승인됨 · 2026-09-15 KST.</strong> 사용자의 “구현 ㄱㄱ” 지시로 피그마의 최근 7일 기준과 아래 범위를 승인했다. 승인 범위는 인증된 회원의 <code>GET /me/interest-analysis</code>, <code>GET /me/liked-issues</code>, 조회에 필요한 <code>user_interaction_events</code> migration/entity/repository 읽기 경계다. 관심 등록·해제 쓰기 endpoint와 물리 삭제 정책은 보류한다.</p><p>구현 제어 문서: <a href="mypage-interest-analysis-implementation.html">mypage-interest-analysis-implementation.html</a>. 이 기준선을 보존하고, 행동 쓰기 정책을 추가하면 재승인한다.</p></section>
+</article></main>
+</body></html>
