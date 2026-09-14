@@ -251,9 +251,10 @@
             옵션·entity catalog는 읽기 전용 port로 분리하고, 온보딩 write는 repository port와
             transaction manager를 통해 수행한다. production provider는 PostgreSQL adapter로
             연결되어 users 행 잠금, master validation, preference upsert, terminal 상태 변경을 한
-            transaction에서 수행한다. 런타임 인증 모듈은 없으므로 controller는 request의
-            <code>authenticatedUserId</code> seam만 읽고, 값이 없으면 401을 반환한다. 테스트는 fake
-            principal과 repository를 직접 주입한다.
+            transaction에서 수행한다. 런타임 인증은 <code>JwtAuthGuard</code>가 검증한
+            <code>AuthPrincipal</code>을 <code>@CurrentUser()</code> decorator로 controller에 전달하며,
+            온보딩 write는 그 principal의 userId만 사용한다. 테스트는 fake principal과 repository를
+            직접 주입한다.
           </p>
           <table>
             <caption>

@@ -17,6 +17,13 @@ const config: INestiaConfig = {
       title: 'Newtine API',
       version: '0.1.0',
     },
+    security: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      },
+    },
   },
   primitive: false,
 };

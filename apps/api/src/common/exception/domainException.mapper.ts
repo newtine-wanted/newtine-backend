@@ -1,6 +1,7 @@
 import { IssueExceptionCode, PipelineExceptionCode } from '@newtine/core';
 import type { DomainException } from '@newtine/core';
 import { OnboardingExceptionCode } from '@newtine/core';
+import { AuthExceptionCode } from '@newtine/core';
 
 import {
   ApiException,
@@ -23,6 +24,13 @@ const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionS
   onboarding: {
     [OnboardingExceptionCode.UserNotFound]: ApiException.Unauthorized,
     [OnboardingExceptionCode.InvalidSelection]: ApiException.InvalidArgument,
+  },
+  auth: {
+    [AuthExceptionCode.DuplicateEmail]: ApiException.Conflict,
+    [AuthExceptionCode.InvalidEmail]: ApiException.InvalidArgument,
+    [AuthExceptionCode.InvalidPassword]: ApiException.InvalidArgument,
+    [AuthExceptionCode.InvalidCredentials]: ApiException.Unauthorized,
+    [AuthExceptionCode.InvalidRefreshToken]: ApiException.Unauthorized,
   },
 };
 

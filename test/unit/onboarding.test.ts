@@ -12,7 +12,6 @@ import {
   type TransactionManager,
 } from '@newtine/core';
 import { OnboardingService } from '@newtine/api/onboarding/onboarding.service.js';
-import { requireAuthenticatedUserId } from '@newtine/api/onboarding/onboarding.auth.js';
 import { toEntitySearchCommand } from '@newtine/api/onboarding/type/onboarding.input.js';
 
 const transactionManager: TransactionManager = {
@@ -174,7 +173,7 @@ test('complete rejects invalid selections and unknown users without changing sta
   assert.equal(repository.findOnboarding(userId)?.status, OnboardingStatus.Pending);
 });
 
-test('entity query mapping and principal seam preserve the approved boundaries', () => {
+test('entity query mapping preserves the approved boundary', () => {
   const repository = new InMemoryOnboardingRepository();
   const entityId = repository.seedEntity({
     name: '검색 대상',
@@ -182,11 +181,8 @@ test('entity query mapping and principal seam preserve the approved boundaries',
     aliases: [],
     isActive: true,
   });
-  const userId = repository.seedUser();
+  repository.seedUser();
   const search = repository.searchEntities(toEntitySearchCommand({ query: '검색' }));
   assert.equal(search.total, 1);
   assert.equal(search.items[0]?.id, entityId);
-
-  assert.throws(() => requireAuthenticatedUserId({} as never), /인증이 필요합니다/);
-  assert.equal(requireAuthenticatedUserId({ authenticatedUserId: userId } as never), userId);
 });

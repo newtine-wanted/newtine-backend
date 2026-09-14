@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="purpose"
+      content="승인된 회원 인증·JWT·사용자/관리자 권한 설계의 구현 상태와 검증 증거 관리"
+    />
+    <meta name="audience" content="NEWTINE 백엔드 개발자·리뷰어·운영 담당자" />
+    <meta
+      name="problem"
+      content="승인된 인증 설계를 실제 코드·schema·route guard·계약·테스트로 변환하고 구현 중 잔여 위험을 추적"
+    />
+    <meta
+      name="core-flow"
+      content="승인 기준선 → dependency/schema → auth API/session → JWT principal·role guard → 기존 API 보호 → contract·test·gate 증거"
+    />
+    <title>회원 인증·JWT·사용자/관리자 권한 구현 제어 · 구조 리팩터링 완료</title>
+    <style>
+      :root {
+        font-family: system-ui, sans-serif;
+        color: #172b36;
+        background: #f2f5f7;
+        line-height: 1.7;
+      }
+      body {
+        max-width: 1120px;
+        margin: auto;
+        padding: 28px;
+      }
+      header,
+      section {
+        background: white;
+        border: 1px solid #d9e3e8;
+        border-radius: 12px;
+        padding: 24px;
+        margin: 18px 0;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      h1 {
+        font-size: 30px;
+      }
+      h2 {
+        font-size: 22px;
+      }
+      a {
+        color: #075d9b;
+      }
+      nav {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid #cbd8df;
+        text-align: left;
+        padding: 10px;
+        vertical-align: top;
+      }
+      caption {
+        text-align: left;
+        font-weight: 700;
+        margin: 10px 0;
+      }
+      dt {
+        font-weight: 700;
+      }
+      dd {
+        margin: 0 0 10px;
+      }
+      aside {
+        padding: 16px;
+        background: #fff4db;
+        border-left: 4px solid #cc8700;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      li {
+        margin: 8px 0;
+      }
+      .state {
+        font-weight: 700;
+        color: #885900;
+      }
+      .done {
+        color: #286b35;
+        font-weight: 700;
+      }
+      .open {
+        color: #9b3b00;
+        font-weight: 700;
+      }
+      small {
+        color: #435865;
+      }
+      @media (max-width: 700px) {
+        body {
+          padding: 10px;
+        }
+        section,
+        header {
+          padding: 16px;
+        }
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>
+        구현 제어 기준선 · 2026-09-14 · 브랜치 <code>codex/authentication-jwt</code> ·
+        <strong class="state">구조 리팩터링 완료 · 운영 적용 보류</strong>
+      </p>
+      <h1>회원 인증·JWT·사용자/관리자 권한 구현 제어</h1>
+      <p>
+        승인된 설계를 코드와 실행 가능한 검증 증거로 옮기는 living control artifact다. 현재 상태와
+        변경 경계, 실패·복구 불변식, 실제 게이트 결과를 한곳에 기록하고, 구현 중 설계가 바뀌면
+        기준선으로 돌아가 재승인을 요구한다.
+      </p>
+      <dl>
+        <dt>목적</dt>
+        <dd>승인된 회원 인증·JWT·사용자/관리자 권한 설계의 구현 상태와 검증 증거 관리</dd>
+        <dt>사용자</dt>
+        <dd>NEWTINE 백엔드 개발자·리뷰어·운영 담당자</dd>
+        <dt>문제</dt>
+        <dd>승인된 인증 설계를 실제 코드·schema·route guard·계약·테스트로 변환하고 구현 중 잔여 위험을 추적</dd>
+        <dt>핵심 흐름</dt>
+        <dd>승인 기준선 → dependency/schema → auth API/session → JWT principal·role guard → 기존 API 보호 → contract·test·gate 증거</dd>
+        <dt>승인 근거</dt>
+        <dd>사용자의 명시적 “구현 ㄱ” 지시와 후속 G14-A 선택·진행 지시(<code>r</code>). 설계 기준선은 <a href="authentication-authorization-design.html">authentication-authorization-design.html</a>에서 관리한다.</dd>
+        <dt>범위 고정</dt>
+        <dd>email/password 로컬 인증, JWT access, HttpOnly refresh rotation, USER/ADMIN role, 현재 /me API 보호, G14-A Compose local bootstrap과 R1-A/R2-A/R3-A 구조 리팩터링. 소셜 로그인과 <code>kakao_id</code>는 이번 구현에서 제거한다.</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="구현 제어 탐색">
+      <a href="#baseline">기준선</a>
+      <a href="#status">상태</a>
+      <a href="#refactor-contract">리팩터링 계약</a>
+      <a href="#refactor-result">리팩터링 결과</a>
+      <a href="#boundaries">경계</a>
+      <a href="#issues">이슈</a>
+      <a href="#verification">검증</a>
+      <a href="#review">critical review</a>
+      <a href="#risks">잔여 위험</a>
+      <a href="#control-state">통제 상태</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="baseline">
+          <h2>승인된 설계 기준선</h2>
+          <p>
+            아래 항목은 구현자가 임의로 바꿀 수 없는 approved baseline이다. 계약·상태·권한·실패 의미가
+            달라지는 경우 코드를 계속 진행하지 않고 설계 artifact를 갱신하여 재승인을 받는다.
+          </p>
+          <table>
+            <caption>설계 결정과 구현 불변식</caption>
+            <thead>
+              <tr><th scope="col">영역</th><th scope="col">기준선</th><th scope="col">구현 증거</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">identity</th><td>email/password local only. canonical email은 trim/lowercase, password는 trim하지 않음.</td><td>DTO/service/unit test</td></tr>
+              <tr><th scope="row">password</th><td>Argon2id hash만 저장. 길이 12~128자. 원문은 log·DB·response에 남기지 않음.</td><td>password service/test/log redaction</td></tr>
+              <tr><th scope="row">tokens</th><td>jose HS256 access 15분, refresh opaque 30일. access는 JSON, refresh는 HttpOnly cookie.</td><td>JWT service/cookie contract</td></tr>
+              <tr><th scope="row">refresh</th><td>token hash만 저장. rotation은 transaction으로 기존 row를 소비하고 신규 row를 만들며, 재사용은 사용자 활성 session 전체 revoke.</td><td>repository transaction/concurrency test</td></tr>
+              <tr><th scope="row">role</th><td>보호 요청마다 DB current role 조회. signup은 USER만 생성. ADMIN은 운영자만 부여.</td><td>guard/role test/migration ops note</td></tr>
+              <tr><th scope="row">route</th><td>health/auth/catalog/search 공개, /me/** 인증, 향후 /admin/**는 ADMIN.</td><td>controller guard matrix/contract</td></tr>
+              <tr><th scope="row">schema</th><td>users에 email/password_hash/role을 두고 <code>kakao_id</code> 제거. refresh_sessions는 hash·만료·used·revoked 상태를 저장.</td><td>entity/migration/ERD</td></tr>
+              <tr><th scope="row">Compose</th><td>운영 base schema 소유권은 바꾸지 않는다. fresh Compose에만 disposable base-schema fixture와 migration runner를 두어 onboarding·authentication delta migration을 순서대로 적용한다.</td><td>compose init SQL/migration service/fresh-volume E2E</td></tr>
+              <tr><th scope="row">errors</th><td>입력 400, 인증 실패 401, role/CSRF 403, 중복 email 409, 기존 ProblemDetails shape 유지.</td><td>exception mapping/generated contract</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="status">
+          <h2>구현 상태 ledger</h2>
+          <table>
+            <caption>단일 write owner가 갱신하는 진행 상태</caption>
+            <thead>
+              <tr><th scope="col">단계</th><th scope="col">대상</th><th scope="col">상태</th><th scope="col">완료 조건</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">1</th><td>dependency/config</td><td class="done">완료</td><td>jose·argon2 설치, JWT secret/TTL/cookie config 검증</td></tr>
+              <tr><th scope="row">2</th><td>users/session schema</td><td class="state">구현 완료 · 운영 DB 적용 대기</td><td>entity·migration·base schema ownership·kakao_id drop 영향 확인</td></tr>
+              <tr><th scope="row">3</th><td>auth domain/API</td><td class="done">완료</td><td>signup/login/refresh/logout와 G13-A 응답·cookie 구현</td></tr>
+              <tr><th scope="row">4</th><td>principal/role guard</td><td class="done">완료</td><td>DB current role lookup, 401/403, /me 보호, future admin seam</td></tr>
+              <tr><th scope="row">5</th><td>contracts/tests</td><td class="done">완료</td><td>Nestia generated contract, unit/integration/route/concurrency 테스트</td></tr>
+              <tr><th scope="row">6</th><td>gates/review</td><td class="done">완료 · local Compose DB 포함</td><td>format/lint/typecheck/test/build/smoke 결과와 no-write critical review 기록</td></tr>
+              <tr><th scope="row">7</th><td>G14-A Compose bootstrap</td><td class="done">완료 · 운영 schema와 분리</td><td>fresh volume에서 base fixture → migration runner → signup/login/refresh/logout E2E 성공</td></tr>
+              <tr><th scope="row">8</th><td>R1-A/R2-A/R3-A 구조 리팩터링</td><td class="done">완료 · fresh Compose 기동·auth smoke 포함</td><td>ORM CRUD 경계, use case 분리, Principal decorator, 기존 HTTP/JWT/cookie/refresh/role 동작 회귀 검증</td></tr>
+            </tbody>
+          </table>
+          <p><small>각 단계의 “완료”는 코드 존재만이 아니라 완료 조건과 검증 증거를 함께 충족했다는 뜻이다. 운영 DB 적용 대기 단계는 별도로 표시한다.</small></p>
+        </section>
+
+        <section id="refactor-contract">
+          <h2>승인된 구조 리팩터링 실행 계약</h2>
+          <p>
+            사용자가 승인한 R1-A·R2-A·R3-A를 현재 인증 동작을 보존하는 구조 리팩터링으로 실행한다.
+            이 계약은 새 인증 정책을 추가하는 문서가 아니라, 이미 승인·구현된 정책의 책임 경계를
+            명확하게 만드는 구현 기준선이다.
+          </p>
+          <table>
+            <caption>결정·범위·완료 조건</caption>
+            <thead>
+              <tr><th scope="col">결정</th><th scope="col">실행 내용</th><th scope="col">금지된 변경</th><th scope="col">완료 조건</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">R1-A ORM 경계</th>
+                <td>일반 users·refresh session CRUD는 MikroORM EntitySchema의 <code>findOne</code>/<code>insert</code>/<code>nativeUpdate</code>로 수행한다. <code>SELECT ... FOR UPDATE</code>를 포함한 refresh rotation 원자 상태 전이만 명시적 SQL 경계로 남긴다.</td>
+                <td>rotation의 잠금·used/revoked 의미 변경, ORM metadata와 실제 migration schema 불일치</td>
+                <td>일반 repository 메서드에 raw SQL이 없고, rotation/reuse 동시성 불변식과 기존 DB 계약 테스트가 통과한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">R2-A 애플리케이션 경계</th>
+                <td>signup·login·refresh·logout을 독립 use case로 분리하고 session 발급·refresh token 보안 정책·session response mapping을 명명된 협력 객체로 이동한다.</td>
+                <td>HTTP status, cookie 속성, JWT claims/TTL, refresh rotation/reuse 결과, public error shape 변경</td>
+                <td>controller는 HTTP adapter로 남고 각 use case가 필요한 port만 의존하며, 기존 unit·contract·Compose smoke가 통과한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">R3-A Principal</th>
+                <td>guard는 검증된 <code>AuthPrincipal</code> 하나를 request에 주입하고, <code>CurrentUser</code> parameter decorator가 이를 controller에 전달한다. role guard도 동일 principal만 사용한다.</td>
+                <td>body/query의 user id 사용, JWT role claim 권한 부여, optional id/role 필드의 재도입</td>
+                <td><code>/me/**</code>가 decorator principal의 userId만 사용하고, 미인증·role demotion·admin seam 테스트가 통과한다.</td>
+              </tr>
+            </tbody>
+          </table>
+          <dl>
+            <dt>승인 상태</dt>
+            <dd class="done">R1-A / R2-A / R3-A 승인됨 — 사용자의 “권고대로 개선 ㄱ” 지시</dd>
+            <dt>구현 순서</dt>
+            <dd>core domain/port와 shared user metadata → ORM repository adapter → application use case/session policy → guard/principal/decorator → controller/onboarding/tests</dd>
+            <dt>검증 계약</dt>
+            <dd><code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm run test:unit</code>, <code>npm run test:integration</code>, <code>npm run build</code>, <code>npm run contracts:check</code>, <code>npm run test:smoke</code>, fresh Compose auth smoke</dd>
+            <dt>중단 조건</dt>
+            <dd>ORM 전환으로 transaction context가 깨지거나, rotation 동시성·cookie/HTTP 계약·현재 role 조회가 바뀌거나, 운영 schema compatibility를 확인하지 못한 destructive 변경이 필요해지는 경우 구현을 멈추고 설계 재승인을 받는다.</dd>
+          </dl>
+        </section>
+
+        <section id="refactor-result">
+          <h2>구조 리팩터링 as-built 결과</h2>
+          <p>
+            승인된 실행 계약을 현재 동작 위에 적용했다. 인증 정책이나 외부 계약을 새로 만들지 않고,
+            각 책임의 소유 위치와 의존성 방향을 코드 구조에 반영했다.
+          </p>
+          <table>
+            <caption>최종 책임 경계</caption>
+            <thead>
+              <tr><th scope="col">경계</th><th scope="col">최종 소유 위치</th><th scope="col">검증 증거</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">domain/port</th><td><code>libs/core/src/auth/domain</code>의 role·account·principal·exception과 <code>auth/repository/auth.repository.ts</code>의 port/token</td><td>core typecheck, compatibility barrel, principal/account unit</td></tr>
+              <tr><th scope="row">persistence metadata</th><td><code>libs/core/src/user/persistence/user.persistence.entity.ts</code>가 users metadata를 공유하고 onboarding은 이를 소비한다. refresh session도 typed EntitySchema로 등록한다.</td><td>database options entity ledger, fresh migration, repository ORM unit</td></tr>
+              <tr><th scope="row">ORM adapter</th><td><code>PostgresAuthRepository</code>의 email/id 조회·user/session insert·revoke는 MikroORM을 사용한다. refresh rotation은 row lock과 조건부 used 전이만 명시적 SQL로 남긴다.</td><td>ORM CRUD 호출 테스트, rotation SQL 최소 경계 테스트, Compose runtime</td></tr>
+              <tr><th scope="row">application</th><td><code>SignupUseCase</code>, <code>LoginUseCase</code>, <code>RefreshUseCase</code>, <code>LogoutUseCase</code>, <code>SessionIssuer</code>, <code>EmailAddress</code>로 workflow·정책·projection을 분리한다.</td><td>111 unit tests, application imports, contract check</td></tr>
+              <tr><th scope="row">HTTP principal</th><td><code>AccessPrincipalService</code>가 JWT 검증과 DB current role 조회를 담당하고, <code>JwtAuthGuard</code>는 principal 하나를 request에 주입한다. controller는 <code>@CurrentUser()</code>를 사용한다.</td><td><code>/me/onboarding</code> Compose smoke, role guard unit, generated OpenAPI</td></tr>
+            </tbody>
+          </table>
+          <dl>
+            <dt>보존한 불변식</dt>
+            <dd>signup USER 강제, JWT HS256/issuer/audience/TTL, refresh hash-only·rotation·reuse revoke, cookie 속성·HTTP status, DB current role, 401/403/409 ProblemDetails, 소셜 로그인·<code>kakao_id</code> 미사용을 유지했다.</dd>
+            <dt>발견 후 수정한 실행 이슈</dt>
+            <dd>첫 Compose 기동에서 <code>AuthModule</code>이 <code>JwtAuthGuard</code>만 export하고 <code>AccessPrincipalService</code>를 export하지 않아 <code>OnboardingModule</code> DI가 실패했다. 협력 객체를 module boundary에 export한 뒤 이미지를 재빌드했고 fresh Compose 기동과 smoke가 통과했다.</dd>
+            <dt>생성 계약</dt>
+            <dd><code>contracts:check</code>는 15 routes·23 schemas를 재생성·검증했다. <code>generated/openapi.json</code>의 tracked diff는 object key 순서만 달라졌고 정렬 비교 시 기존 계약과 의미적으로 동일하다.</dd>
+          </dl>
+        </section>
+
+        <section id="boundaries">
+          <h2>구현 경계와 상태 전이</h2>
+          <ol>
+            <li>controller는 입력·cookie·Authorization scheme을 경계에서 해석하고 각 application use case는 credential과 session workflow를 적용한다.</li>
+            <li>JWT guard는 signature/issuer/audience/expiry를 검증한 뒤 users를 조회하여 principal id와 current role을 request에 주입한다.</li>
+            <li>role guard는 principal의 DB role만 사용한다. JWT role claim이나 body role은 권한 근거가 아니다.</li>
+            <li>refresh row는 active → used(정상 회전) 또는 revoked(로그아웃/재사용 대응)로만 전이한다. expired row는 재활성화하지 않는다.</li>
+            <li>회원가입·로그인은 refresh session 발급까지 성공해야 외부 성공 응답을 반환한다. 실패 transaction은 users/session의 부분 상태를 남기지 않는다.</li>
+          </ol>
+          <aside>
+            <strong>주의:</strong> 현재 onboarding migration은 base schema가 users를 소유한다고 기록한다. 실제 base DDL과 데이터가 확인되지 않은 상태에서 <code>kakao_id</code> drop은 되돌릴 수 없는 영향을 가질 수 있으므로 migration 실행 전 preflight 증거를 남긴다.
+          </aside>
+        </section>
+
+        <section id="issues">
+          <h2>이슈·결정 register</h2>
+          <table>
+            <caption>구현 중 설계 변경을 감지하는 기록</caption>
+            <thead>
+              <tr><th scope="col">ID</th><th scope="col">내용</th><th scope="col">영향</th><th scope="col">상태·조치</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">I-001</th><td>실제 base schema DDL/운영 데이터의 users ownership을 확인해야 한다.</td><td>migration 실행 가능 여부, kakao_id drop·email unique·password_hash nullability</td><td class="open">확인 필요 — read-only schema preflight 후 migration에 기록</td></tr>
+              <tr><th scope="row">I-002</th><td>Argon2id native runtime의 배포 이미지 지원과 비용을 확인해야 한다.</td><td>build/startup/per-request latency</td><td class="open">확인 필요 — install/build/benchmark 증거</td></tr>
+              <tr><th scope="row">I-003</th><td>rate limit, secret rotation, password reset, email verification은 승인 범위 밖이다.</td><td>운영 hardening과 account recovery</td><td>잔여 위험 — 별도 설계 이슈로 분리</td></tr>
+              <tr><th scope="row">I-004</th><td>구현 시작 시점에는 설계 변경 이슈가 없다.</td><td>baseline 무결성</td><td>기록됨 — 변경 발생 시 이 행을 갱신하지 말고 새 행을 추가</td></tr>
+              <tr><th scope="row">I-005</th><td>critical review에서 login/refresh의 Nest POST 기본 status(201)가 G13-A의 200과 불일치함을 발견했다.</td><td>HTTP 계약·생성 SDK/OpenAPI</td><td class="done">수정됨 — <code>@HttpCode(200)</code> 추가 후 계약 재생성·재검증</td></tr>
+              <tr><th scope="row">I-006</th><td>fresh Compose DB에서 기존 delta migration이 외부 <code>users</code> base table을 요구하여 실패하고, 실제 <code>POST /auth/signup</code>이 500을 반환했다.</td><td>local reproducibility·auth E2E·migration bootstrap</td><td class="done">해결됨 — G14-A Compose fixture·migration runner 추가, fresh volume migration 및 auth smoke 통과</td></tr>
+              <tr><th scope="row">I-007</th><td>초기 Compose auth smoke가 현재 <code>/me/onboarding</code> 응답에 없는 <code>userId</code>를 기대했다.</td><td>검증 스크립트 false negative</td><td class="done">수정됨 — 실제 response contract(status/completedAt/ageGroup/regionCodes)에 맞춰 재실행 통과</td></tr>
+              <tr><th scope="row">I-008</th><td>사용자 승인에 따라 인증 구현의 구조적 책임 경계를 개선한다(R1-A ORM, R2-A use case, R3-A Principal decorator).</td><td>repository·service·guard의 가독성, 의존성 방향, 테스트 대상 경계</td><td class="done">해결됨 — 기존 HTTP/JWT/cookie/refresh/role 동작과 public contract를 보존하며 실행 계약 완료</td></tr>
+              <tr><th scope="row">I-009</th><td>첫 구조 리팩터링 Compose 기동에서 <code>JwtAuthGuard</code>의 새 <code>AccessPrincipalService</code> 의존성이 <code>OnboardingModule</code>에서 resolve되지 않았다.</td><td>런타임 module export·보호 route startup</td><td class="done">해결됨 — <code>AuthModule</code>이 <code>AccessPrincipalService</code>를 함께 export하고 fresh image·Compose smoke 재검증</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="verification">
+          <h2>검증 증거 ledger</h2>
+          <table>
+            <caption>실행 전 계획과 실행 후 결과</caption>
+            <thead>
+              <tr><th scope="col">증거</th><th scope="col">명령/시나리오</th><th scope="col">현재 결과</th><th scope="col">판정 기준</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">static</th><td><code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code></td><td class="done">통과</td><td>auth 신규 파일 포함, 실패 0</td></tr>
+              <tr><th scope="row">domain</th><td>email/password/JWT claims·algorithm·TTL/password redaction unit</td><td class="done">통과 · unit 12 suites / 57 tests</td><td>불변식과 경계값 재현</td></tr>
+              <tr><th scope="row">session</th><td>hash-only, expiry/used/revoked, logout, refresh rotation/reuse all-session revoke</td><td class="done">통과 · repository/migration unit 포함</td><td>한 token은 한 번만 성공; 재사용 후 활성 session revoke</td></tr>
+              <tr><th scope="row">route</th><td>public/auth/user/admin matrix, role demotion, CSRF, ProblemDetails</td><td class="done">통과 · unit + smoke</td><td>G2/G4/G9와 401/403 일치</td></tr>
+              <tr><th scope="row">migration</th><td>G14-A fresh Compose fixture → onboarding/auth migration up</td><td class="done">통과 — 두 migration 모두 applied</td><td>base fixture 위에 delta migration이 순서대로 완료</td></tr>
+              <tr><th scope="row">Compose runtime</th><td><code>docker compose -p auth-jwt-g14-test up -d --build --wait db migrate api</code>, <code>npm run test:smoke:compose</code></td><td class="done">통과 — migration·signup·protected API·login·refresh rotation/reuse revoke·logout</td><td>fresh volume에서 전체 인증 흐름과 cookie/session 상태 성공</td></tr>
+              <tr><th scope="row">contract</th><td><code>npm run contracts:all</code>, <code>npm run test:contracts</code>, <code>npm run typecheck:generated</code></td><td class="done">통과 · contract 1 suite / 4 tests</td><td>auth route와 실패 status/schema가 generated contract에 반영</td></tr>
+              <tr><th scope="row">release gate</th><td><code>npm run test:unit</code>, <code>npm run test:integration</code>, <code>npm run build</code>, <code>npm run test:smoke</code></td><td class="done">통과 · integration 1 suite / 5 tests</td><td>기존 동작 회귀 없음, build/startup 가능</td></tr>
+              <tr><th scope="row">refactor gate</th><td>R1-A ORM CRUD/rotation 경계, R2-A use case/application 경계, R3-A principal/decorator와 fresh Compose startup/smoke</td><td class="done">통과 — unit 20 suites / 111 tests, integration 2 suites / 11 tests, build, contracts, fresh Compose auth smoke</td><td>책임 경계가 실제 runtime wiring과 동작 불변식에 함께 반영</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="review">
+          <h2>읽기 전용 critical review</h2>
+          <p>
+            리뷰 유형은 자기 변경(self-change)이다. 승인된 설계 기준선, 실제 구현 흐름, 생성 계약과
+            fresh gate 결과를 대조했다. 이전 REV-001은 수정·재검증되었고, G14-A 적용 후 Compose
+            bootstrap blocker를 해소했다. 이번 구조 리팩터링도 동일한 기준선으로 no-write 재점검했다.
+            운영 base schema 호환성·정책 확인과 non-blocking risk는 별도 잔여 항목으로 남긴다.
+          </p>
+          <table>
+            <caption>리뷰 finding</caption>
+            <thead>
+              <tr><th scope="col">ID</th><th scope="col">심각도·상태</th><th scope="col">관찰된 사실·영향</th><th scope="col">최소 조치·검증 공백</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">REV-001</th>
+                <td class="done">fixed · blocker 해소</td>
+                <td><code>POST /auth/login</code>·<code>POST /auth/refresh</code>가 명시적 status 없이 Nest 기본 201을 사용하여 G13-A의 200과 불일치했다.</td>
+                <td><code>@HttpCode(HttpStatus.OK)</code> 추가, SDK/OpenAPI status 200 확인, contract·build·smoke 재실행 통과</td>
+              </tr>
+              <tr>
+                <th scope="row">REV-002</th>
+                <td class="done">해결됨 · local contract</td>
+                <td><code>README.md</code>가 secret 준비 없이 <code>docker compose up --build</code>를 안내했고, production 설정에서 빈 secret과 Secure policy로 startup이 실패할 수 있었다.</td>
+                <td>README에 local <code>.env</code> 준비를 추가하고 Compose가 <code>NODE_ENV</code>/<code>AUTH_COOKIE_SECURE</code>를 env-file에서 받도록 수정했다. secret 미설정은 Compose interpolation에서 명시적으로 실패하며, production fail-closed는 유지한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">REV-003</th>
+                <td class="done">해결됨 · Compose 범위</td>
+                <td>fresh Compose volume에는 <code>users</code> base schema가 없어 onboarding migration이 실패하고 signup이 500이 됐다.</td>
+                <td>G14-A로 Compose에만 disposable base fixture, runtime migration runner, API dependency를 추가했다. fresh volume에서 두 migration applied와 <code>npm run test:smoke:compose</code> 통과를 확인했다. 실제 운영 base schema/data compatibility는 여전히 별도 확인 대상이다.</td>
+              </tr>
+              <tr>
+                <th scope="row">REV-004</th>
+                <td class="state">논의 필요 · open</td>
+                <td>Origin 검사는 refresh/logout에만 호출된다(<code>auth.controller.ts:66,79</code>). signup/login도 refresh cookie를 설정하므로, G9의 “same-site only”가 모든 cookie-setting auth endpoint를 뜻한다면 cross-site POST에 의한 login/signup CSRF가 남는다.</td>
+                <td>G9 적용 범위를 확정한다. same-site 전면 정책이면 signup/login에도 Origin 검사를 추가하고 cross-origin 시나리오를 검증한다. 예외를 허용하면 그 정책과 login-CSRF 영향을 명시적으로 승인한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">REV-005</th>
+                <td class="open">Non-blocking risk · open</td>
+                <td><code>refresh_sessions</code>의 used/revoked/expired row를 정리하는 retention job이나 삭제 정책이 없다. 로그인·rotation이 반복되면 테이블이 계속 증가한다.</td>
+                <td><code>expires_at</code> grace period를 둔 정리 작업과 운영 모니터링을 별도 설계하고, FK/인덱스 부하를 확인한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">REV-006</th>
+                <td class="done">fixed · 구조 리팩터링 범위</td>
+                <td>monolithic <code>AuthService</code>가 workflow·token/session policy·email validation·response mapping을 모두 소유하고, request에 id/role optional field가 따로 존재했다.</td>
+                <td>네 개 use case, <code>EmailAddress</code>, <code>SessionIssuer</code>, pure session mapper, <code>AuthPrincipal</code>/<code>@CurrentUser()</code>로 분리했다. typecheck·unit·integration·contract·Compose smoke 통과</td>
+              </tr>
+              <tr>
+                <th scope="row">REV-007</th>
+                <td class="done">fixed · runtime DI</td>
+                <td>첫 fresh Compose에서 <code>JwtAuthGuard → AccessPrincipalService</code> 의존성을 <code>OnboardingModule</code>이 resolve하지 못했다.</td>
+                <td><code>AccessPrincipalService</code>를 <code>AuthModule</code> exports에 추가하고 image rebuild 후 API healthy 및 전체 auth smoke 통과</td>
+              </tr>
+            </tbody>
+          </table>
+          <p><strong>리뷰 판단:</strong> 구조 리팩터링과 fresh Compose의 구현 blocker는 해결됨. 운영 base schema/data compatibility는 실제 운영 DB 적용 전 남은 검증 공백이며, REV-004는 G9 정책 확인 사항, REV-005는 non-blocking 운영 위험이다.</p>
+        </section>
+
+        <section id="risks">
+          <h2>잔여 위험과 중단 조건</h2>
+          <ul>
+            <li>base schema/data를 확인하지 못한 채 destructive migration을 실행하지 않는다. 실제 column ownership 또는 기존 email 충돌이 발견되면 구현을 중단하고 설계를 재승인한다.</li>
+            <li>Argon2id가 운영 runtime에서 로드되지 않거나 비용이 허용 범위를 넘으면 KDF를 임의로 바꾸지 않고 parameter/runtime 결정을 재승인한다.</li>
+            <li>refresh 동시성에서 두 요청이 성공하거나 used row가 재활성화되면 API 완료로 판정하지 않는다.</li>
+            <li>현재 DB role이 반영되지 않은 채 JWT claim만으로 admin 접근이 허용되면 G4 위반으로 판정하고 수정한다.</li>
+            <li>access/refresh/password/secret이 log, error detail, generated fixture에 나타나면 redaction과 fixture를 즉시 정리하고 재검증한다.</li>
+            <li>G14-A fixture는 local disposable schema일 뿐 운영 base schema의 호환성 증거가 아니다. 운영 DB에는 fixture를 적용하지 않는다.</li>
+          </ul>
+        </section>
+
+        <section id="control-state">
+          <h2>구현 제어 상태</h2>
+          <dl>
+            <dt>현재 상태</dt>
+            <dd><strong class="state">구조 리팩터링 완료 · 운영 제어 보류</strong></dd>
+            <dt>설계 baseline</dt>
+            <dd><a href="authentication-authorization-design.html">authentication-authorization-design.html</a> · G1~G14-A 설계 승인됨 · 구현 승인됨</dd>
+            <dt>개발자 설계 이해</dt>
+            <dd>미실시 — 별도 design-control HTML의 DC1~DC14 self-check는 비차단 참고 자료이며 브라우저 결과는 미보고</dd>
+            <dt>변경 관리</dt>
+            <dd>단일 write owner로 구현한다. 승인 범위를 바꾸는 발견은 이 문서의 issue register에 기록하고 설계 재승인 후 진행한다.</dd>
+            <dt>다음 행동</dt>
+            <dd>구조 리팩터링 후 no-write critical review와 전체 게이트 결과를 유지한다. 운영 base schema/data compatibility, G9 Origin 적용 범위, refresh session retention은 기존 별도 확인 사항으로 유지한다.</dd>
+          </dl>
+          <table>
+            <caption>구현 control coverage</caption>
+            <thead>
+              <tr><th scope="col">축</th><th scope="col">커버리지</th><th scope="col">증거 위치</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">prediction</th><td>auth 성공 응답, cookie, 보호 route, role demotion 예상</td><td>baseline/status/verification</td></tr>
+              <tr><th scope="row">invariant</th><td>hash-only, token rotation, DB role, 401/403, no credential logging</td><td>baseline/boundaries/risks</td></tr>
+              <tr><th scope="row">boundary</th><td>controller·guard·service·repository·migration의 책임 분리</td><td>boundaries/status</td></tr>
+              <tr><th scope="row">failure recovery</th><td>invalid credential, duplicate, expired/reused refresh, CSRF, transaction rollback</td><td>baseline/verification/risks</td></tr>
+              <tr><th scope="row">verification</th><td>static, domain, session, route, migration, contract, release gate</td><td>verification ledger</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>

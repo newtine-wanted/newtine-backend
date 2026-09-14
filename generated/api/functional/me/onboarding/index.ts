@@ -11,6 +11,7 @@ import type { OnboardingStateResult } from "../../../../../apps/api/src/onboardi
 import type { CompleteOnboardingRequest } from "../../../../../apps/api/src/onboarding/type/onboarding.request";
 
 /**
+ * @security bearerAuth
  * @throws 401 Authentication is required.
  * @throws 500 The server could not complete the request.
  * @controller OnboardingController.getMyOnboarding
@@ -45,6 +46,7 @@ export namespace getMyOnboarding {
 }
 
 /**
+ * @security bearerAuth
  * @throws 400 The request is invalid.
  * @throws 401 Authentication is required.
  * @throws 500 The server could not complete the request.
@@ -95,6 +97,7 @@ export namespace complete {
 }
 
 /**
+ * @security bearerAuth
  * @throws 401 Authentication is required.
  * @throws 500 The server could not complete the request.
  * @controller OnboardingController.skip

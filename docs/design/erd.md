@@ -164,13 +164,15 @@ Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 
 
 ## 12. users
 
-카카오 식별자로 로그인. 이메일로 계정을 병합하지 않는다. 온보딩 완료와 건너뛰기를 구분한다.
+로컬 email/password로 로그인한다. 비밀번호 원문은 저장하지 않고 Argon2id 결과만 저장한다. 소셜 로그인과
+<code>kakao_id</code>는 이번 인증 모델에서 제외하고, 온보딩 완료와 건너뛰기를 구분한다.
 
 | 컬럼 | 타입 | 키 | NULL | 기본값 | 허용값·참조·비고 |
 | --- | --- | --- | --- | --- | --- |
 | id | uuid | PK | 불가 | — | — |
-| kakao_id | text | UK | 불가 | — | — |
-| email | text | — | 허용 | — | — |
+| email | text | — | 허용 | — | canonical email unique (기존 legacy row는 NULL 허용) |
+| password_hash | text | — | 허용 | — | Argon2id 결과; legacy row는 credential 발급 전 NULL 가능 |
+| role | text | — | 불가 | USER | USER / ADMIN; signup은 USER만 |
 | onboarding_status | text | — | 불가 | — | PENDING / COMPLETED / SKIPPED |
 | onboarding_completed_at | timestamptz | — | 허용 | — | — |
 | created_at | timestamptz | — | 불가 | — | — |
