@@ -47,7 +47,7 @@
 
       <section id="current-implementation">
         <h2>현재 구현</h2>
-        <p>PR worktree <code>.worktrees/issue-card-query</code>에 <code>origin/main=d4db486</code>을 merge했고, 현재 main worktree의 사용자 변경은 건드리지 않았다. merge commit <code>0af1b95</code>와 구현 기록 commit을 push해 최종 head를 <code>cbe4a6c</code>로 갱신했다.</p>
+        <p>PR worktree <code>.worktrees/issue-card-query</code>에 <code>origin/main=d4db486</code>을 merge했고, 현재 main worktree의 사용자 변경은 건드리지 않았다. merge commit <code>0af1b95</code>와 구현 기록 커밋들을 원격 branch에 push했다.</p>
         <ol>
           <li>origin/main을 PR branch에 merge했다.</li>
           <li>예외 mapper, module, core export와 generated source를 양쪽 기능의 합집합으로 해소했다.</li>
@@ -68,7 +68,7 @@
           <caption>구현 이슈와 해결 증거</caption>
           <thead><tr><th>ID</th><th>상태</th><th>증상·원인</th><th>조치·검증</th><th>잔여 위험</th></tr></thead>
           <tbody>
-            <tr><td>PR3-MERGE-001</td><td>해결됨</td><td>GitHub PR #3가 <code>CONFLICTING</code>·<code>DIRTY</code>로 표시됐다.</td><td>최신 원격 main merge, 3개 수동 conflict 해소, generated 재생성, staged diff 검사, merge commit <code>0af1b95</code>와 최종 head <code>cbe4a6c</code> push 후 GitHub에서 <code>MERGEABLE</code>·<code>CLEAN</code>을 확인했다.</td><td>원격 checks는 현재 비어 있어 CI 결과는 별도 확인 대상이다.</td></tr>
+            <tr><td>PR3-MERGE-001</td><td>해결됨</td><td>GitHub PR #3가 <code>CONFLICTING</code>·<code>DIRTY</code>로 표시됐다.</td><td>최신 원격 main merge, 3개 수동 conflict 해소, generated 재생성, staged diff 검사, merge commit과 구현 기록 커밋 push 후 GitHub에서 <code>MERGEABLE</code>·<code>CLEAN</code>을 확인했다.</td><td>원격 checks는 현재 비어 있어 CI 결과는 별도 확인 대상이다.</td></tr>
             <tr><td>PR3-MERGE-002</td><td>해당 없음</td><td>기록 시작 시점에 추가 구현 이슈는 관찰되지 않았다.</td><td>새 이슈 발견 시 증상·원인·조치·증거를 이 행에 추가하지 않고 별도 행으로 보존한다.</td><td>실제 PostgreSQL 왕복은 환경에 따라 미검증일 수 있다.</td></tr>
           </tbody>
         </table>
@@ -86,7 +86,7 @@
             <tr><td><code>npm test</code></td><td>통과</td><td>unit 20 suites/106 tests, integration 2 suites/11 tests.</td></tr>
             <tr><td><code>npm run build</code></td><td>통과</td><td>API와 batch build 모두 통과.</td></tr>
             <tr><td><code>git diff --check</code> · staged conflict check</td><td>통과</td><td>whitespace 오류와 unresolved conflict 없음.</td></tr>
-            <tr><td><code>gh pr view 3</code></td><td>통과</td><td>head <code>cbe4a6c</code>, base <code>d4db486</code>, <code>mergeable=MERGEABLE</code>, <code>mergeStateStatus=CLEAN</code>.</td></tr>
+            <tr><td><code>gh pr view 3</code></td><td>통과</td><td>현재 push된 head, base <code>d4db486</code>, <code>mergeable=MERGEABLE</code>, <code>mergeStateStatus=CLEAN</code>.</td></tr>
           </tbody>
         </table>
       </section>
