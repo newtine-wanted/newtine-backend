@@ -143,3 +143,16 @@ export {
 } from './onboarding/inMemoryOnboarding.repository.js';
 export { InMemoryOnboardingTransactionManager } from './onboarding/inMemoryOnboarding.transactionManager.js';
 export { PostgresOnboardingRepository } from './onboarding/postgresOnboarding.repository.js';
+export { AuthRole, AUTH_REPOSITORY } from './auth/auth.model.js';
+export type {
+  AuthRoleValue,
+  AuthRepository,
+  AuthUser,
+  CreateAuthUserCommand,
+  CreateRefreshSessionCommand,
+  RotateRefreshSessionCommand,
+  RotateRefreshSessionResult,
+} from './auth/auth.model.js';
+export { AuthException, AuthExceptionCode } from './auth/auth.exception.js';
+export type { AuthExceptionCodeValue } from './auth/auth.exception.js';
+export { PostgresAuthRepository } from './auth/postgresAuth.repository.js';

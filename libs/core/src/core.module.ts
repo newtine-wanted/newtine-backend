@@ -9,6 +9,8 @@ import { MikroOrmPipelineRepository } from '@newtine/core/pipeline/repository/mi
 import { PIPELINE_RUN_REPOSITORY } from '@newtine/core/pipeline/repository/pipeline.repository.js';
 import { ONBOARDING_REPOSITORY } from '@newtine/core/onboarding/onboarding.model.js';
 import { PostgresOnboardingRepository } from '@newtine/core/onboarding/postgresOnboarding.repository.js';
+import { AUTH_REPOSITORY } from '@newtine/core/auth/auth.model.js';
+import { PostgresAuthRepository } from '@newtine/core/auth/postgresAuth.repository.js';
 
 @Module({
   imports: [MikroOrmModule.forRootAsync({ useFactory: () => createDatabaseOptions() })],
@@ -28,12 +30,17 @@ import { PostgresOnboardingRepository } from '@newtine/core/onboarding/postgresO
       provide: ONBOARDING_REPOSITORY,
       useClass: PostgresOnboardingRepository,
     },
+    {
+      provide: AUTH_REPOSITORY,
+      useClass: PostgresAuthRepository,
+    },
   ],
   exports: [
     TRANSACTION_MANAGER,
     ONBOARDING_REPOSITORY,
     PIPELINE_RUN_REPOSITORY,
     PipelineRunService,
+    AUTH_REPOSITORY,
   ],
 })
 export class CoreModule {}

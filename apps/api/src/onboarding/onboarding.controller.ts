@@ -1,8 +1,9 @@
 import { TypedBody, TypedException, TypedQuery, TypedRoute } from '@nestia/core';
-import { Controller, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import { Controller, HttpCode, HttpStatus, Req, UseGuards } from '@nestjs/common';
 import typia from 'typia';
 
 import { ApiException } from '@newtine/api/common/exception/api.exception.js';
+import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
 import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDetails.js';
 import { requireAuthenticatedUserId, type AuthenticatedRequest } from './onboarding.auth.js';
 import { OnboardingService } from './onboarding.service.js';
@@ -50,8 +51,10 @@ export class OnboardingController {
     );
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
   @TypedException<ProblemDetails>(ApiException.InternalError)
+  @UseGuards(JwtAuthGuard)
   @TypedRoute.Get('me/onboarding')
   async getMyOnboarding(@Req() request: AuthenticatedRequest): Promise<OnboardingStateResult> {
     return toStateResult(
@@ -59,9 +62,11 @@ export class OnboardingController {
     );
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
   @TypedException<ProblemDetails>(ApiException.InternalError)
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @TypedRoute.Post('me/onboarding/complete')
   async complete(
@@ -81,8 +86,10 @@ export class OnboardingController {
     return toStateResult(state);
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
   @TypedException<ProblemDetails>(ApiException.InternalError)
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @TypedRoute.Post('me/onboarding/skip')
   async skip(@Req() request: AuthenticatedRequest): Promise<OnboardingStateResult> {

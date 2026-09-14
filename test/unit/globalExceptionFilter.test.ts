@@ -4,6 +4,7 @@ import { test } from '@jest/globals';
 import type { PinoLogger } from 'nestjs-pino';
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
   InternalServerErrorException,
   UnauthorizedException,
@@ -165,6 +166,20 @@ test('GlobalExceptionFilter maps missing authentication to the standard unauthor
     status: 401,
     detail: '요청을 처리할 수 없습니다.',
     code: 'UNAUTHORIZED',
+  });
+});
+
+test('GlobalExceptionFilter maps authenticated-but-forbidden requests to the standard forbidden error', () => {
+  const filter = createFilter();
+  const { state, host } = createHost();
+
+  filter.catch(new ForbiddenException(), host as never);
+
+  assert.deepEqual(state.body, {
+    title: 'Forbidden',
+    status: 403,
+    detail: '요청을 처리할 수 없습니다.',
+    code: 'FORBIDDEN',
   });
 });
 

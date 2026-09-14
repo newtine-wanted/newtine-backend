@@ -11,8 +11,9 @@ export const UserSchema = defineEntity({
   tableName: 'users',
   properties: {
     id: p.uuid().primary(),
-    kakaoId: p.text().fieldName('kakao_id'),
     email: p.text().nullable(),
+    passwordHash: p.text().fieldName('password_hash').nullable(),
+    role: p.text().fieldName('role'),
     onboardingStatus: p.text().fieldName('onboarding_status'),
     onboardingCompletedAt: p
       .datetime()

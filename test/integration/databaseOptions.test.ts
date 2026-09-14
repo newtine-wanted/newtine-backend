@@ -3,6 +3,8 @@ import { test } from '@jest/globals';
 
 import { createDatabaseOptions } from '@newtine/core/common/database/database.options.js';
 import { DatabaseConfigurationException } from '@newtine/core/common/database/databaseConfiguration.exception.js';
+import { Migration20260914000000Authentication } from '@newtine/core/auth/migrations/Migration20260914000000Authentication.js';
+import { AUTH_PERSISTENCE_ENTITIES } from '@newtine/core/auth/persistence/auth.persistence.entity.js';
 import { Migration20260913000000OnboardingPersistence } from '@newtine/core/onboarding/migrations/Migration20260913000000OnboardingPersistence.js';
 import { ONBOARDING_PERSISTENCE_ENTITIES } from '@newtine/core/onboarding/persistence/onboarding.persistence.entity.js';
 import { AiUsageRecordEntity } from '@newtine/core/pipeline/repository/mikroOrm/aiUsageRecord.entity.js';
@@ -14,7 +16,11 @@ test('database options never enable automatic database creation', () => {
   const options = createDatabaseOptions({ NODE_ENV: 'test' });
 
   assert.equal(options.ensureDatabase, false);
-  assert.deepEqual(options.entities, [...ONBOARDING_PERSISTENCE_ENTITIES, AiUsageRecordEntity]);
+  assert.deepEqual(options.entities, [
+    ...ONBOARDING_PERSISTENCE_ENTITIES,
+    AiUsageRecordEntity,
+    ...AUTH_PERSISTENCE_ENTITIES,
+  ]);
   assert.ok(options.extensions?.length);
   assert.equal(options.migrations?.transactional, true);
   assert.equal(options.migrations?.snapshot, false);
@@ -24,6 +30,7 @@ test('database options never enable automatic database creation', () => {
     Migration20260913000001CategoryCodePrimaryKey,
     Migration202609130001Pipeline,
     Migration202609130002PipelineEmbeddingTasks,
+    Migration20260914000000Authentication,
   ]);
   assert.equal(options.registerRequestContext, true);
 });

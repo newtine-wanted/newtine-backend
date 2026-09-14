@@ -1,11 +1,11 @@
 import { UnauthorizedException } from '@nestjs/common';
-import type { Request } from 'express';
 import { isUuidV7 } from '@newtine/core';
 
-export interface AuthenticatedRequest extends Request {
-  /** Set by the future authentication guard; never read from body or query. */
-  authenticatedUserId?: string;
-}
+import type { AuthenticatedRequest } from '@newtine/api/auth/auth.request.js';
+
+export type { AuthenticatedRequest } from '@newtine/api/auth/auth.request.js';
+
+/** The guard-owned principal is never read from body or query. */
 
 export function requireAuthenticatedUserId(request: AuthenticatedRequest): string {
   const userId = request.authenticatedUserId;

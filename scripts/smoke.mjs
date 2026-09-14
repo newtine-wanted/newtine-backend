@@ -175,6 +175,35 @@ try {
   assert.equal(searchBody.query, '파일럿');
   assert.ok(Array.isArray(searchBody.items));
 
+  const invalidSignup = await postJson('/auth/signup', {
+    email: 'not-an-email',
+    password: 'short',
+  });
+  assert.equal(invalidSignup.response.statusCode, 400);
+  assert.equal(
+    invalidSignup.response.headers['content-type']?.split(';')[0],
+    'application/problem+json',
+  );
+  assert.deepEqual(Object.keys(JSON.parse(invalidSignup.body)).sort(), [
+    'code',
+    'detail',
+    'status',
+    'title',
+  ]);
+
+  const unauthenticatedMe = await get('/me/onboarding');
+  assert.equal(unauthenticatedMe.response.statusCode, 401);
+  assert.equal(JSON.parse(unauthenticatedMe.body).code, 'UNAUTHORIZED');
+
+  const missingRefresh = await postRawJson('/auth/refresh', '{}');
+  assert.equal(missingRefresh.response.statusCode, 401);
+  assert.equal(JSON.parse(missingRefresh.body).code, 'UNAUTHORIZED');
+
+  const logout = await postRawJson('/auth/logout', '{}');
+  assert.equal(logout.response.statusCode, 204);
+  assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /newtine_refresh=;/);
+  assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /Max-Age=0/);
+
   const invalidSearch = await postJson('/issues/search', { query: '', unexpected: true });
   assert.equal(invalidSearch.response.statusCode, 400);
   assert.equal(
@@ -261,7 +290,7 @@ try {
   );
 
   console.log(
-    'API smoke passed: health, search, four-field failures, parser 400/413, JSON logs, and request ID correlation',
+    'API smoke passed: health, search, auth route boundaries, four-field failures, parser 400/413, JSON logs, and request ID correlation',
   );
 } finally {
   await stopApi();
