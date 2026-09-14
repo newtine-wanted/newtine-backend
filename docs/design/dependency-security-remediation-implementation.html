@@ -151,7 +151,7 @@
             <dt>lifecycle</dt><dd>구현 점검 중</dd>
             <dt>affected paths</dt><dd><code>package.json</code>, <code>package-lock.json</code>, <code>docs/design/README.md</code>, 설계·구현 제어 HTML</dd>
             <dt>현재 단계</dt><dd>manifest·lockfile 수정, clean install, security audit, 정적 품질·타입·빌드·unit/integration·계약·HTTP smoke 게이트와 독립 diff 검토 완료. 로컬 커밋 생성: Nest 12.0.2, multer 2.3.0, uuid 11.1.1</dd>
-            <dt>다음 단계</dt><dd>push → main 대상 ready PR 생성</dd>
+            <dt>다음 단계</dt><dd>PR 리뷰·merge 대기</dd>
           </dl>
           <table>
             <caption>구현 단계별 완료 조건</caption>
@@ -160,7 +160,7 @@
               <tr><th scope="row">manifest·lockfile</th><td>승인된 패치 버전만 반영</td><td>완료</td></tr>
               <tr><th scope="row">security</th><td><code>npm audit --audit-level=moderate</code> 통과</td><td>완료 · 0 vulnerabilities</td></tr>
               <tr><th scope="row">quality</th><td>format, lint, typecheck, build, test, contracts, smoke 통과</td><td>완료 · 모든 게이트 통과</td></tr>
-              <tr><th scope="row">delivery</th><td>diff 검토·commit·push·main 대상 PR 생성</td><td>commit 완료 · push/PR 대기</td></tr>
+              <tr><th scope="row">delivery</th><td>diff 검토·commit·push·main 대상 PR 생성</td><td>완료 · <a href="https://github.com/newtine-wanted/newtine-backend/pull/7">PR #7</a> open/ready</td></tr>
             </tbody>
           </table>
         </section>
@@ -305,7 +305,8 @@
             <dt>issue-register</dt><dd>SEC-DEP-001 · 해결됨</dd>
             <dt>design-delta</dt><dd>없음</dd>
             <dt>commit</dt><dd><code>chore: update vulnerable dependencies</code> 로컬 커밋 완료</dd>
-            <dt>다음 갱신 조건</dt><dd>push·PR 단계 직후 실제 명령 결과를 반영</dd>
+            <dt>PR</dt><dd><a href="https://github.com/newtine-wanted/newtine-backend/pull/7">#7 chore: update vulnerable dependencies</a> · base <code>main</code> · ready · open</dd>
+            <dt>다음 갱신 조건</dt><dd>리뷰·merge 또는 PR 상태 변경 시 실제 결과를 반영</dd>
           </dl>
         </section>
       </article>
