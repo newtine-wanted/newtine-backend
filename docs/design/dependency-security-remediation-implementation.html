@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="npm 의존성 보안 advisory를 안전한 패치 버전으로 해소하고 검증 가능한 PR로 전달" />
+    <meta name="audience" content="백엔드 개발자와 PR 리뷰어" />
+    <meta name="problem" content="multer 및 uuid 보안 advisory가 lockfile에 남아 있어 API 의존성 공급망 위험과 PR 검증 공백이 존재" />
+    <meta name="core-flow" content="audit 증거 확인 → 패치 범위 선택 → package manifest·lockfile 갱신 → 빌드·테스트·audit 검증 → PR" />
+    <title>의존성 보안 보완 구현 제어</title>
+    <style>
+      body {
+        max-width: 1060px;
+        margin: 36px auto;
+        padding: 0 20px;
+        color: #233349;
+        background: #f5f7fb;
+        font: 16px/1.7 system-ui, sans-serif;
+      }
+      header,
+      section,
+      aside {
+        margin: 22px 0;
+        padding: 22px;
+        background: #fff;
+        border: 1px solid #d6dfeb;
+        border-radius: 12px;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      nav {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      a {
+        color: #255bb4;
+      }
+      pre {
+        overflow: auto;
+        padding: 16px;
+        background: #edf2f9;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 9px;
+        border: 1px solid #d6dfeb;
+        text-align: left;
+        vertical-align: top;
+      }
+      aside {
+        border-left: 4px solid #b87920;
+      }
+      .control-slide label {
+        display: block;
+        margin: 12px 0;
+      }
+      button {
+        margin: 4px 8px 4px 0;
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .control-result {
+        margin-top: 16px;
+        padding: 12px;
+        background: #eef7ef;
+        border-left: 4px solid #3c8c4a;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>구현 제어 · 구현 완료 · high-risk · 보안 의존성 보완</p>
+      <h1>의존성 보안 보완 구현 제어</h1>
+      <p>승인된 dependency-only 설계를 실제 변경, 검증, PR 운영 증거와 대조한다.</p>
+      <p>
+        작성일: <time datetime="2026-09-14">2026-09-14</time> · 갱신일:
+        <time datetime="2026-09-14">2026-09-14</time> · 기준 승인:
+        <a href="dependency-security-remediation-design.html">의존성 보안 보완 설계</a>
+      </p>
+      <dl>
+        <dt>목적(purpose)</dt>
+        <dd>npm 의존성 보안 advisory를 안전한 패치 버전으로 해소하고 검증 가능한 PR로 전달</dd>
+        <dt>사용자(audience)</dt>
+        <dd>백엔드 개발자와 PR 리뷰어</dd>
+        <dt>문제(problem)</dt>
+        <dd>multer 및 uuid 보안 advisory가 lockfile에 남아 있어 API 의존성 공급망 위험과 PR 검증 공백이 존재</dd>
+        <dt>핵심 흐름(core-flow)</dt>
+        <dd>audit 증거 확인 → 패치 범위 선택 → package manifest·lockfile 갱신 → 빌드·테스트·audit 검증 → PR</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#baseline-reference">기준 설계</a>
+      <a href="#current-implementation">현재 구현</a>
+      <a href="#implementation-status">구현 상태</a>
+      <a href="#issue-register">이슈 기록</a>
+      <a href="#verification-evidence">검증 증거</a>
+      <a href="#residual-risks">잔여 위험</a>
+      <a href="#implementation-control">구현 통제 점검</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="baseline-reference">
+          <h2>기준 설계와 승인 범위</h2>
+          <p><a href="dependency-security-remediation-design.html">의존성 보안 보완 설계</a>의 G1-A/G2-B를 기준으로 한다. 설계 승인 시각은 2026-09-14이며, 승인 증거는 명시적 구현 승인 질문에 대한 사용자 응답 “ㄱ”이다.</p>
+          <table>
+            <caption>승인된 변경 계약</caption>
+            <thead><tr><th scope="col">영역</th><th scope="col">승인 내용</th><th scope="col">금지된 확장</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">의존성</th><td><code>@nestjs/common</code>, <code>@nestjs/core</code>, <code>@nestjs/platform-express</code>, <code>@nestjs/testing</code>를 <code>12.0.2</code>로 정렬하고 <code>uuid</code> 최소 버전을 <code>^11.1.1</code>로 갱신</td><td>무관한 major/minor 업데이트, <code>npm audit fix --force</code>로 범위 확장</td></tr>
+              <tr><th scope="row">lockfile</th><td>승인 버전과 <code>multer@2.3.0</code>을 재현 가능하게 기록</td><td>의도하지 않은 transitive 대량 갱신</td></tr>
+              <tr><th scope="row">런타임</th><td>API route·DTO·DB schema·parser 정책을 유지</td><td>multipart 제한 또는 API 동작 변경</td></tr>
+              <tr><th scope="row">외부 효과</th><td>검증 후 <code>codex/dependency-security-updates</code>를 push하고 <code>main</code> 대상 ready PR 생성</td><td>검증 전 push/PR, production 배포</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="current-implementation">
+          <h2>구현 전 관찰</h2>
+          <ul>
+            <li>package manifest는 Nest 12.0.1 계열과 <code>uuid^11.1.0</code>을 선언한다.</li>
+            <li><code>@nestjs/platform-express@12.0.1</code>이 <code>multer@2.2.0</code>을 끌어오며, npm audit은 high 2건을 보고했다.</li>
+            <li><code>uuid@11.1.0</code>은 moderate advisory 대상이다. 소스에서는 <code>uuid</code>의 <code>v7()</code>만 사용한다.</li>
+            <li>현재 컨트롤러에는 multipart 업로드 인터셉터나 업로드 endpoint가 없다.</li>
+          </ul>
+          <figure>
+            <figcaption>취약 의존성에서 수정 버전으로의 경계</figcaption>
+            <pre>package.json → package-lock.json → @nestjs/platform-express → multer
+                                  └──────────→ uuid
+현재: 12.0.1 → 2.2.0, uuid 11.1.0
+목표: 12.0.2 → 2.3.0, uuid 11.1.1</pre>
+          </figure>
+        </section>
+
+        <section id="implementation-status">
+          <h2>구현 상태</h2>
+          <dl>
+            <dt>lifecycle</dt><dd>구현 점검 중</dd>
+            <dt>affected paths</dt><dd><code>package.json</code>, <code>package-lock.json</code>, <code>docs/design/README.md</code>, 설계·구현 제어 HTML</dd>
+            <dt>현재 단계</dt><dd>manifest·lockfile 수정, clean install, security audit, 정적 품질·타입·빌드·unit/integration·계약·HTTP smoke 게이트와 독립 diff 검토 완료. 로컬 커밋 생성: Nest 12.0.2, multer 2.3.0, uuid 11.1.1</dd>
+            <dt>다음 단계</dt><dd>push → main 대상 ready PR 생성</dd>
+          </dl>
+          <table>
+            <caption>구현 단계별 완료 조건</caption>
+            <thead><tr><th scope="col">단계</th><th scope="col">완료 조건</th><th scope="col">상태</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">manifest·lockfile</th><td>승인된 패치 버전만 반영</td><td>완료</td></tr>
+              <tr><th scope="row">security</th><td><code>npm audit --audit-level=moderate</code> 통과</td><td>완료 · 0 vulnerabilities</td></tr>
+              <tr><th scope="row">quality</th><td>format, lint, typecheck, build, test, contracts, smoke 통과</td><td>완료 · 모든 게이트 통과</td></tr>
+              <tr><th scope="row">delivery</th><td>diff 검토·commit·push·main 대상 PR 생성</td><td>commit 완료 · push/PR 대기</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="issue-register">
+          <h2>issue-register</h2>
+          <table>
+            <caption>구현 이슈 추적</caption>
+            <thead><tr><th scope="col">ID / 상태</th><th scope="col">증상·영향</th><th scope="col">원인·탐지</th><th scope="col">조치·검증</th><th scope="col">잔여 위험</th></tr></thead>
+            <tbody>
+              <tr>
+                <th scope="row">SEC-DEP-001 · 해결됨</th>
+                <td>manifest·lockfile에서 취약 범위였던 <code>multer@2.2.0</code>과 <code>uuid@11.1.0</code>을 교체했고 clean install 및 audit에서 0 vulnerabilities를 확인했다.</td>
+                <td><code>multer@2.2.0</code>는 platform-express 12.0.1의 transitive dependency이고 <code>uuid@11.1.0</code>은 direct dependency. 탐지: <code>npm audit</code>.</td>
+                <td><code>@nestjs/*@12.0.2</code>, <code>multer@2.3.0</code>, <code>uuid@11.1.1</code>을 lockfile에 반영했다. <code>npm ci</code>, <code>npm audit --audit-level=moderate</code>, 품질 게이트·테스트·계약 검증·HTTP smoke가 모두 통과했고 로컬 커밋에 기록했다.</td>
+                <td>운영 환경의 실제 multipart 사용은 PR 이후에도 별도 확인.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="design-delta">
+          <h2>design-delta</h2>
+          <p>승인 설계와의 material delta는 없다. HTTP smoke를 추가적인 실행 증거로 수행했지만 dependency-only 범위와 검증 전략을 변경하지 않았다. 런타임/API/DB 변경이 발견되면 구현을 멈추고 설계를 재승인한다.</p>
+        </section>
+
+        <section id="verification-evidence">
+          <h2>검증 증거</h2>
+          <table>
+            <caption>실행할 게이트와 기록 위치</caption>
+            <thead><tr><th scope="col">명령</th><th scope="col">목적</th><th scope="col">결과</th></tr></thead>
+            <tbody>
+              <tr><th scope="row"><code>npm ci</code></th><td>clean install과 lockfile 재현성</td><td>통과 · 706 packages 설치, 0 vulnerabilities</td></tr>
+              <tr><th scope="row"><code>npm audit --audit-level=moderate</code></th><td>취약 advisory 제거</td><td>통과 · found 0 vulnerabilities</td></tr>
+              <tr><th scope="row"><code>npm run format:check</code> · <code>npm run lint</code> · <code>npm run typecheck</code></th><td>정적 품질과 타입 회귀</td><td>통과 · 모두 exit 0</td></tr>
+              <tr><th scope="row"><code>npm run build</code> · <code>npm test</code> · <code>npm run test:smoke</code></th><td>API/batch 빌드, unit/integration 회귀, 실제 HTTP 경계</td><td>통과 · build, 44 tests, health/search/failure/parser smoke</td></tr>
+              <tr><th scope="row"><code>npm run contracts:check</code></th><td>SDK·e2e·OpenAPI 계약 재생성·검증</td><td>통과 · generator, contract 4 tests, generated typecheck</td></tr>
+              <tr><th scope="row"><code>npm run test:smoke</code></th><td>실제 HTTP health/search/failure/parser 경계</td><td>통과</td></tr>
+              <tr><th scope="row">최종 <code>git diff</code>·독립 검토</th><td>승인 범위와 외부 변경 확인</td><td>통과 · concrete finding 없음</td></tr>
+            </tbody>
+          </table>
+          <p><strong>검증 원칙:</strong> 네트워크/registry 실패는 검증 불가로 기록하며 통과로 표현하지 않는다. PR은 필수 게이트가 모두 통과하고 diff가 승인 범위 안일 때만 생성한다.</p>
+        </section>
+
+        <section id="review">
+          <h2>독립 변경 리뷰</h2>
+          <p>리뷰 유형: 자기 변경 · 리뷰 상태: 검토 완료 · 기준: 승인 설계, 실제 diff, fresh verification evidence</p>
+          <table>
+            <caption>리뷰 판단</caption>
+            <thead><tr><th scope="col">ID / 판단</th><th scope="col">근거</th><th scope="col">조치</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">F-001 · concrete finding 없음</th><td>lockfile 변경 집합이 root metadata와 승인된 Nest 4개, multer, uuid로 제한됨. <code>npm ls</code>는 Nest 12.0.2, multer 2.3.0, uuid 11.1.1을 확인했고 audit은 0 vulnerabilities였다.</td><td>수정 불필요. PR은 승인 범위와 검증 결과를 본문에 기록한다.</td></tr>
+              <tr><th scope="row">R-001 · non-blocking risk</th><td><code>npm ci</code>에서 기존 dev tooling의 <code>inflight</code>, <code>glob</code>, <code>eslint</code> deprecation 경고가 남았다. 이번 audit 결과는 0 vulnerabilities이며 현재 PR의 보안 advisory 대상과는 별개다.</td><td>이번 PR에서는 범위를 넓히지 않는다. 후속 tooling 정리 시 별도 dependency review를 수행한다.</td></tr>
+            </tbody>
+          </table>
+          <p>리뷰 판단: blocker 없음 · 논의 필요 없음 · non-blocking risk만 있음(R-001).</p>
+        </section>
+
+        <section id="verification-gaps">
+          <h2>검증 공백</h2>
+          <ul>
+            <li>clean install, audit, format, lint, typecheck, build, unit/integration test, contract 게이트와 HTTP smoke가 모두 통과했다. OpenAPI 재생성 결과는 전후 JSON semantic equality를 확인한 뒤 key-order-only diff를 PR에서 제외했다.</li>
+            <li>운영 환경의 실제 multipart 요청 유무와 gateway/WAF 정책은 저장소 밖의 정보라 이 PR에서 검증하지 않는다.</li>
+          </ul>
+        </section>
+
+        <section id="residual-risks">
+          <h2>잔여 위험·운영 조건</h2>
+          <aside>
+            <p>현재 코드에서 multipart 업로드 사용은 확인되지 않았지만, <code>platform-express</code>가 제공하는 parser 경계 자체는 계속 존재한다. 향후 업로드 endpoint를 추가할 때 파일 크기·필드 수·array index·abort 처리 정책과 회귀 테스트를 별도 설계한다.</p>
+            <p>이 PR은 npm audit이 보고한 dependency advisory 범위를 다룬다. 전체 보안 취약점 부재나 production 배포 승인을 의미하지 않는다.</p>
+            <p><code>npm ci</code>에서 기존 transitive dev tooling의 <code>inflight</code>, <code>glob</code>, <code>eslint</code> deprecation 경고가 남았지만 이번 audit은 0 vulnerabilities였다. 이 PR의 승인 범위 밖 후속 정리 항목이다.</p>
+          </aside>
+        </section>
+
+        <section id="implementation-control">
+          <h2>구현 이해 점검</h2>
+          <p>아래 점검은 기술 검증과 별개이며, 결과가 Codex에 자동 전달되지는 않는다. 미제출은 구현을 자동으로 승인하거나 실패시키지 않는다.</p>
+          <div id="control-progress" aria-live="polite">질문 1 / 4 · 답변 0 / 4</div>
+          <form id="implementation-control-form">
+            <section class="control-slide" data-correct="b">
+              <fieldset>
+                <legend>1. multer 취약점의 수정 경계는?</legend>
+                <label><input type="radio" name="q1" value="a" /> uuid 버전만 올리는 것</label>
+                <label><input type="radio" name="q1" value="b" /> platform-express 12.0.2가 multer 2.3.0을 해석하게 하는 것</label>
+                <label><input type="radio" name="q1" value="c" /> OpenAPI JSON만 재생성하는 것</label>
+              </fieldset>
+              <div class="control-result" hidden><strong>상태:</strong> <output class="status"></output><br /><strong>설명:</strong> <span class="explanation"></span><br /><strong>다음:</strong> <span class="next-action"></span></div>
+            </section>
+            <section class="control-slide" data-correct="a" hidden>
+              <fieldset>
+                <legend>2. audit이 여전히 취약점을 보고하면?</legend>
+                <label><input type="radio" name="q2" value="a" /> PR을 멈추고 lockfile·의존성 경로와 advisory를 다시 확인한다</label>
+                <label><input type="radio" name="q2" value="b" /> force 옵션으로 강제 업데이트하고 통과 처리한다</label>
+                <label><input type="radio" name="q2" value="c" /> audit 명령을 검증 목록에서 제거한다</label>
+              </fieldset>
+              <div class="control-result" hidden><strong>상태:</strong> <output class="status"></output><br /><strong>설명:</strong> <span class="explanation"></span><br /><strong>다음:</strong> <span class="next-action"></span></div>
+            </section>
+            <section class="control-slide" data-correct="c" hidden>
+              <fieldset>
+                <legend>3. 승인 범위를 벗어난 runtime/API 변경이 diff에 보이면?</legend>
+                <label><input type="radio" name="q3" value="a" /> 테스트가 통과하면 그대로 포함한다</label>
+                <label><input type="radio" name="q3" value="b" /> PR 본문에만 적고 진행한다</label>
+                <label><input type="radio" name="q3" value="c" /> 구현을 멈추고 design delta를 기록한 뒤 재승인을 받는다</label>
+              </fieldset>
+              <div class="control-result" hidden><strong>상태:</strong> <output class="status"></output><br /><strong>설명:</strong> <span class="explanation"></span><br /><strong>다음:</strong> <span class="next-action"></span></div>
+            </section>
+            <section class="control-slide" data-correct="b" hidden>
+              <fieldset>
+                <legend>4. PR 생성 전 필요한 최소 증거는?</legend>
+                <label><input type="radio" name="q4" value="a" /> npm install 성공 메시지</label>
+                <label><input type="radio" name="q4" value="b" /> audit·품질 게이트·테스트·계약 검증과 최종 diff 점검</label>
+                <label><input type="radio" name="q4" value="c" /> package.json 변경만 확인</label>
+              </fieldset>
+              <div class="control-result" hidden><strong>상태:</strong> <output class="status"></output><br /><strong>설명:</strong> <span class="explanation"></span><br /><strong>다음:</strong> <span class="next-action"></span></div>
+            </section>
+            <nav aria-label="구현 이해 점검 이동">
+              <button type="button" id="previous-question">이전</button>
+              <button type="button" id="next-question">다음</button>
+              <button type="button" id="submit-control">제출</button>
+            </nav>
+            <output id="control-summary" aria-live="polite"></output>
+          </form>
+          <table>
+            <caption>Implementation coverage ledger</caption>
+            <thead><tr><th scope="col">축</th><th scope="col">질문·증거</th><th scope="col">상태</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">goal/scope</th><td>승인 범위·Q3</td><td>대기</td></tr>
+              <tr><th scope="row">invariants/boundary</th><td>dependency graph·Q1</td><td>대기</td></tr>
+              <tr><th scope="row">failure/recovery</th><td>issue-register·Q2</td><td>대기</td></tr>
+              <tr><th scope="row">authority/external effects</th><td>push/PR gate·Q3/Q4</td><td>대기</td></tr>
+              <tr><th scope="row">observability/verification</th><td>audit·quality gates·Q2/Q4</td><td>대기</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="implementation-control-state">
+          <h2>implementation-control-state</h2>
+          <dl>
+            <dt>lifecycle</dt><dd>구현 완료</dd>
+            <dt>developer-understanding</dt><dd>미실시</dd>
+            <dt>issue-register</dt><dd>SEC-DEP-001 · 해결됨</dd>
+            <dt>design-delta</dt><dd>없음</dd>
+            <dt>commit</dt><dd><code>chore: update vulnerable dependencies</code> 로컬 커밋 완료</dd>
+            <dt>다음 갱신 조건</dt><dd>push·PR 단계 직후 실제 명령 결과를 반영</dd>
+          </dl>
+        </section>
+      </article>
+    </main>
+    <script>
+      const slides = [...document.querySelectorAll('.control-slide')];
+      const answers = {};
+      let current = 0;
+      const progress = document.querySelector('#control-progress');
+      const previous = document.querySelector('#previous-question');
+      const next = document.querySelector('#next-question');
+      const submit = document.querySelector('#submit-control');
+      const summary = document.querySelector('#control-summary');
+
+      function render() {
+        slides.forEach((slide, index) => { slide.hidden = index !== current; });
+        const answered = Object.keys(answers).length;
+        progress.textContent = '질문 ' + (current + 1) + ' / ' + slides.length + ' · 답변 ' + answered + ' / ' + slides.length;
+        previous.disabled = current === 0;
+        next.disabled = current === slides.length - 1;
+      }
+
+      slides.forEach((slide, index) => {
+        slide.querySelectorAll('input').forEach((input) => {
+          input.addEventListener('change', () => { answers[index] = input.value; render(); });
+        });
+      });
+      previous.addEventListener('click', () => { current -= 1; render(); });
+      next.addEventListener('click', () => { current += 1; render(); });
+      submit.addEventListener('click', () => {
+        let correct = 0;
+        slides.forEach((slide, index) => {
+          const result = slide.querySelector('.control-result');
+          const status = slide.querySelector('.status');
+          const explanation = slide.querySelector('.explanation');
+          const nextAction = slide.querySelector('.next-action');
+          result.hidden = false;
+          if (answers[index] === slide.dataset.correct) {
+            correct += 1;
+            status.textContent = '확립';
+            explanation.textContent = 'as-built 구현을 예측하는 답을 선택했다.';
+            nextAction.textContent = '실제 검증 결과와 최종 diff를 확인한다.';
+          } else {
+            status.textContent = answers[index] ? '보류' : '미실시';
+            explanation.textContent = '구현 제어 기록과 답변을 다시 대조한다.';
+            nextAction.textContent = 'PR 전 해당 운영 경계를 다시 확인한다.';
+          }
+        });
+        summary.textContent = '제출 결과: ' + correct + ' / ' + slides.length + ' 확립. 이 결과는 기술 검증이나 PR 승인을 대신하지 않는다.';
+      });
+      render();
+    </script>
+  </body>
+</html>
