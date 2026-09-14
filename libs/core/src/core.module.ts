@@ -11,6 +11,8 @@ import { ONBOARDING_REPOSITORY } from '@newtine/core/onboarding/onboarding.model
 import { PostgresOnboardingRepository } from '@newtine/core/onboarding/postgresOnboarding.repository.js';
 import { AUTH_REPOSITORY } from '@newtine/core/auth/repository/auth.repository.js';
 import { PostgresAuthRepository } from '@newtine/core/auth/postgresAuth.repository.js';
+import { INTEREST_REPOSITORY } from '@newtine/core/interest/interest.model.js';
+import { MikroOrmInterestRepository } from '@newtine/core/interest/mikroOrmInterest.repository.js';
 
 @Module({
   imports: [MikroOrmModule.forRootAsync({ useFactory: () => createDatabaseOptions() })],
@@ -34,6 +36,10 @@ import { PostgresAuthRepository } from '@newtine/core/auth/postgresAuth.reposito
       provide: AUTH_REPOSITORY,
       useClass: PostgresAuthRepository,
     },
+    {
+      provide: INTEREST_REPOSITORY,
+      useClass: MikroOrmInterestRepository,
+    },
   ],
   exports: [
     TRANSACTION_MANAGER,
@@ -41,6 +47,7 @@ import { PostgresAuthRepository } from '@newtine/core/auth/postgresAuth.reposito
     PIPELINE_RUN_REPOSITORY,
     PipelineRunService,
     AUTH_REPOSITORY,
+    INTEREST_REPOSITORY,
   ],
 })
 export class CoreModule {}
