@@ -152,7 +152,7 @@
             <dt>affected paths</dt><dd><code>package.json</code>, <code>package-lock.json</code>, <code>docs/design/README.md</code>, 설계·구현 제어 HTML</dd>
             <dt>현재 단계</dt><dd>manifest·lockfile 수정, clean install, security audit, 정적 품질·타입·빌드·unit/integration·계약·HTTP smoke 게이트와 독립 diff 검토 완료. 로컬 커밋 생성: Nest 12.0.2, multer 2.3.0, uuid 11.1.1</dd>
             <dt>merge resolution</dt><dd><code>origin/main</code>과 충돌한 <code>package.json</code>·<code>package-lock.json</code>을 해소했다. main의 <code>yaml@2.9.1</code>과 보안 패치인 Nest 12.0.2·multer 2.3.0·uuid 11.1.1을 함께 보존하고 머지 커밋 <code>1477af1</code>을 생성했다.</dd>
-            <dt>다음 단계</dt><dd>업데이트된 브랜치 push 후 PR #7 mergeability·CI 확인 및 리뷰 대기</dd>
+            <dt>다음 단계</dt><dd>PR #7 CI 완료·리뷰·merge 대기</dd>
           </dl>
           <table>
             <caption>구현 단계별 완료 조건</caption>
@@ -161,7 +161,7 @@
               <tr><th scope="row">manifest·lockfile</th><td>승인된 패치 버전만 반영</td><td>완료</td></tr>
               <tr><th scope="row">security</th><td><code>npm audit --audit-level=moderate</code> 통과</td><td>완료 · 0 vulnerabilities</td></tr>
               <tr><th scope="row">quality</th><td>format, lint, typecheck, build, test, contracts, smoke 통과</td><td>완료 · 모든 게이트 통과</td></tr>
-              <tr><th scope="row">delivery</th><td>diff 검토·commit·push·main 대상 PR 생성</td><td>진행 · <a href="https://github.com/newtine-wanted/newtine-backend/pull/7">PR #7</a> open/ready, main 충돌 해소 커밋 생성·push 대기</td></tr>
+              <tr><th scope="row">delivery</th><td>diff 검토·commit·push·main 대상 PR 생성</td><td>완료 · <a href="https://github.com/newtine-wanted/newtine-backend/pull/7">PR #7</a> open/ready, 충돌 해소 커밋 push 완료, CI 대기</td></tr>
             </tbody>
           </table>
         </section>
@@ -319,8 +319,8 @@
             <dt>issue-register</dt><dd>SEC-DEP-001 · 해결됨</dd>
             <dt>design-delta</dt><dd>없음</dd>
             <dt>commit</dt><dd><code>chore: update vulnerable dependencies</code> 및 <code>1477af1 merge: resolve main conflict</code> 완료</dd>
-            <dt>PR</dt><dd><a href="https://github.com/newtine-wanted/newtine-backend/pull/7">#7 chore: update vulnerable dependencies</a> · base <code>main</code> · ready · open · 충돌 해소 커밋 push 대기</dd>
-            <dt>다음 갱신 조건</dt><dd>충돌 해소 커밋 push 후 PR mergeability·CI 상태를 실제 결과로 갱신</dd>
+            <dt>PR</dt><dd><a href="https://github.com/newtine-wanted/newtine-backend/pull/7">#7 chore: update vulnerable dependencies</a> · base <code>main</code> · ready · open · mergeable · head <code>c023256</code> · CI queued</dd>
+            <dt>다음 갱신 조건</dt><dd>PR CI 완료·리뷰·merge 또는 상태 변경 시 실제 결과를 반영</dd>
           </dl>
         </section>
       </article>
