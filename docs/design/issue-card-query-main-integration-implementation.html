@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="purpose" content="승인된 PR #3 issue-card-query 최신 main 통합을 구현·검증한다" />
+    <meta name="audience" content="PR을 통합·검증하는 백엔드 개발자" />
+    <meta name="problem" content="최신 main의 pipeline/onboarding과 PR #3의 issue-card-query를 충돌 없이 함께 제공하고 migration·생성 계약을 검증한다" />
+    <meta name="core-flow" content="merge → 충돌 경계 합집합 → feed migration 등록 → 계약 재생성 → local gate → PR branch 갱신" />
+    <title>PR #3 issue-card-query 최신 main 통합 구현 기록</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; line-height: 1.55; color: #182230; }
+      body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
+      header, section, aside { border: 1px solid #d8dee8; border-radius: .6rem; padding: 1rem; margin: 1rem 0; }
+      header { background: #f4f7fb; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #d8dee8; padding: .55rem; vertical-align: top; text-align: left; }
+      th { background: #f4f7fb; }
+      code, samp { background: #eef1f5; padding: .08rem .25rem; border-radius: .2rem; }
+      .status { font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>PR #3 issue-card-query 최신 main 통합 구현</h1>
+      <p>구현-control 기록 · <span class="status">구현 점검 중</span></p>
+      <dl>
+        <dt>목적</dt><dd>승인된 PR #3 issue-card-query 최신 main 통합을 구현·검증한다.</dd>
+        <dt>사용자</dt><dd>PR을 통합·검증하는 백엔드 개발자.</dd>
+        <dt>문제</dt><dd>pipeline/onboarding이 추가된 <code>origin/main=d4db486</code>과 PR branch <code>b5a355c</code>의 공통 경계를 합치고 GitHub의 conflicting 상태를 해소한다.</dd>
+        <dt>핵심 흐름</dt><dd>merge → 충돌 경계 합집합 → feed migration 등록 → 계약 재생성 → local gate → PR branch 갱신.</dd>
+        <dt>기준선</dt><dd><a href="issue-card-query-main-integration-design.html">issue-card-query-main-integration-design.html</a> · <time datetime="2026-09-14">2026-09-14 KST</time> 승인 범위.</dd>
+      </dl>
+    </header>
+
+    <main>
+      <section id="baseline-reference">
+        <h2>승인된 실행 계약</h2>
+        <ul>
+          <li><strong>범위:</strong> 최신 <code>origin/main</code> merge, 공통 예외·module·export·생성 계약·migration 등록 해소, feed schema TypeScript migration 편입, 관련 검증.</li>
+          <li><strong>불변식:</strong> pipeline/onboarding과 issue-card-query API·repository·테스트를 모두 보존한다. 공개 endpoint 의미와 pipeline 상태 머신은 바꾸지 않는다.</li>
+          <li><strong>migration:</strong> <code>Migration202609130003IssueCardQuery</code>를 ordered <code>migrationsList</code> 마지막에 등록하고 <code>down()</code>은 데이터 삭제 없이 명시적으로 중단한다.</li>
+          <li><strong>generated:</strong> source 통합 후 <code>npm run contracts:all</code>로 재생성한다.</li>
+          <li><strong>금지:</strong> rebase/force-push, PR 기능 삭제, generated 파일 수동 합성, 인증·추천·pipeline 정책 재설계.</li>
+          <li><strong>focused 검증:</strong> merge conflict 없음, <code>git diff --check</code>, contract generation/check, typecheck, 관련 unit/integration, build 및 저장소 gate.</li>
+        </ul>
+      </section>
+
+      <section id="current-implementation">
+        <h2>현재 구현</h2>
+        <p>PR worktree <code>.worktrees/issue-card-query</code>에 <code>origin/main=d4db486</code>을 merge했고, 현재 main worktree의 사용자 변경은 건드리지 않았다. 로컬 merge index는 충돌 표식 없이 정리되어 commit/push 직전이다.</p>
+        <ol>
+          <li>origin/main을 PR branch에 merge했다.</li>
+          <li>예외 mapper, module, core export와 generated source를 양쪽 기능의 합집합으로 해소했다.</li>
+          <li>feed raw SQL을 <code>Migration202609130003IssueCardQuery</code>로 옮기고 database options/test를 갱신했다.</li>
+          <li>5개 controller, 14개 route 기준으로 SDK/e2e/OpenAPI를 재생성했다.</li>
+          <li>로컬 검증을 완료했고 commit/push와 원격 mergeability 확인이 남았다.</li>
+        </ol>
+      </section>
+
+      <section id="implementation-status">
+        <h2>구현 상태</h2>
+        <p><strong>구현 점검 중.</strong> 승인: <time datetime="2026-09-14">2026-09-14 KST</time>, 사용자 <code>ㄱ</code>. 승인 범위의 로컬 구현과 기술 검증은 끝났고, merge commit·push·원격 PR 상태 확인을 기다린다.</p>
+      </section>
+
+      <section id="issue-register">
+        <h2>Issue register</h2>
+        <table>
+          <caption>구현 이슈와 해결 증거</caption>
+          <thead><tr><th>ID</th><th>상태</th><th>증상·원인</th><th>조치·검증</th><th>잔여 위험</th></tr></thead>
+          <tbody>
+            <tr><td>PR3-MERGE-001</td><td>완화됨</td><td>GitHub PR #3가 <code>CONFLICTING</code>·<code>DIRTY</code>로 표시된다.</td><td>최신 원격 main merge, 3개 수동 conflict 해소, generated 재생성, staged diff 검사를 완료했다. commit/push 후 원격 상태를 재확인한다.</td><td>원격 branch 갱신 전에는 GitHub 상태가 바뀌지 않는다.</td></tr>
+            <tr><td>PR3-MERGE-002</td><td>해당 없음</td><td>기록 시작 시점에 추가 구현 이슈는 관찰되지 않았다.</td><td>새 이슈 발견 시 증상·원인·조치·증거를 이 행에 추가하지 않고 별도 행으로 보존한다.</td><td>실제 PostgreSQL 왕복은 환경에 따라 미검증일 수 있다.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="verification-evidence">
+        <h2>검증 증거</h2>
+        <table>
+          <caption>실행한 기술 검증</caption>
+          <thead><tr><th>명령</th><th>결과</th><th>관찰된 증거</th></tr></thead>
+          <tbody>
+            <tr><td><code>npm run contracts:check</code></td><td>통과</td><td>5 controllers, 14 paths/routes; contract 4 tests와 generated typecheck 통과.</td></tr>
+            <tr><td><code>npm run test:jest -- test/unit/issueCardQuery.test.ts test/integration/databaseOptions.test.ts</code></td><td>통과</td><td>2 suites, 18 tests.</td></tr>
+            <tr><td><code>npm run format:check</code> · <code>npm run lint</code> · <code>npm run typecheck</code></td><td>통과</td><td>Prettier, ESLint, 전체 TypeScript typecheck 통과. 누락된 <code>yaml</code>은 lockfile 기준으로 dependency sync 후 재검증했다.</td></tr>
+            <tr><td><code>npm test</code></td><td>통과</td><td>unit 20 suites/106 tests, integration 2 suites/11 tests.</td></tr>
+            <tr><td><code>npm run build</code></td><td>통과</td><td>API와 batch build 모두 통과.</td></tr>
+            <tr><td><code>git diff --check</code> · staged conflict check</td><td>통과</td><td>whitespace 오류와 unresolved conflict 없음.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="verification-gaps">
+        <h2>검증 공백과 잔여 위험</h2>
+        <ul>
+          <li>실제 PostgreSQL·pgvector 연결과 migration up 재실행/down 경계는 로컬 환경의 가능 범위를 넘으면 검증 불가로 남긴다.</li>
+          <li>GitHub의 mergeability와 checks는 push 후 원격 상태로 재확인한다.</li>
+          <li>구현-control 이해 점검은 as-built diff와 실제 검증 결과가 나온 뒤 구성한다.</li>
+        </ul>
+      </section>
+
+      <section id="implementation-control-state">
+        <h2>implementation-control-state</h2>
+        <dl>
+          <dt>lifecycle</dt><dd>구현 점검 중</dd>
+          <dt>developer-understanding-state</dt><dd>미실시</dd>
+          <dt>coverage</dt><dd>merge 경계·migration 순서/실패·generated 계약·검증·원격 PR 상태를 구현 후 각각 실제 증거로 채운다.</dd>
+          <dt>design-delta</dt><dd>없음. 승인 baseline과 다른 behavior/contract/state가 발견되면 즉시 재승인 필요로 전환한다.</dd>
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>

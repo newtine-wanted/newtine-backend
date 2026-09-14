@@ -23,7 +23,22 @@ test('onboarding options expose the approved topic, age, and region catalogs', (
   const repository = new InMemoryOnboardingRepository();
   const options = repository.getOptions();
 
-  assert.equal(options.topics.length, 12);
+  assert.equal(options.topics.length, 10);
+  assert.deepEqual(
+    options.topics.map((option) => [option.code, option.name]),
+    [
+      ['housing', '주거'],
+      ['labor', '일자리'],
+      ['finance', '세금·금융'],
+      ['welfare', '복지·연금'],
+      ['education', '교육'],
+      ['health', '보건·의료'],
+      ['climate', '환경·기후'],
+      ['security', '외교·안보'],
+      ['local', '지역·교통'],
+      ['politics', '정치·사법'],
+    ],
+  );
   assert.equal(options.ageGroups.length, 4);
   assert.equal(options.regions.length, 17);
   assert.deepEqual(
@@ -71,14 +86,14 @@ test('complete atomically applies initial topic/entity +2 and region +1', async 
   const service = new OnboardingService(repository, transactionManager);
 
   const result = await service.complete(userId, {
-    topicCodes: ['HOUSING'],
+    topicCodes: ['housing'],
     entityIds: [entityId],
     ageGroup: AgeGroup.Age19To34,
     regionCodes: ['SEOUL'],
   });
 
   assert.equal(result.status, OnboardingStatus.Completed);
-  assert.equal(result.preferences.topicWeights.HOUSING, 2);
+  assert.equal(result.preferences.topicWeights.housing, 2);
   assert.equal(result.preferences.entityWeights[entityId], 2);
   assert.equal(result.preferences.regionWeights.SEOUL, 1);
   assert.deepEqual(result.regionCodes, ['SEOUL']);
@@ -89,7 +104,7 @@ test('terminal retries return the stored result without applying weights again',
   const userId = repository.seedUser();
   const service = new OnboardingService(repository, transactionManager);
   const command = {
-    topicCodes: ['MEDIA'],
+    topicCodes: ['politics'],
     entityIds: [],
     ageGroup: null,
     regionCodes: [],
@@ -110,7 +125,7 @@ test('skip discards the pending onboarding draft and remains terminal', async ()
 
   const result = await service.skip(userId);
   const retry = await service.complete(userId, {
-    topicCodes: ['HOUSING'],
+    topicCodes: ['housing'],
     entityIds: [],
     ageGroup: null,
     regionCodes: ['BUSAN'],
@@ -141,7 +156,7 @@ test('complete rejects invalid selections and unknown users without changing sta
   );
   await assert.rejects(
     service.complete(userId, {
-      topicCodes: ['HOUSING'],
+      topicCodes: ['housing'],
       entityIds: [],
       ageGroup: 'AGE_UNKNOWN' as never,
       regionCodes: [],

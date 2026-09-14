@@ -26,6 +26,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 
 COPY --from=build --chown=node:node /app/dist ./dist
+COPY --from=build --chown=node:node /app/config ./config
 
 USER node
 

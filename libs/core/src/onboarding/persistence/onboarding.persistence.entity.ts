@@ -39,39 +39,32 @@ export const OnboardingEntitySchema = defineEntity({
   },
 });
 
-/** Metadata for the existing issue category master plus stable onboarding code. */
+/** Canonical category master. The stable category code is the primary key. */
 export const IssueCategorySchema = defineEntity({
   name: 'IssueCategory',
   tableName: 'issue_categories',
   properties: {
-    id: p.uuid().primary(),
-    name: p.text(),
-    code: p.text().nullable(),
-    displayOrder: p.integer().fieldName('display_order').nullable(),
+    code: p.text().primary(),
+    displayName: p.text().fieldName('display_name'),
+    displayOrder: p.integer().fieldName('display_order'),
+    createdAt: p.datetime().fieldName('created_at').columnType('timestamptz'),
   },
-  uniques: [
-    {
-      name: 'issue_categories_code_unique',
-      properties: 'code',
-      where: 'code IS NOT NULL',
-    },
-  ],
 });
 
-/** Metadata for the existing user/category preference table. */
+/** User/category preferences reference the category code directly. */
 export const UserCategoryPreferenceSchema = defineEntity({
   name: 'UserCategoryPreference',
   tableName: 'user_category_preferences',
   properties: {
     userCategoryPreferencesId: p.uuid().fieldName('user_category_preferences_id').primary(),
     userId: p.uuid().fieldName('user_id'),
-    categoryId: p.uuid().fieldName('category_id'),
+    categoryCode: p.text().fieldName('category_code'),
     weight: p.decimal('number').columnType('numeric'),
   },
   uniques: [
     {
-      name: 'user_category_preferences_user_category_unique',
-      properties: ['userId', 'categoryId'],
+      name: 'user_category_preferences_user_category_code_unique',
+      properties: ['userId', 'categoryCode'],
     },
   ],
 });

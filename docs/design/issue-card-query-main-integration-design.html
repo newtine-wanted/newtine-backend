@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="purpose" content="PR #3 issue-card-query를 최신 main과 통합해 충돌을 해소한다" />
+    <meta name="audience" content="PR을 통합·검증하는 백엔드 개발자" />
+    <meta name="problem" content="pipeline/onboarding이 추가된 최신 main과 issue-card-query PR의 공통 파일·migration·생성 계약 충돌을 해소한다" />
+    <meta name="core-flow" content="최신 main 확인 → PR 브랜치 merge → 공통 경계 합집합 해소 → migration 등록 → 계약 재생성 → 게이트 검증" />
+    <title>PR #3 issue-card-query 최신 main 통합 설계</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; line-height: 1.55; }
+      body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; color: #182230; }
+      header, section, aside { border: 1px solid #d8dee8; border-radius: .6rem; padding: 1rem; margin: 1rem 0; }
+      header { background: #f4f7fb; }
+      h1, h2 { line-height: 1.25; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #d8dee8; padding: .55rem; vertical-align: top; text-align: left; }
+      th { background: #f4f7fb; }
+      code { background: #eef1f5; padding: .08rem .25rem; border-radius: .2rem; }
+      figure { margin: 1rem 0; }
+      .flow { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+      .flow span { border: 1px solid #9aa8ba; border-radius: .4rem; padding: .45rem .65rem; background: #fff; }
+      .status { font-weight: 700; }
+      .quiz-slide[hidden] { display: none; }
+      .quiz-nav { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; }
+      .quiz-nav button, .quiz-slide button { padding: .35rem .65rem; }
+      .quiz-result { border-left: .3rem solid #5b7c99; margin-top: .75rem; padding: .5rem .75rem; background: #f4f7fb; }
+      .quiz-result[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>PR #3 issue-card-query 최신 main 통합</h1>
+      <p>설계 기준 문서 · <span class="status">설계 승인됨 / 구현 진행 중</span></p>
+      <dl>
+        <dt>목적</dt><dd>PR #3의 issue detail·personalized feed 기능을 최신 main의 pipeline/onboarding과 함께 유지한다.</dd>
+        <dt>사용자</dt><dd>PR을 통합·검증하는 백엔드 개발자.</dd>
+        <dt>문제</dt><dd><code>origin/main=d4db486</code>가 PR 브랜치의 기준 <code>4634e1c</code>보다 전진했고, 공통 예외·생성 계약·core export·migration 경계에서 충돌한다.</dd>
+        <dt>핵심 흐름</dt><dd>최신 main 확인 → merge → 두 기능의 등록·export·계약 합집합 → feed schema를 ordered MikroORM migration으로 등록 → 생성 계약·테스트·게이트 검증.</dd>
+        <dt>강도</dt><dd>Standard: API·DB migration·생성 계약 경계를 함께 다루지만, 기존 승인 기능의 의미와 공개 endpoint는 변경하지 않는다.</dd>
+      </dl>
+    </header>
+
+    <main>
+      <section id="goal-and-invariants">
+        <h2>목표와 불변식</h2>
+        <ul>
+          <li>PR 브랜치의 issue detail/feed API, repository port, 테스트와 문서를 삭제하지 않는다.</li>
+          <li>최신 main의 onboarding·pipeline API, 상태 머신, provider·migration을 유지한다.</li>
+          <li>feed 테이블 SQL은 <code>Migration202609130003IssueCardQuery</code>의 <code>addSql()</code>로 옮기고 <code>down()</code>은 데이터 삭제를 막기 위해 명시적으로 중단한다.</li>
+          <li><code>generated/</code> 산출물은 controller/source 통합 후 <code>npm run contracts:all</code>로 재생성한다. 생성 파일을 손으로 합치지 않는다.</li>
+          <li>충돌 해소 목적을 넘어 인증 principal, 추천 정책, pipeline 상태, 공개 API 의미를 새로 설계하지 않는다.</li>
+        </ul>
+      </section>
+
+      <section id="flow">
+        <h2>통합 흐름</h2>
+        <figure>
+          <div class="flow">
+            <span><code>origin/main d4db486</code></span><b>→</b>
+            <span>PR branch merge</span><b>→</b>
+            <span>공통 등록·export 합집합</span><b>→</b>
+            <span>ordered migration</span><b>→</b>
+            <span>Nestia 계약 재생성</span><b>→</b>
+            <span>local gate</span>
+          </div>
+          <figcaption>두 기능의 소스 경계를 합친 뒤 database runner와 생성 계약을 단일 경로로 검증한다. 시각 요소의 텍스트 등가: 위 순서 그대로 실행한다.</figcaption>
+        </figure>
+      </section>
+
+      <section id="grilling-state">
+        <h2>설계 의사결정 질문 (grilling)</h2>
+        <p>진행 상태: <strong>완료</strong>. 사용자가 <code>G1-A / G2-A</code>를 선택해 통합 경계를 확정했다.</p>
+        <table>
+          <caption>현재 frontier</caption>
+          <thead><tr><th>ID</th><th>결정</th><th>선택지</th><th>권고와 트레이드오프</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>G1</td>
+              <td>PR branch를 최신 main과 어떻게 맞출지</td>
+              <td>A. <code>origin/main</code>을 merge<br />B. PR 커밋을 rebase</td>
+              <td><strong>사용자 선택: A</strong>. 기존 PR 이력과 원격 branch를 보존하고 force-push를 피한다. merge commit이 남는 비용은 감수한다.</td>
+            </tr>
+            <tr>
+              <td>G2</td>
+              <td>feed schema 적용 경계</td>
+              <td>A. ordered MikroORM TypeScript migration으로 편입<br />B. raw SQL 파일을 별도 수동 적용</td>
+              <td><strong>사용자 선택: A</strong>. 현재 main의 <code>db:migrate</code>·history·transaction을 재사용한다. migration 파일을 변환·등록해야 하는 작업량은 늘어난다.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>G3(생성 계약)는 소스가 확정되면 <code>npm run contracts:all</code> 재생성으로 고정한다. 수동 병합은 재현성과 endpoint 누락 검증을 잃으므로 독립적인 사용자 선택지로 두지 않는다.</p>
+        <p>현재 frontier: 없음. 남은 단계는 공유 이해 확인 → design-control self-check → 별도 구현 승인이다.</p>
+      </section>
+
+      <section id="shared-understanding">
+        <h2>공유 이해 확인</h2>
+        <p>이 설계는 PR 브랜치에 최신 <code>origin/main</code>을 merge해 기존 이력을 보존하고, pipeline/onboarding과 issue-card-query의 등록·export·공개 계약을 모두 남긴다는 뜻이다. feed SQL은 <code>Migration202609130003IssueCardQuery</code>로 옮겨 onboarding → pipeline → embedding-task → issue-card-query 순서의 MikroORM migration history에 등록한다. 생성 SDK·e2e·OpenAPI는 source 통합 뒤 재생성하며, API 의미·추천 규칙·pipeline 상태 머신은 변경하지 않는다.</p>
+        <p><strong>잔여 가정:</strong> 실제 PostgreSQL 왕복과 migration up/down은 로컬 환경에서 가능한 범위만 검증하고, 연결되지 않는 운영 검증은 잔여 위험으로 기록한다.</p>
+        <p><strong>확인 상태:</strong> <time datetime="2026-09-14">2026-09-14 KST</time> 사용자 <code>ㄱㄱㄱㄱ</code> 응답으로 공유 이해를 확인했다.</p>
+      </section>
+
+      <section id="design-control-state">
+        <h2>설계 이해·통제 점검</h2>
+        <dl>
+          <dt>design-control-state</dt><dd>확인 중. migration 순서·down 안전성·계약 재생성 결과를 예측하는 self-check를 구성한다.</dd>
+          <dt>approval-state</dt><dd>설계 승인됨. <time datetime="2026-09-14">2026-09-14 KST</time> 사용자 <code>ㄱ</code> 응답으로 승인했다. 승인 범위는 최신 main merge, 두 기능 보존, feed TypeScript migration 편입, 계약 재생성, 검증이다.</dd>
+        </dl>
+        <article id="design-control-quiz" class="quiz">
+          <p id="quiz-progress" aria-live="polite">문항 1 / 4 · 답변 0 / 4</p>
+          <div class="quiz-slide" data-answer="b">
+            <fieldset>
+              <legend>C1 · 통합 후 반드시 보존해야 하는 범위는?</legend>
+              <label><input type="radio" name="c1" value="a" /> PR의 feed 기능을 삭제하고 최신 main만 남긴다.</label><br />
+              <label><input type="radio" name="c1" value="b" /> pipeline/onboarding과 issue-card-query API·repository·테스트를 모두 남긴다.</label><br />
+              <label><input type="radio" name="c1" value="c" /> generated 파일만 남기고 source controller는 다시 작성하지 않는다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="c" hidden>
+            <fieldset>
+              <legend>C2 · feed migration의 등록 순서는?</legend>
+              <label><input type="radio" name="c2" value="a" /> issue-card-query → pipeline → onboarding</label><br />
+              <label><input type="radio" name="c2" value="b" /> raw SQL 파일을 migration history와 무관하게 수동 실행</label><br />
+              <label><input type="radio" name="c2" value="c" /> onboarding → category → pipeline → embedding-task → issue-card-query</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="a" hidden>
+            <fieldset>
+              <legend>C3 · migration down에서 지켜야 할 안전성은?</legend>
+              <label><input type="radio" name="c3" value="a" /> 운영 데이터 삭제를 피하도록 명시적으로 중단한다.</label><br />
+              <label><input type="radio" name="c3" value="b" /> 모든 feed·pipeline 테이블을 자동 삭제한다.</label><br />
+              <label><input type="radio" name="c3" value="c" /> down을 구현하지 않고 실패를 숨긴다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-slide" data-answer="b" hidden>
+            <fieldset>
+              <legend>C4 · generated SDK/e2e/OpenAPI를 갱신하는 방법은?</legend>
+              <label><input type="radio" name="c4" value="a" /> 충돌난 generated 파일을 손으로 이어 붙인다.</label><br />
+              <label><input type="radio" name="c4" value="b" /> source 통합 후 <code>npm run contracts:all</code>로 재생성하고 계약/typecheck를 확인한다.</label><br />
+              <label><input type="radio" name="c4" value="c" /> 기존 generated 파일을 모두 삭제하고 검증하지 않는다.</label>
+            </fieldset>
+            <button type="button" data-submit>제출</button>
+            <div class="quiz-result" hidden><strong data-status>상태</strong><p data-explanation>설명</p><p data-next>다음 조치</p></div>
+          </div>
+          <div class="quiz-nav">
+            <button type="button" data-prev>이전</button>
+            <button type="button" data-next>다음</button>
+            <output id="quiz-output" aria-live="polite">제출 전</output>
+          </div>
+        </article>
+        <script>
+          (() => {
+            const slides = [...document.querySelectorAll('.quiz-slide')];
+            const progress = document.querySelector('#quiz-progress');
+            const output = document.querySelector('#quiz-output');
+            let current = 0;
+            const update = () => {
+              slides.forEach((slide, index) => { slide.hidden = index !== current; });
+              const answered = slides.filter((slide) => slide.querySelector('input:checked')).length;
+              progress.textContent = `문항 ${current + 1} / ${slides.length} · 답변 ${answered} / ${slides.length}`;
+            };
+            slides.forEach((slide) => {
+              slide.querySelector('[data-submit]').addEventListener('click', () => {
+                const selected = slide.querySelector('input:checked');
+                const result = slide.querySelector('.quiz-result');
+                result.hidden = false;
+                const correct = selected?.value === slide.dataset.answer;
+                result.querySelector('[data-status]').textContent = correct ? '확립' : '보류';
+                result.querySelector('[data-explanation]').textContent = correct
+                  ? '선택한 통합 불변식과 실행 순서를 예측했다.'
+                  : '선택한 답이 승인된 통합 기준과 다르다. 설계 요약과 실제 diff를 다시 확인한다.';
+                result.querySelector('[data-next]').textContent = correct
+                  ? '다음 문항으로 이동한다.'
+                  : '구현 전 해당 경계를 다시 확인한다.';
+                output.textContent = correct ? '현재 문항: 확립' : '현재 문항: 보류';
+                update();
+              });
+            });
+            document.querySelector('[data-prev]').addEventListener('click', () => { current = Math.max(0, current - 1); update(); });
+            document.querySelector('[data-next]').addEventListener('click', () => { current = Math.min(slides.length - 1, current + 1); update(); });
+            update();
+          })();
+        </script>
+      </section>
+
+      <aside id="verification-plan">
+        <h2>검증 계획</h2>
+        <ol>
+          <li><code>git diff --check</code></li>
+          <li><code>npm run contracts:all</code>, <code>npm run test:contracts</code>, <code>npm run typecheck:generated</code></li>
+          <li><code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code></li>
+          <li>관련 unit/integration test와 전체 <code>npm test</code>, <code>npm run build</code></li>
+          <li>가능한 환경에서 migration up 재실행과 안전한 down 실패 경계 확인</li>
+        </ol>
+        <p>검증 실패·환경 미충족·실제 PostgreSQL 미연결은 통과로 표현하지 않고 잔여 위험으로 기록한다.</p>
+      </aside>
+    </main>
+  </body>
+</html>

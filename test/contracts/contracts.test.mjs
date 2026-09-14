@@ -20,11 +20,30 @@ const EXPECTED_FAILURE_STATUSES = {
   '/me/onboarding': ['401', '500'],
   '/me/onboarding/complete': ['400', '401', '500'],
   '/me/onboarding/skip': ['401', '500'],
+  '/pipeline/runs': ['400', '409', '500'],
+  '/pipeline/runs/{runId}': ['400', '404', '500'],
+  '/pipeline/runs/{runId}/retry': ['400', '404', '409', '500'],
+  '/pipeline/runs/{runId}/interrupt': ['400', '404', '409', '500'],
 };
 const requiredFiles = [
   'api/index.ts',
   'e2e/features/api/automated/test_api_health_getHealth.ts',
   'e2e/features/api/automated/test_api_issues_search.ts',
+  'api/functional/me/index.ts',
+  'api/functional/me/onboarding/index.ts',
+  'api/functional/onboarding/index.ts',
+  'api/functional/onboarding/entities/index.ts',
+  'api/functional/onboarding/options/index.ts',
+  'e2e/features/api/automated/test_api_me_onboarding_complete.ts',
+  'e2e/features/api/automated/test_api_me_onboarding_getMyOnboarding.ts',
+  'e2e/features/api/automated/test_api_me_onboarding_skip.ts',
+  'e2e/features/api/automated/test_api_onboarding_entities_searchEntities.ts',
+  'e2e/features/api/automated/test_api_onboarding_options_getOptions.ts',
+  'api/functional/pipeline/runs/index.ts',
+  'e2e/features/api/automated/test_api_pipeline_runs_create.ts',
+  'e2e/features/api/automated/test_api_pipeline_runs_get.ts',
+  'e2e/features/api/automated/test_api_pipeline_runs_interrupt.ts',
+  'e2e/features/api/automated/test_api_pipeline_runs_retry.ts',
   'openapi.json',
 ];
 
@@ -41,6 +60,21 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   const schemas = document.components?.schemas;
   const problemDetails = schemas?.ProblemDetails;
   assert.ok(problemDetails, 'ProblemDetails schema is required');
+
+  const pipelineCreate = schemas?.PipelineRunCreateRequest;
+  assert.deepEqual(Object.keys(pipelineCreate?.properties ?? {}), ['query']);
+  assert.equal(schemas?.PipelineRunLimitsRequest, undefined);
+
+  const retrySchema =
+    document.paths?.['/pipeline/runs/{runId}/retry']?.post?.requestBody?.content?.[
+      'application/json'
+    ]?.schema;
+  assert.deepEqual(retrySchema?.discriminator?.propertyName, 'scope');
+  const contentSchemaName = retrySchema?.discriminator?.mapping?.CONTENT?.split('/').pop();
+  const discoverySchemaName = retrySchema?.discriminator?.mapping?.DISCOVERY?.split('/').pop();
+  assert.ok(contentSchemaName && discoverySchemaName);
+  assert.ok(schemas?.[contentSchemaName]?.required?.includes('failedJobIds'));
+  assert.equal(schemas?.[discoverySchemaName]?.required?.includes('failedJobIds'), false);
 
   assert.deepEqual(Object.keys(problemDetails.properties ?? {}).sort(), [
     'code',

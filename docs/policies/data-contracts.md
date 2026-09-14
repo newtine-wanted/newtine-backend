@@ -51,7 +51,7 @@
 {
   "analysis_status": "READY",
   "issue_count": 12,
-  "category_counts": [{"category_id": "분류 id", "count": 7}],
+  "category_counts": [{"category_code": "finance", "count": 7}],
   "connections": [
     {
       "title": "주거 부담을 줄이는 두 접근",
@@ -87,7 +87,7 @@
 | 조회 | 후보 |
 | --- | --- |
 | 공개 피드 | issues(publication_status, published_at, id) |
-| 분류별 조회 | issues(category_id, published_at) |
+| 분류별 조회 | issues(category_code, published_at) |
 | 기사에서 이슈 역조회 | issue_articles(article_id, issue_id) |
 | 이전 이슈 조회 | issue_relations(to_issue_id) |
 | 최신 행동 | user_interaction_events(user_id, issue_id, created_at) |
@@ -99,7 +99,7 @@
 
 ## AI 사용량
 
-호출 시작 RUNNING, 결과 확인 후 SUCCEEDED/FAILED, 결과 불명 UNKNOWN이다. 프로세스 종료로 남은 RUNNING도 결과를 확인하지 못하면 UNKNOWN으로 정리한다. actual_cost는 USD 추정 비용이며 최종 청구액과 다를 수 있다. 비용/토큰 미확인은 NULL이다. SEARCH/FETCH는 model/토큰이 NULL일 수 있다.
+호출 ledger의 목표 상태는 호출 시작 RUNNING, 결과 확인 후 SUCCEEDED/FAILED, 결과 불명 UNKNOWN이다. 현재 provider 호출 기록은 종료 시점에 결과를 확인할 수 있는 HTTP/provider 오류를 FAILED로, timeout·전송 오류처럼 결과 자체가 불명확한 경우를 UNKNOWN으로 기록한다. pre-call RUNNING row와 finalize/recovery는 G26-B 후속 범위다. actual_cost는 USD 추정 비용이며 최종 청구액과 다를 수 있다. 비용/토큰 미확인은 NULL이다. SEARCH/FETCH는 model/토큰이 NULL일 수 있다.
 
 이슈 job 외 호출은 job FK가 NULL이므로 현재 스키마는 개별 보고서·사용자별 비용 추적을 지원하지 않는다. 기간·operation·provider 집계는 가능하다. 별도 예산 예약 없이 강한 동시 지출 상한이 보장된다고 해석하지 않는다.
 
