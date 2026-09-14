@@ -314,9 +314,9 @@
                 <td>이번 구현은 소셜 인증을 사용하지 않으며 <code>kakao_id</code> 컬럼을 제거한다. 실제 컬럼 drop은 base schema ownership과 기존 데이터 확인을 거쳐 migration으로 기록한다.</td>
               </tr>
               <tr>
-                <th scope="row"><code>apps/api/src/onboarding/onboarding.auth.ts</code></th>
-                <td><code>authenticatedUserId</code>를 “future authentication guard”가 넣는 seam으로 정의했지만 실제 guard는 없다. 값은 body/query에서 읽지 않도록 의도되어 있다.</td>
-                <td>JWT 검증 결과를 공통 principal로 주입하고 온보딩 controller의 수동 seam을 제거하거나 공통 decorator로 대체한다.</td>
+                <th scope="row"><code>apps/api/src/onboarding/onboarding.auth.ts</code> (설계 시점 snapshot)</th>
+                <td>설계 시점에는 <code>authenticatedUserId</code>를 “future authentication guard”가 넣는 seam으로 정의했지만 실제 guard는 없었다. 값은 body/query에서 읽지 않도록 의도되어 있었다.</td>
+                <td>구현에서는 해당 수동 seam을 제거하고 JWT 검증 결과를 공통 <code>AuthPrincipal</code>로 주입한 뒤 <code>@CurrentUser()</code> decorator로 전달한다.</td>
               </tr>
               <tr>
                 <th scope="row"><code>apps/api/src/api.module.ts</code> 및 controllers</th>
@@ -678,7 +678,7 @@
         <section id="grilling-state">
           <h2>설계 의사결정 질문 (grilling)</h2>
           <p>
-            <strong class="open">진행 상태: 완료 / 공유 이해 확인 대기</strong>. 아래 질문은 settled design의
+            <strong class="open">진행 상태: 리팩터링 설계 결정 완료</strong>. 아래 질문은 settled design의
             이해도 시험이 아니라 구현 전에 사용자와 선택하는 인증·인가 계약이다. G1~G14의 material
             frontier가 해결되었고, G12-A로 기존 users를 확장하며 G14-A로 운영 base schema 소유권은
             유지하고 Compose에만 disposable bootstrap을 두기로 했다. 이번 구현에서는 소셜 provider·카카오
@@ -746,6 +746,41 @@
             </p>
             <p><strong>결정 상태:</strong> 사용자 선택 <code>G14-A</code> 및 구현 진행 승인 기록 완료. 운영 base schema 소유권은 유지하고 Compose local bootstrap만 구현한다.</p>
           </aside>
+          <aside id="refactor-frontier">
+            <h3>후속 구조 리팩터링 frontier</h3>
+            <p>
+              현재 구현은 기능적으로 검증되었지만, auth application·domain·infrastructure 경계와 ORM 사용 방식이
+              섞여 있다. 아래 결정은 기존 HTTP·JWT·cookie·refresh 상태 전이를 유지하면서 가독성과 책임 경계를
+              개선할지 결정한다. 이 결정 전에는 구현 파일을 수정하지 않는다.
+            </p>
+            <table>
+              <caption>리팩터링 설계 선택지</caption>
+              <thead>
+                <tr><th scope="col">ID</th><th scope="col">결정</th><th scope="col">선택지</th><th scope="col">권고</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">R1</th>
+                  <td>인증 persistence 접근 전략</td>
+                  <td>A: 일반 CRUD는 MikroORM entity를 사용하고 refresh rotation만 명시적 SQL/QueryBuilder로 유지 · B: SQL-first를 공식화하고 entity metadata를 제거</td>
+                  <td>A — ORM의 이점과 동시성 제어를 함께 유지한다.</td>
+                </tr>
+                <tr>
+                  <th scope="row">R2</th>
+                  <td>구조 리팩터링 범위</td>
+                  <td>A: HTTP 계약·상태 전이를 유지하고 use case·domain policy·adapter 책임만 분리 · B: aggregate·provider·권한 모델까지 확장</td>
+                  <td>A — 현재 요구사항에 필요한 가독성만 개선하고 과설계를 피한다.</td>
+                </tr>
+                <tr>
+                  <th scope="row">R3</th>
+                  <td>인증 principal 전달 방식</td>
+                  <td>A: <code>Principal</code> 객체와 <code>@CurrentUser()</code> decorator 도입 · B: 현재처럼 request optional field와 helper 유지</td>
+                  <td>A — controller가 Express request 내부 필드와 인증 구현을 직접 알지 않게 한다.</td>
+                </tr>
+              </tbody>
+            </table>
+            <p><strong>결정 반영:</strong> 사용자가 권고안 <code>R1-A / R2-A / R3-A</code>를 승인했다. 기존 HTTP·JWT·cookie·refresh 상태 전이는 유지하고, 일반 persistence CRUD는 MikroORM으로 전환하며, refresh rotation의 동시성 SQL은 유지한다. 구현은 use case·domain policy·adapter 책임 분리와 <code>Principal</code>/<code>@CurrentUser()</code> 전달 방식에 한정한다.</p>
+          </aside>
         </section>
 
         <section id="verification-plan">
@@ -769,12 +804,12 @@
         <section id="design-control-state">
           <h2>설계 이해·통제 점검 (design-control)</h2>
           <p>
-            상태: <strong>미실시</strong>. G14가 추가되어 기존 G1~G13 기준선은 재승인 대상이 되었다. G14의
-            bootstrap 경계를 선택하고 공유 이해를 확인한 뒤, prediction·invariant·boundary·failure
+            상태: <strong>미실시</strong>. G14와 R1~R3 설계 delta가 반영되었다. 아래 질문은
+            implementation 전 prediction·invariant·boundary·failure
             recovery·verification coverage를 다시 점검한다. 답변 결과는 브라우저 안에만 남으며 Codex에
             자동 전달된다고 가정하지 않는다.
           </p>
-          <p id="design-control-progress" class="control-progress" aria-live="polite">질문 1 / 11 · 답변 0 / 11</p>
+          <p id="design-control-progress" class="control-progress" aria-live="polite">질문 1 / 14 · 답변 0 / 14</p>
           <div id="design-control-questions">
             <section class="control-slide is-active" data-question-id="DC1" data-answer="b" data-explanation="개인 데이터의 소유권은 요청 body/query/path가 아니라 검증된 access JWT의 subject에서 시작해야 한다. controller와 service는 guard가 주입한 principal user id를 사용한다." data-next="principal 주입과 /me route guard의 테스트를 구현한다.">
               <fieldset>
@@ -864,12 +899,36 @@
                 <label><input type="radio" name="dc11" value="c" /> base table을 만들지 않고 migration과 signup을 계속 실행한다.</label>
               </fieldset>
             </section>
+            <section class="control-slide" data-question-id="DC12" data-answer="a" data-explanation="일반적인 user·refresh session CRUD는 등록된 MikroORM entity를 통해 다루고, refresh rotation의 row lock·조건부 상태 전이처럼 동시성 제어가 핵심인 부분만 명시적 SQL 또는 QueryBuilder로 유지한다. raw SQL을 무조건 제거하지 않는다." data-next="ORM entity CRUD와 rotation 동시성 테스트를 분리해 검증한다.">
+              <fieldset>
+                <legend>DC12. R1-A의 ORM과 raw SQL 책임 분리는 어떻게 되는가?</legend>
+                <label><input type="radio" name="dc12" value="a" /> 일반 CRUD는 MikroORM, refresh rotation의 동시성 제어는 명시적 SQL/QueryBuilder를 사용한다.</label>
+                <label><input type="radio" name="dc12" value="b" /> 모든 persistence를 raw SQL로 두고 ORM entity는 장식으로만 유지한다.</label>
+                <label><input type="radio" name="dc12" value="c" /> 동시성 상태 전이도 ORM을 쓰지 않고 애플리케이션 메모리에서 처리한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC13" data-answer="b" data-explanation="이번 리팩터링은 HTTP 계약, JWT/cookie 정책, refresh 상태 전이를 바꾸지 않는다. AuthService를 유즈케이스·domain policy·adapter 경계로 나누되 User aggregate나 provider 계정 병합까지 확장하지 않는다." data-next="기존 auth contract·Compose smoke·refresh reuse 테스트를 그대로 회귀 검증한다.">
+              <fieldset>
+                <legend>DC13. R2-A 리팩터링에서 유지해야 하는 것은 무엇인가?</legend>
+                <label><input type="radio" name="dc13" value="a" /> User aggregate와 social provider까지 새로 설계해 HTTP 계약도 함께 바꾼다.</label>
+                <label><input type="radio" name="dc13" value="b" /> 기존 HTTP·JWT·cookie·refresh 상태 전이는 유지하고 책임 경계만 분리한다.</label>
+                <label><input type="radio" name="dc13" value="c" /> 구조 변경이므로 기존 인증 테스트와 Compose 검증은 제거한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC14" data-answer="c" data-explanation="guard는 인증 결과인 Principal을 request에 한 번 주입하고, controller는 @CurrentUser()로 이를 받는다. controller가 Express request optional field를 직접 읽거나 body의 user id를 인증 주체로 사용하지 않는다." data-next="Principal decorator와 /me route 회귀 테스트를 구현한다.">
+              <fieldset>
+                <legend>DC14. R3-A에서 보호 controller가 인증된 사용자를 받는 방식은 무엇인가?</legend>
+                <label><input type="radio" name="dc14" value="a" /> controller가 request.authenticatedUserId를 직접 읽고 helper로 검증한다.</label>
+                <label><input type="radio" name="dc14" value="b" /> request body의 userId와 JWT subject 중 더 구체적인 값을 선택한다.</label>
+                <label><input type="radio" name="dc14" value="c" /> guard가 Principal을 주입하고 controller는 @CurrentUser()로 받는다.</label>
+              </fieldset>
+            </section>
           </div>
           <div class="control-nav" aria-label="설계 통제 질문 탐색">
             <button type="button" data-prev-question>이전</button>
             <button type="button" data-next-question>다음</button>
             <button type="button" data-submit-question>현재 답변 제출</button>
-            <span class="control-progress" data-control-progress>질문 1 / 11 · 답변 0 / 11</span>
+            <span class="control-progress" data-control-progress>질문 1 / 14 · 답변 0 / 14</span>
           </div>
           <p><small>각 질문의 결과는 제출한 뒤 해당 카드에만 표시된다. 이 HTML self-check는 설계 이해를 돕는 기록이며 구현 승인이나 브라우저 결과 전송의 대체가 아니다.</small></p>
           <table>
@@ -878,13 +937,13 @@
               <tr><th scope="col">축</th><th scope="col">현재 상태</th><th scope="col">질문 시점</th></tr>
             </thead>
             <tbody>
-              <tr><th scope="row">목표·범위</th><td>G1·G2·G7·G12·G13·G14 해결</td><td>DC1·DC2·DC10·DC11</td></tr>
-              <tr><th scope="row">결정·불변식</th><td>G3~G11 해결, Argon2id 파라미터는 benchmark</td><td>DC3·DC4·DC6·DC7</td></tr>
-              <tr><th scope="row">경계·상태 전이</th><td>refresh row와 principal 전이 계약</td><td>DC1·DC4·DC5·DC6</td></tr>
+              <tr><th scope="row">목표·범위</th><td>G1·G2·G7·G12·G13·G14 및 R2-A 해결</td><td>DC1·DC2·DC10·DC11·DC13</td></tr>
+              <tr><th scope="row">결정·불변식</th><td>G3~G11 및 R1-A 해결, Argon2id 파라미터는 benchmark</td><td>DC3·DC4·DC6·DC7·DC12</td></tr>
+              <tr><th scope="row">경계·상태 전이</th><td>refresh row·principal 전이와 R1/R3 adapter 경계</td><td>DC1·DC4·DC5·DC6·DC12·DC14</td></tr>
               <tr><th scope="row">실패·복구</th><td>G5·G9·G11 해결</td><td>DC5·DC8·DC9</td></tr>
               <tr><th scope="row">권한·외부 효과</th><td>G4·G10 해결</td><td>DC6·DC7</td></tr>
               <tr><th scope="row">관찰성·운영</th><td>redaction 근거와 G6 해결, rate limit·secret rotation 미확정</td><td>DC3·DC5·DC7·잔여 위험</td></tr>
-              <tr><th scope="row">검증·잔여 위험</th><td>Argon2id benchmark·base schema DDL·fresh Compose E2E 검증 필요</td><td>DC3·DC5·DC10·DC11·구현 제어 문서</td></tr>
+              <tr><th scope="row">검증·잔여 위험</th><td>Argon2id benchmark·base schema DDL·fresh Compose E2E·ORM/rotation 회귀 검증 필요</td><td>DC3·DC5·DC10·DC11·DC12·DC13·DC14·구현 제어 문서</td></tr>
             </tbody>
           </table>
         </section>
@@ -893,13 +952,13 @@
           <h2>승인 상태</h2>
           <dl>
             <dt>현재 상태</dt>
-            <dd><strong class="state">재승인 필요</strong></dd>
+            <dd><strong class="done">설계 승인됨</strong> — R1-A / R2-A / R3-A</dd>
             <dt>설계 control 상태</dt>
-            <dd>미실시 — G14-A 설계 delta와 DC11을 기록함. self-check 결과는 비차단</dd>
+            <dd>미실시 — G14-A와 R1~R3 설계 delta 및 DC1~DC14를 기록함. self-check 결과는 비차단</dd>
             <dt>구현 승인</dt>
-            <dd>승인됨 — G1~G13 및 G14-A. 운영 base schema 소유권은 유지하고 Compose local bootstrap만 추가</dd>
+            <dd>승인됨 — G1~G14-A 및 R1-A / R2-A / R3-A. 기존 API·상태 전이·보안 정책 유지</dd>
             <dt>다음 단계</dt>
-            <dd>구현 제어 문서 갱신 → Compose bootstrap 및 migration runner 구현 → fresh volume 실제 E2E 검증</dd>
+            <dd>구조 리팩터링 구현 → auth 회귀·ORM/rotation 동시성·fresh Compose gate 검증</dd>
           </dl>
         </section>
       </article>
