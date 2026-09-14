@@ -112,20 +112,58 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
   async findCandidates(
     excludedIssueIds: ReadonlySet<string>,
     limit?: number,
-    _scope?: IssueCandidateScope,
+    scope?: IssueCandidateScope,
   ): Promise<IssueRecord[]> {
-    void _scope;
-    return this.issues
-      .filter(
-        (issue) =>
-          issue.publicationStatus === 'PUBLISHED' &&
-          issue.integratedSummary !== null &&
-          issue.summaryLines.length === 3 &&
-          !excludedIssueIds.has(issue.id),
-      )
-      .sort(compareIssue)
-      .slice(0, limit === undefined ? undefined : Math.max(0, limit))
-      .map(cloneIssue);
+    const candidateLimit = limit === undefined ? undefined : normalizeLimit(limit);
+    if (candidateLimit === 0) return [];
+
+    const publicIssues = this.issues.filter(isPublicIssue);
+    if (scope === undefined || candidateLimit === undefined) {
+      const rows = publicIssues
+        .filter((issue) => !excludedIssueIds.has(issue.id))
+        .sort(compareIssue);
+      return (candidateLimit === undefined ? rows : rows.slice(0, candidateLimit)).map(cloneIssue);
+    }
+
+    const rows: IssueRecord[] = [];
+    const seenIds = new Set(excludedIssueIds);
+    let remainingRows = candidateLimit;
+    for (const slice of buildCandidateSlices(scope)) {
+      if (remainingRows === 0) break;
+      const sliceLimit = Math.min(
+        remainingRows,
+        Math.max(1, Math.floor(candidateLimit * slice.weight)),
+      );
+      const sliceRows = publicIssues
+        .filter((issue) => !seenIds.has(issue.id) && slice.matches(issue))
+        .sort(compareIssue)
+        .slice(0, sliceLimit);
+      for (const issue of sliceRows) {
+        if (seenIds.has(issue.id)) continue;
+        seenIds.add(issue.id);
+        rows.push(issue);
+        remainingRows -= 1;
+      }
+    }
+    if (remainingRows > 0) {
+      const fillRows = publicIssues
+        .filter((issue) => !seenIds.has(issue.id))
+        .sort(compareIssue)
+        .slice(0, remainingRows);
+      for (const issue of fillRows) {
+        if (seenIds.has(issue.id)) continue;
+        seenIds.add(issue.id);
+        rows.push(issue);
+        remainingRows -= 1;
+        if (remainingRows === 0) break;
+      }
+    }
+
+    const unique = new Map<string, IssueRecord>();
+    for (const issue of rows) {
+      if (!unique.has(issue.id)) unique.set(issue.id, issue);
+    }
+    return [...unique.values()].sort(compareIssue).slice(0, candidateLimit).map(cloneIssue);
   }
 
   async findIssue(id: string): Promise<IssueRecord | null> {
@@ -204,6 +242,114 @@ function compareIssue(left: IssueRecord, right: IssueRecord): number {
   const rightEventAt = right.eventAt?.getTime() ?? Number.NEGATIVE_INFINITY;
   if (rightEventAt !== leftEventAt) return rightEventAt - leftEventAt;
   return left.id.localeCompare(right.id);
+}
+
+interface CandidateSlice {
+  matches: (issue: IssueRecord) => boolean;
+  weight: number;
+}
+
+function buildCandidateSlices(scope: IssueCandidateScope): CandidateSlice[] {
+  const slices: CandidateSlice[] = [];
+  const personalized = personalizedMatcher(scope);
+  if (personalized !== null) slices.push({ matches: personalized, weight: 0.3 });
+
+  const threshold = Math.min(1, Math.max(0, scope.highScoreThreshold));
+  const major = (issue: IssueRecord): boolean =>
+    scoreAtLeastAndAtMostOne(issue.importanceScore, threshold) ||
+    scoreAtLeastAndAtMostOne(issue.freshnessScore, threshold);
+  slices.push({ matches: major, weight: 0.2 });
+
+  if (scope.connectedIssueIds.length > 0) {
+    const connectedIds = new Set(scope.connectedIssueIds);
+    slices.push({ matches: (issue) => connectedIds.has(issue.id), weight: 0.15 });
+  }
+
+  const excludedCategories = new Set(
+    uniqueStrings([...scope.selectedCategoryCodes, ...scope.actedCategoryCodes]),
+  );
+  if (excludedCategories.size > 0) {
+    slices.push({
+      matches: (issue) => !excludedCategories.has(issue.categoryCode),
+      weight: 0.2,
+    });
+  }
+
+  const mismatch = mismatchMatcher(scope);
+  if (personalized !== null && mismatch !== null) {
+    slices.push({
+      matches: (issue) => !personalized(issue) && mismatch(issue) && major(issue),
+      weight: 0.15,
+    });
+  }
+  return slices;
+}
+
+function personalizedMatcher(scope: IssueCandidateScope): ((issue: IssueRecord) => boolean) | null {
+  const matchers: Array<(issue: IssueRecord) => boolean> = [];
+  if (scope.selectedCategoryCodes.length > 0) {
+    matchers.push((issue) => scope.selectedCategoryCodes.includes(issue.categoryCode));
+  }
+  if (scope.selectedEntityIds.length > 0) {
+    matchers.push((issue) => issue.entityIds.some((id) => scope.selectedEntityIds.includes(id)));
+  }
+  if (scope.preferredRegionCodes.length > 0) {
+    matchers.push((issue) =>
+      issue.regionCodes.some((code) => scope.preferredRegionCodes.includes(code)),
+    );
+  }
+  if (scope.ageGroup !== null) {
+    matchers.push((issue) => issue.ageGroups.includes(scope.ageGroup!));
+  }
+  return matchers.length === 0 ? null : (issue) => matchers.some((matches) => matches(issue));
+}
+
+function mismatchMatcher(scope: IssueCandidateScope): ((issue: IssueRecord) => boolean) | null {
+  const matchers: Array<(issue: IssueRecord) => boolean> = [];
+  if (scope.selectedCategoryCodes.length > 0) {
+    matchers.push((issue) => !scope.selectedCategoryCodes.includes(issue.categoryCode));
+  }
+  if (scope.selectedEntityIds.length > 0) {
+    matchers.push(
+      (issue) =>
+        issue.entityIds.length > 0 &&
+        !issue.entityIds.some((id) => scope.selectedEntityIds.includes(id)),
+    );
+  }
+  if (scope.preferredRegionCodes.length > 0) {
+    matchers.push(
+      (issue) =>
+        issue.regionCodes.length > 0 &&
+        !issue.regionCodes.some((code) => scope.preferredRegionCodes.includes(code)),
+    );
+  }
+  if (scope.ageGroup !== null) {
+    matchers.push(
+      (issue) => issue.ageGroups.length > 0 && !issue.ageGroups.includes(scope.ageGroup!),
+    );
+  }
+  return matchers.length === 0 ? null : (issue) => matchers.some((matches) => matches(issue));
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value !== ''))];
+}
+
+function normalizeLimit(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function scoreAtLeastAndAtMostOne(value: number, threshold: number): boolean {
+  return value >= threshold && value <= 1;
+}
+
+function isPublicIssue(issue: IssueRecord): boolean {
+  return (
+    issue.publicationStatus === 'PUBLISHED' &&
+    issue.integratedSummary !== null &&
+    Array.isArray(issue.summaryLines) &&
+    issue.summaryLines.length === 3
+  );
 }
 
 function clamp01(value: number): number {

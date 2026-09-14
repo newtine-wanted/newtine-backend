@@ -30,6 +30,7 @@ import { PostgresOnboardingRepository } from '@newtine/core/onboarding/postgresO
     },
   ],
   exports: [
+    MikroOrmTransactionManager,
     TRANSACTION_MANAGER,
     ONBOARDING_REPOSITORY,
     PIPELINE_RUN_REPOSITORY,

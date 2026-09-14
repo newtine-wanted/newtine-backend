@@ -1,6 +1,12 @@
 import { Module } from '@nestjs/common';
 
-import { CoreModule, ISSUE_QUERY_REPOSITORY } from '@newtine/core';
+import {
+  CoreModule,
+  InMemoryTransactionManager,
+  ISSUE_QUERY_REPOSITORY,
+  MikroOrmTransactionManager,
+  TRANSACTION_MANAGER,
+} from '@newtine/core';
 import { IssueController } from '@newtine/api/issue/issue.controller.js';
 import { FeedController } from '@newtine/api/issue/feed.controller.js';
 import { IssueDetailService } from '@newtine/api/issue/issueDetail.service.js';
@@ -18,6 +24,12 @@ import { PostgresIssueQueryRepository } from '@newtine/api/issue/repository/post
       useFactory: () => new InMemoryIssueQueryRepository(),
     },
     PostgresIssueQueryRepository,
+    {
+      provide: TRANSACTION_MANAGER,
+      useFactory: (postgres: MikroOrmTransactionManager) =>
+        shouldUsePostgres() ? postgres : new InMemoryTransactionManager(),
+      inject: [MikroOrmTransactionManager],
+    },
     {
       provide: ISSUE_QUERY_REPOSITORY,
       useFactory: (memory: InMemoryIssueQueryRepository, postgres: PostgresIssueQueryRepository) =>

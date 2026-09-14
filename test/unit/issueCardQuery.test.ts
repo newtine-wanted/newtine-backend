@@ -9,6 +9,7 @@ import { toIssueDetailResponse } from '@newtine/api/issue/type/issueDetail.mappe
 import type {
   IssueRecord,
   IssueRelationRecord,
+  TransactionManager,
   UserInteractionRecord,
   UserRecommendationContext,
 } from '@newtine/core';
@@ -59,6 +60,27 @@ test('feed returns at most ten unique cards and reuses the same batch on retry',
     }),
     /완료된 탐색 세션/,
   );
+});
+
+test('feed batch generation is owned by the supplied transaction manager', async () => {
+  const repository = new InMemoryIssueQueryRepository({ issues: [issue(1)] });
+  let transactionCalls = 0;
+  const transactionManager: TransactionManager = {
+    execute: async (work) => {
+      transactionCalls += 1;
+      return work();
+    },
+  };
+  const service = new IssueFeedService(repository, transactionManager);
+  const session = await service.createSession({ userId: null, guestKey: null });
+
+  await service.getBatch({
+    owner: { userId: null, guestKey: session.guestKey! },
+    sessionId: session.sessionId,
+    batchNo: 0,
+  });
+
+  assert.equal(transactionCalls, 1);
 });
 
 test('connected cards require a verified later FOLLOW_UP event', async () => {

@@ -9,6 +9,7 @@ import { Migration20260913000001CategoryCodePrimaryKey } from '../../pipeline/mi
 import { Migration202609130001Pipeline } from '../../pipeline/migrations/Migration202609130001Pipeline.js';
 import { Migration202609130002PipelineEmbeddingTasks } from '../../pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
 import { Migration202609130003IssueCardQuery } from '../../pipeline/migrations/Migration202609130003IssueCardQuery.js';
+import { Migration202609130004IssueCardQueryReadModel } from '../../pipeline/migrations/Migration202609130004IssueCardQueryReadModel.js';
 
 export function createDatabaseOptions(
   env: NodeJS.ProcessEnv = process.env,
@@ -49,6 +50,7 @@ export function createDatabaseOptions(
         Migration202609130001Pipeline,
         Migration202609130002PipelineEmbeddingTasks,
         Migration202609130003IssueCardQuery,
+        Migration202609130004IssueCardQueryReadModel,
       ],
       transactional: true,
       allOrNothing: true,

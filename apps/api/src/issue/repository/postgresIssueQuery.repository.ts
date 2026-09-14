@@ -99,7 +99,8 @@ export class PostgresIssueQueryRepository implements IssueQueryRepository {
       'get',
     );
     const row = rows[0];
-    return row === undefined ? null : await this.loadBatch(row);
+    if (row === undefined) return null;
+    return (await this.loadBatches([row]))[0] ?? null;
   }
 
   async findFeedBatches(sessionId: string): Promise<FeedBatchRecord[]> {
@@ -111,101 +112,113 @@ export class PostgresIssueQueryRepository implements IssueQueryRepository {
       [sessionId],
       'all',
     );
-    return Promise.all(rows.map((row) => this.loadBatch(row)));
+    return this.loadBatches(rows);
   }
 
   async saveFeedBatch(session: FeedSessionRecord, batch: FeedBatchRecord): Promise<void> {
-    await this.entityManager.transactional(async (manager) => {
-      const connection = manager.getConnection();
-      const transaction = manager.getTransactionContext();
-      if (transaction === undefined) {
-        throw new Error('feed batch transaction context is unavailable');
-      }
-      const execute = <T extends DbRow = DbRow>(
-        sql: string,
-        params: unknown[],
-        method: 'all' | 'get' | 'run',
-      ): Promise<T[]> =>
-        connection
-          .execute<T>(sql, params, method, transaction)
-          .then((result) => normalizeRows<T>(result, method));
-      const sessionRows = await execute<DbRow>(
-        `SELECT id, status, next_batch_no
-           FROM feed_sessions
-          WHERE id = ?::uuid
-          FOR UPDATE`,
-        [session.id],
-        'get',
+    const manager = this.currentEntityManager();
+    const transaction = manager.getTransactionContext();
+    if (transaction === undefined) {
+      throw new Error('feed batch transaction context is unavailable');
+    }
+    const connection = manager.getConnection();
+    const execute = <T extends DbRow = DbRow>(
+      sql: string,
+      params: unknown[],
+      method: 'all' | 'get' | 'run',
+    ): Promise<T[]> =>
+      connection
+        .execute<T>(sql, params, method, transaction)
+        .then((result) => normalizeRows<T>(result, method));
+
+    const sessionRows = await execute<DbRow>(
+      `SELECT id, status, next_batch_no, expires_at, expires_at > clock_timestamp() AS is_unexpired
+         FROM feed_sessions
+        WHERE id = ?::uuid
+        FOR UPDATE`,
+      [session.id],
+      'get',
+    );
+    const currentSession = sessionRows[0];
+    if (currentSession === undefined) {
+      throw new IssueException(
+        IssueExceptionCode.FeedBatchConflict,
+        '현재 탐색 상태에서는 새 묶음을 저장할 수 없습니다.',
       );
-      const currentSession = sessionRows[0];
-      const existing = await execute<DbRow>(
-        `SELECT 1 FROM feed_batches WHERE feed_session_id = ?::uuid AND batch_no = ?`,
-        [batch.sessionId, batch.batchNo],
-        'get',
+    }
+    if (!booleanValue(currentSession.is_unexpired)) {
+      throw new IssueException(
+        IssueExceptionCode.FeedSessionExpired,
+        '탐색 세션이 만료되었습니다.',
       );
-      if (existing[0] !== undefined) return;
-      const latestRows = await execute<DbRow>(
-        `SELECT continuation
-           FROM feed_batches
-          WHERE feed_session_id = ?::uuid
-          ORDER BY batch_no DESC
-          LIMIT 1`,
-        [batch.sessionId],
-        'get',
+    }
+
+    const existing = await execute<DbRow>(
+      `SELECT 1 FROM feed_batches WHERE feed_session_id = ?::uuid AND batch_no = ?`,
+      [batch.sessionId, batch.batchNo],
+      'get',
+    );
+    if (existing[0] !== undefined) return;
+    const latestRows = await execute<DbRow>(
+      `SELECT continuation
+         FROM feed_batches
+        WHERE feed_session_id = ?::uuid
+        ORDER BY batch_no DESC
+        LIMIT 1`,
+      [batch.sessionId],
+      'get',
+    );
+    const latestContinuation = latestRows[0]?.continuation;
+    const currentNextBatchNo = numberValue(currentSession.next_batch_no);
+    if (
+      currentSession.status === 'COMPLETED' ||
+      currentNextBatchNo !== batch.batchNo ||
+      (latestContinuation !== undefined && latestContinuation !== 'CONTINUE')
+    ) {
+      throw new IssueException(
+        IssueExceptionCode.FeedBatchConflict,
+        '현재 탐색 상태에서는 새 묶음을 저장할 수 없습니다.',
       );
-      const latestContinuation = latestRows[0]?.continuation;
-      const currentNextBatchNo = numberValue(currentSession?.next_batch_no);
-      if (
-        currentSession === undefined ||
-        currentSession.status === 'COMPLETED' ||
-        currentNextBatchNo !== batch.batchNo ||
-        (latestContinuation !== undefined && latestContinuation !== 'CONTINUE')
-      ) {
-        throw new IssueException(
-          IssueExceptionCode.FeedBatchConflict,
-          '현재 탐색 상태에서는 새 묶음을 저장할 수 없습니다.',
-        );
-      }
+    }
+    await execute(
+      `INSERT INTO feed_batches
+        (feed_session_id, batch_no, continuation, created_at)
+       VALUES (?::uuid, ?, ?, ?)`,
+      [batch.sessionId, batch.batchNo, batch.continuation, batch.createdAt],
+      'run',
+    );
+    for (const item of batch.items) {
       await execute(
-        `INSERT INTO feed_batches
-          (feed_session_id, batch_no, continuation, created_at)
-         VALUES (?::uuid, ?, ?, ?)`,
-        [batch.sessionId, batch.batchNo, batch.continuation, batch.createdAt],
-        'run',
-      );
-      for (const item of batch.items) {
-        await execute(
-          `INSERT INTO feed_batch_items
-            (feed_session_id, batch_no, position, issue_id, selection_type, reason_codes)
-           VALUES (?::uuid, ?, ?, ?::uuid, ?, ?::jsonb)`,
-          [
-            batch.sessionId,
-            batch.batchNo,
-            item.position,
-            item.issueId,
-            item.selectionType,
-            JSON.stringify(item.reasonCodes),
-          ],
-          'run',
-        );
-      }
-      await execute(
-        `UPDATE feed_sessions
-            SET next_batch_no = ?, status = ?, last_topic = ?,
-                last_representative_entity_id = ?::uuid, topic_run = ?, entity_run = ?
-          WHERE id = ?::uuid`,
+        `INSERT INTO feed_batch_items
+          (feed_session_id, batch_no, position, issue_id, selection_type, reason_codes)
+         VALUES (?::uuid, ?, ?, ?::uuid, ?, ?::jsonb)`,
         [
-          session.nextBatchNo,
-          session.status,
-          session.lastTopic,
-          session.lastRepresentativeEntityId,
-          session.topicRun,
-          session.entityRun,
-          session.id,
+          batch.sessionId,
+          batch.batchNo,
+          item.position,
+          item.issueId,
+          item.selectionType,
+          JSON.stringify(item.reasonCodes),
         ],
         'run',
       );
-    });
+    }
+    await execute(
+      `UPDATE feed_sessions
+          SET next_batch_no = ?, status = ?, last_topic = ?,
+              last_representative_entity_id = ?::uuid, topic_run = ?, entity_run = ?
+        WHERE id = ?::uuid`,
+      [
+        session.nextBatchNo,
+        session.status,
+        session.lastTopic,
+        session.lastRepresentativeEntityId,
+        session.topicRun,
+        session.entityRun,
+        session.id,
+      ],
+      'run',
+    );
   }
 
   async findCandidates(
@@ -275,11 +288,12 @@ export class PostgresIssueQueryRepository implements IssueQueryRepository {
   async findIssuesByIds(ids: ReadonlySet<string>): Promise<IssueRecord[]> {
     const issueIds = [...ids];
     if (issueIds.length === 0) return [];
+    const issueIdArray = postgresArrayExpression(issueIds, 'uuid');
     const rows = await this.execute<DbRow>(
-      `${issueSelect('i.id = ANY(?::uuid[])')}
+      `${issueSelect(`i.id = ANY(${issueIdArray.sql})`)}
        ORDER BY i.importance_score DESC NULLS LAST, i.freshness_score DESC NULLS LAST,
                 i.event_at DESC NULLS LAST, i.id`,
-      [issueIds],
+      issueIdArray.params,
       'all',
     );
     return rows.map((row) => toIssue(row));
@@ -328,13 +342,14 @@ export class PostgresIssueQueryRepository implements IssueQueryRepository {
   async findFollowUps(issueIds: ReadonlySet<string>): Promise<IssueRelationRecord[]> {
     const ids = [...issueIds];
     if (ids.length === 0) return [];
+    const issueIdArray = postgresArrayExpression(ids, 'uuid');
     const rows = await this.execute<DbRow>(
       `SELECT from_issue_id::text, to_issue_id::text, relation_type, verified_at
          FROM issue_relations
         WHERE relation_type = 'FOLLOW_UP'
           AND verified_at IS NOT NULL
-          AND from_issue_id = ANY(?::uuid[])`,
-      [ids],
+          AND from_issue_id = ANY(${issueIdArray.sql})`,
+      issueIdArray.params,
       'all',
     );
     return rows.map((row) => ({
@@ -345,38 +360,49 @@ export class PostgresIssueQueryRepository implements IssueQueryRepository {
     }));
   }
 
-  private async loadBatch(row: DbRow): Promise<FeedBatchRecord> {
-    const sessionId = stringValue(row.feed_session_id);
-    const batchNo = numberValue(row.batch_no);
+  private async loadBatches(rows: DbRow[]): Promise<FeedBatchRecord[]> {
+    if (rows.length === 0) return [];
+    const sessionId = stringValue(rows[0]!.feed_session_id);
     const itemRows = await this.execute<DbRow>(
-      `SELECT issue_id::text, position, selection_type, reason_codes
+      `SELECT feed_session_id::text, batch_no, issue_id::text, position, selection_type, reason_codes
          FROM feed_batch_items
-        WHERE feed_session_id = ?::uuid AND batch_no = ?
-        ORDER BY position`,
-      [sessionId, batchNo],
+        WHERE feed_session_id = ?::uuid
+        ORDER BY batch_no, position`,
+      [sessionId],
       'all',
     );
-    return {
-      sessionId,
-      batchNo,
-      continuation: continuationValue(row.continuation),
-      createdAt: dateValue(row.created_at),
-      items: itemRows.map((item) => ({
+    const itemsByBatch = new Map<number, FeedBatchRecord['items']>();
+    for (const item of itemRows) {
+      const batchNo = numberValue(item.batch_no);
+      const items = itemsByBatch.get(batchNo) ?? [];
+      items.push({
         issueId: stringValue(item.issue_id),
         position: numberValue(item.position),
         selectionType: selectionTypeValue(item.selection_type),
         reasonCodes: stringArray(item.reason_codes),
-      })),
-    };
+      });
+      itemsByBatch.set(batchNo, items);
+    }
+    return rows.map((row) => {
+      const batchNo = numberValue(row.batch_no);
+      return {
+        sessionId: stringValue(row.feed_session_id),
+        batchNo,
+        continuation: continuationValue(row.continuation),
+        createdAt: dateValue(row.created_at),
+        items: itemsByBatch.get(batchNo) ?? [],
+      };
+    });
   }
 
   private async loadArticles(issueId: string): Promise<IssueArticleRecord[]> {
     const rows = await this.execute<DbRow>(
-      `SELECT a.id::text, a.title, a.article_url, p.name AS publisher_name, a.published_at
+      `SELECT a.id::text, a.title, a.article_url,
+              COALESCE(p.name, a.publisher_name) AS publisher_name, a.published_at
          FROM issue_articles ia
          JOIN articles a ON a.id = ia.article_id
-         JOIN publishers p ON p.id = a.publisher_id
-        WHERE ia.issue_id = ?::uuid
+         LEFT JOIN publishers p ON p.id = a.publisher_id
+        WHERE ia.issue_id = ?::uuid AND a.source_status = 'AVAILABLE'
         ORDER BY ia.sort_order NULLS LAST, a.id`,
       [issueId],
       'all',
@@ -422,8 +448,10 @@ export class PostgresIssueQueryRepository implements IssueQueryRepository {
     limit?: number,
   ): Promise<DbRow[]> {
     const ids = [...excludedIssueIds];
-    const exclusion = ids.length === 0 ? '' : ' AND NOT (i.id = ANY(?::uuid[]))';
-    const params = ids.length === 0 ? [...extraParams] : [...extraParams, ids];
+    const exclusionArray = ids.length === 0 ? null : postgresArrayExpression(ids, 'uuid');
+    const exclusion = exclusionArray === null ? '' : ` AND NOT (i.id = ANY(${exclusionArray.sql}))`;
+    const params =
+      exclusionArray === null ? [...extraParams] : [...extraParams, ...exclusionArray.params];
     let query = `${issueSelect(`${PUBLIC_ISSUE_WHERE}${extraWhere === '' ? '' : ` AND (${extraWhere})`}`)}${exclusion}
        ORDER BY i.importance_score DESC NULLS LAST, i.freshness_score DESC NULLS LAST,
                 i.event_at DESC NULLS LAST, i.id`;
@@ -439,10 +467,15 @@ export class PostgresIssueQueryRepository implements IssueQueryRepository {
     params: unknown[],
     method: 'all' | 'get' | 'run',
   ): Promise<T[]> {
-    const result = (await this.entityManager
+    const manager = this.currentEntityManager();
+    const result = (await manager
       .getConnection()
-      .execute<T>(sql, params, method)) as unknown;
+      .execute<T>(sql, params, method, manager.getTransactionContext())) as unknown;
     return normalizeRows<T>(result, method);
+  }
+
+  private currentEntityManager(): EntityManager {
+    return this.entityManager.getContext(false);
   }
 }
 
@@ -458,6 +491,14 @@ function normalizeRows<T>(result: unknown, method: 'all' | 'get' | 'run'): T[] {
 
 const PUBLIC_ISSUE_WHERE =
   "i.publication_status = 'PUBLISHED' AND d.integrated_summary IS NOT NULL AND jsonb_typeof(d.summary_lines) = 'array' AND jsonb_array_length(d.summary_lines) = 3";
+
+// The current producer does not persist these fields. Keep the capability disabled explicitly
+// until its write contract is connected; using category/first entity as a fabricated substitute
+// would make the run-limit state look valid while silently changing its meaning.
+const POSTGRES_PRODUCER_METADATA_CAPABILITY = {
+  mainTopic: false,
+  representativeEntityId: false,
+} as const;
 
 interface CandidateSlice {
   where: string;
@@ -480,9 +521,10 @@ function buildCandidateSlices(scope: IssueCandidateScope): CandidateSlice[] {
   slices.push({ where: major.sql, params: major.params, weight: 0.2 });
 
   if (scope.connectedIssueIds.length > 0) {
+    const connected = postgresArrayCondition('i.id', scope.connectedIssueIds, 'uuid', 'ANY');
     slices.push({
-      where: 'i.id = ANY(?::uuid[])',
-      params: [scope.connectedIssueIds],
+      where: connected.sql,
+      params: connected.params,
       weight: 0.15,
     });
   }
@@ -492,9 +534,16 @@ function buildCandidateSlices(scope: IssueCandidateScope): CandidateSlice[] {
     ...scope.actedCategoryCodes,
   ]);
   if (excludedCategories.length > 0) {
+    const excluded = postgresArrayCondition(
+      'i.category_code',
+      excludedCategories,
+      'text',
+      'ALL',
+      '<>',
+    );
     slices.push({
-      where: 'i.category_code <> ALL(?::text[])',
-      params: [excludedCategories],
+      where: excluded.sql,
+      params: excluded.params,
       weight: 0.2,
     });
   }
@@ -517,20 +566,38 @@ function matchCondition(scope: IssueCandidateScope): {
   const clauses: string[] = [];
   const params: unknown[] = [];
   if (scope.selectedCategoryCodes.length > 0) {
-    clauses.push('i.category_code = ANY(?::text[])');
-    params.push(scope.selectedCategoryCodes);
+    const selectedCategories = postgresArrayCondition(
+      'i.category_code',
+      scope.selectedCategoryCodes,
+      'text',
+      'ANY',
+    );
+    clauses.push(selectedCategories.sql);
+    params.push(...selectedCategories.params);
   }
   if (scope.selectedEntityIds.length > 0) {
-    clauses.push(
-      'EXISTS (SELECT 1 FROM issue_entities ie WHERE ie.issue_id = i.id AND ie.entity_id = ANY(?::uuid[]))',
+    const selectedEntities = postgresArrayCondition(
+      'ie.entity_id',
+      scope.selectedEntityIds,
+      'uuid',
+      'ANY',
     );
-    params.push(scope.selectedEntityIds);
+    clauses.push(
+      `EXISTS (SELECT 1 FROM issue_entities ie WHERE ie.issue_id = i.id AND ${selectedEntities.sql})`,
+    );
+    params.push(...selectedEntities.params);
   }
   if (scope.preferredRegionCodes.length > 0) {
-    clauses.push(
-      "EXISTS (SELECT 1 FROM issue_impacts im WHERE im.issue_id = i.id AND im.target_type = 'REGION' AND im.target_value = ANY(?::text[]))",
+    const preferredRegions = postgresArrayCondition(
+      'im.target_value',
+      scope.preferredRegionCodes,
+      'text',
+      'ANY',
     );
-    params.push(scope.preferredRegionCodes);
+    clauses.push(
+      `EXISTS (SELECT 1 FROM issue_impacts im WHERE im.issue_id = i.id AND im.target_type = 'REGION' AND ${preferredRegions.sql})`,
+    );
+    params.push(...preferredRegions.params);
   }
   if (scope.ageGroup !== null) {
     clauses.push(
@@ -551,20 +618,39 @@ function mismatchCondition(scope: IssueCandidateScope): {
   const clauses: string[] = [];
   const params: unknown[] = [];
   if (scope.selectedCategoryCodes.length > 0) {
-    clauses.push('i.category_code <> ALL(?::text[])');
-    params.push(scope.selectedCategoryCodes);
+    const selectedCategories = postgresArrayCondition(
+      'i.category_code',
+      scope.selectedCategoryCodes,
+      'text',
+      'ALL',
+      '<>',
+    );
+    clauses.push(selectedCategories.sql);
+    params.push(...selectedCategories.params);
   }
   if (scope.selectedEntityIds.length > 0) {
-    clauses.push(
-      'EXISTS (SELECT 1 FROM issue_entities ie WHERE ie.issue_id = i.id) AND NOT EXISTS (SELECT 1 FROM issue_entities ie WHERE ie.issue_id = i.id AND ie.entity_id = ANY(?::uuid[]))',
+    const selectedEntities = postgresArrayCondition(
+      'ie.entity_id',
+      scope.selectedEntityIds,
+      'uuid',
+      'ANY',
     );
-    params.push(scope.selectedEntityIds);
+    clauses.push(
+      `EXISTS (SELECT 1 FROM issue_entities ie WHERE ie.issue_id = i.id) AND NOT EXISTS (SELECT 1 FROM issue_entities ie WHERE ie.issue_id = i.id AND ${selectedEntities.sql})`,
+    );
+    params.push(...selectedEntities.params);
   }
   if (scope.preferredRegionCodes.length > 0) {
-    clauses.push(
-      "EXISTS (SELECT 1 FROM issue_impacts im WHERE im.issue_id = i.id AND im.target_type = 'REGION') AND NOT EXISTS (SELECT 1 FROM issue_impacts im WHERE im.issue_id = i.id AND im.target_type = 'REGION' AND im.target_value = ANY(?::text[]))",
+    const preferredRegions = postgresArrayCondition(
+      'im.target_value',
+      scope.preferredRegionCodes,
+      'text',
+      'ANY',
     );
-    params.push(scope.preferredRegionCodes);
+    clauses.push(
+      `EXISTS (SELECT 1 FROM issue_impacts im WHERE im.issue_id = i.id AND im.target_type = 'REGION') AND NOT EXISTS (SELECT 1 FROM issue_impacts im WHERE im.issue_id = i.id AND im.target_type = 'REGION' AND ${preferredRegions.sql})`,
+    );
+    params.push(...preferredRegions.params);
   }
   if (scope.ageGroup !== null) {
     clauses.push(
@@ -580,6 +666,33 @@ function mismatchCondition(scope: IssueCandidateScope): {
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter((value) => value !== ''))];
+}
+
+type PostgresArrayType = 'text' | 'uuid';
+type PostgresArrayOperator = 'ANY' | 'ALL';
+
+function postgresArrayCondition(
+  column: string,
+  values: readonly string[],
+  type: PostgresArrayType,
+  operator: PostgresArrayOperator,
+  comparison = '=',
+): { sql: string; params: string[] } {
+  const expression = postgresArrayExpression(values, type);
+  return {
+    sql: `${column} ${comparison} ${operator}(${expression.sql})`,
+    params: expression.params,
+  };
+}
+
+function postgresArrayExpression(
+  values: readonly string[],
+  type: PostgresArrayType,
+): { sql: string; params: string[] } {
+  return {
+    sql: `ARRAY[${values.map(() => `?::${type}`).join(', ')}]::${type}[]`,
+    params: [...values],
+  };
 }
 
 function normalizeLimit(value: number): number {
@@ -603,8 +716,12 @@ function clamp01(value: number): number {
 }
 
 function issueSelect(where: string): string {
-  return `SELECT i.id::text AS id, i.title, i.category_code, c.name AS category_name,
-                 i.sub_category, NULL::text AS main_topic, NULL::text AS representative_entity_id,
+  const mainTopic = POSTGRES_PRODUCER_METADATA_CAPABILITY.mainTopic ? 'i.main_topic' : 'NULL::text';
+  const representativeEntityId = POSTGRES_PRODUCER_METADATA_CAPABILITY.representativeEntityId
+    ? 'i.representative_entity_id'
+    : 'NULL::text';
+  return `SELECT i.id::text AS id, i.title, i.category_code, c.display_name AS category_name,
+                 i.sub_category, ${mainTopic} AS main_topic, ${representativeEntityId} AS representative_entity_id,
                  i.event_at, i.publication_status, i.freshness_score, i.importance_score,
                  i.published_at, i.updated_at, d.integrated_summary, d.summary_lines,
                  d.viewpoints, d.glossary,
@@ -614,7 +731,10 @@ function issueSelect(where: string): string {
                              FROM issue_impacts im WHERE im.issue_id = i.id AND im.target_type = 'REGION'), '{}') AS region_codes,
                  COALESCE((SELECT array_agg(DISTINCT im.target_value)
                              FROM issue_impacts im WHERE im.issue_id = i.id AND im.target_type = 'AGE_GROUP'), '{}') AS age_groups,
-                 (SELECT count(DISTINCT ia.article_id)::int FROM issue_articles ia WHERE ia.issue_id = i.id) AS article_count
+                 (SELECT count(DISTINCT ia.article_id)::int
+                    FROM issue_articles ia
+                    JOIN articles count_article ON count_article.id = ia.article_id
+                   WHERE ia.issue_id = i.id AND count_article.source_status = 'AVAILABLE') AS article_count
             FROM issues i
             JOIN issue_categories c ON c.code = i.category_code
             LEFT JOIN issue_details d ON d.issue_id = i.id
@@ -676,6 +796,10 @@ function nullableString(value: unknown): string | null {
 function numberValue(value: unknown): number {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true || value === 'true' || value === 't';
 }
 
 function dateValue(value: unknown): Date {

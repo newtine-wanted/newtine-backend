@@ -1,16 +1,18 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
 
 import {
   ISSUE_QUERY_REPOSITORY,
   IssueException,
   IssueExceptionCode,
+  TRANSACTION_MANAGER,
   type FeedBatchRecord,
   type FeedOwner,
   type FeedSessionRecord,
   type IssueCandidateScope,
   type IssueRecord,
   type IssueQueryRepository,
+  type TransactionManager,
   type UserRecommendationContext,
   type UserInteractionRecord,
 } from '@newtine/core';
@@ -24,6 +26,9 @@ import type { FeedBatchInput, FeedOwnerInput } from './type/feed.input.js';
 import type { FeedBatchResult, FeedCardResult, FeedSessionResult } from './type/feed.output.js';
 
 const DEFAULT_LIMIT = DEFAULT_CANDIDATE_BUDGET;
+const PASSTHROUGH_TRANSACTION_MANAGER: TransactionManager = {
+  execute: (work) => work(),
+};
 
 @Injectable()
 export class IssueFeedService {
@@ -41,7 +46,16 @@ export class IssueFeedService {
     1,
   );
 
-  constructor(@Inject(ISSUE_QUERY_REPOSITORY) private readonly repository: IssueQueryRepository) {}
+  private readonly transactionManager: TransactionManager;
+
+  constructor(
+    @Inject(ISSUE_QUERY_REPOSITORY) private readonly repository: IssueQueryRepository,
+    @Inject(TRANSACTION_MANAGER) @Optional() transactionManager?: TransactionManager,
+  ) {
+    // Direct unit tests use the deterministic in-memory adapter without Nest's CoreModule. The
+    // production module always supplies MikroOrmTransactionManager through this token.
+    this.transactionManager = transactionManager ?? PASSTHROUGH_TRANSACTION_MANAGER;
+  }
 
   async createSession(ownerInput: FeedOwnerInput): Promise<FeedSessionResult> {
     // A guest session is always bound to a fresh, high-entropy bearer secret. The
@@ -58,7 +72,9 @@ export class IssueFeedService {
   }
 
   async getBatch(input: FeedBatchInput): Promise<FeedBatchResult> {
-    return this.withLock(input.sessionId, async () => this.getBatchLocked(input));
+    return this.withLock(input.sessionId, () =>
+      this.transactionManager.execute(() => this.getBatchLocked(input)),
+    );
   }
 
   private async getBatchLocked(input: FeedBatchInput): Promise<FeedBatchResult> {
