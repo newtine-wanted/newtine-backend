@@ -70,6 +70,45 @@ assert.equal(onboarding.completedAt, null);
 assert.equal(onboarding.ageGroup, null);
 assert.deepEqual(onboarding.regionCodes, []);
 
+const feedSessionResponse = await request('/feed-sessions', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Authorization: `Bearer ${signupBody.accessToken}`,
+  },
+  body: JSON.stringify({}),
+});
+assert.equal(feedSessionResponse.response.status, 200);
+const feedSession = parseJson(feedSessionResponse);
+assert.equal(feedSession.nextBatchNo, 0);
+assert.equal(Object.hasOwn(feedSession, 'guestKey'), false);
+
+const feedBatchResponse = await request(`/feed-sessions/${feedSession.sessionId}/batches`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Authorization: `Bearer ${signupBody.accessToken}`,
+  },
+  body: JSON.stringify({ batchNo: 0 }),
+});
+assert.equal(feedBatchResponse.response.status, 200);
+const feedBatch = parseJson(feedBatchResponse);
+assert.equal(feedBatch.sessionId, feedSession.sessionId);
+assert.equal(feedBatch.batchNo, 0);
+assert.ok(Array.isArray(feedBatch.items));
+
+const userPipelineResponse = await request('/pipeline/runs', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Authorization: `Bearer ${signupBody.accessToken}`,
+    'idempotency-key': `compose-user-pipeline-${Date.now()}`,
+  },
+  body: JSON.stringify({ query: '권한 경계 smoke' }),
+});
+assert.equal(userPipelineResponse.response.status, 403);
+assert.equal(parseJson(userPipelineResponse).code, 'FORBIDDEN');
+
 const login = await request('/auth/login', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
@@ -125,5 +164,5 @@ const idempotentLogout = await request('/auth/logout', {
 assert.equal(idempotentLogout.response.status, 204);
 
 console.log(
-  'Compose auth smoke passed: migration, signup, protected API, login, refresh rotation, reuse revoke, and logout',
+  'Compose auth smoke passed: migration, signup, protected API, member feed, login, refresh rotation, reuse revoke, and logout',
 );
