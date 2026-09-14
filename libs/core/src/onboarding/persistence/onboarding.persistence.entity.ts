@@ -1,29 +1,6 @@
 import { defineEntity, p, type EntitySchema } from '@mikro-orm/core';
 
-/**
- * Metadata for the existing users table plus the onboarding age-group delta.
- *
- * The table is owned by the application's base schema. This module only
- * describes the columns consumed by onboarding; it does not create the table.
- */
-export const UserSchema = defineEntity({
-  name: 'OnboardingUser',
-  tableName: 'users',
-  properties: {
-    id: p.uuid().primary(),
-    email: p.text().nullable(),
-    passwordHash: p.text().fieldName('password_hash').nullable(),
-    role: p.text().fieldName('role'),
-    onboardingStatus: p.text().fieldName('onboarding_status'),
-    onboardingCompletedAt: p
-      .datetime()
-      .fieldName('onboarding_completed_at')
-      .columnType('timestamptz')
-      .nullable(),
-    ageGroup: p.text().fieldName('age_group').nullable(),
-    createdAt: p.datetime().fieldName('created_at').columnType('timestamptz'),
-  },
-});
+export { UserSchema } from '../../user/persistence/user.persistence.entity.js';
 
 /** Metadata for the existing entities master table. */
 export const OnboardingEntitySchema = defineEntity({
@@ -141,7 +118,6 @@ export const UserRegionPreferenceSchema = defineEntity({
  * does not make decorators available to the core library.
  */
 export const ONBOARDING_PERSISTENCE_ENTITIES = [
-  UserSchema,
   OnboardingEntitySchema,
   IssueCategorySchema,
   UserCategoryPreferenceSchema,

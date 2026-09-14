@@ -1,17 +1,37 @@
-import { defineEntity, p, type EntitySchema } from '@mikro-orm/core';
+import { EntitySchema, type EntitySchema as EntitySchemaType } from '@mikro-orm/core';
+
+export interface RefreshSessionPersistenceEntity {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
 
 /** Metadata for the opaque refresh-token session table. */
-export const RefreshSessionSchema = defineEntity({
+export const RefreshSessionSchema = new EntitySchema<RefreshSessionPersistenceEntity>({
   name: 'RefreshSession',
   tableName: 'refresh_sessions',
   properties: {
-    id: p.uuid().primary(),
-    userId: p.uuid().fieldName('user_id'),
-    tokenHash: p.text().fieldName('token_hash'),
-    expiresAt: p.datetime().fieldName('expires_at').columnType('timestamptz'),
-    usedAt: p.datetime().fieldName('used_at').columnType('timestamptz').nullable(),
-    revokedAt: p.datetime().fieldName('revoked_at').columnType('timestamptz').nullable(),
-    createdAt: p.datetime().fieldName('created_at').columnType('timestamptz'),
+    id: { type: String, columnType: 'uuid', primary: true },
+    userId: { type: String, columnType: 'uuid', fieldName: 'user_id' },
+    tokenHash: { type: String, fieldName: 'token_hash' },
+    expiresAt: { type: Date, fieldName: 'expires_at', columnType: 'timestamptz' },
+    usedAt: {
+      type: Date,
+      fieldName: 'used_at',
+      columnType: 'timestamptz',
+      nullable: true,
+    },
+    revokedAt: {
+      type: Date,
+      fieldName: 'revoked_at',
+      columnType: 'timestamptz',
+      nullable: true,
+    },
+    createdAt: { type: Date, fieldName: 'created_at', columnType: 'timestamptz' },
   },
   uniques: [
     {
@@ -29,4 +49,4 @@ export const RefreshSessionSchema = defineEntity({
 
 export const AUTH_PERSISTENCE_ENTITIES = [
   RefreshSessionSchema,
-] as const satisfies readonly EntitySchema[];
+] as const satisfies readonly EntitySchemaType[];

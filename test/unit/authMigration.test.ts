@@ -3,7 +3,7 @@ import { test } from '@jest/globals';
 
 import { Migration20260914000000Authentication } from '@newtine/core/auth/migrations/Migration20260914000000Authentication.js';
 
-test('authentication migration removes kakao_id and establishes local credential/session invariants', () => {
+test('인증 migration이 kakao_id를 제거하고 로컬 자격 증명·세션 불변식을 설정한다', () => {
   const migration = new Migration20260914000000Authentication(
     undefined as never,
     undefined as never,
@@ -20,7 +20,7 @@ test('authentication migration removes kakao_id and establishes local credential
   assert.match(sql, /refresh_sessions_user_fk/);
 });
 
-test('authentication migration refuses an automatic down migration because credential data is irreversible', () => {
+test('인증 migration이 credential 데이터의 비가역성 때문에 자동 down migration을 거부한다', () => {
   const migration = new Migration20260914000000Authentication(
     undefined as never,
     undefined as never,

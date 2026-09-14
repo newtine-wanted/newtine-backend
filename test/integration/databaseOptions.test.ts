@@ -11,12 +11,14 @@ import { AiUsageRecordEntity } from '@newtine/core/pipeline/repository/mikroOrm/
 import { Migration20260913000001CategoryCodePrimaryKey } from '@newtine/core/pipeline/migrations/Migration20260913000001CategoryCodePrimaryKey.js';
 import { Migration202609130001Pipeline } from '@newtine/core/pipeline/migrations/Migration202609130001Pipeline.js';
 import { Migration202609130002PipelineEmbeddingTasks } from '@newtine/core/pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
+import { USER_PERSISTENCE_ENTITIES } from '@newtine/core/user/persistence/user.persistence.entity.js';
 
 test('database options never enable automatic database creation', () => {
   const options = createDatabaseOptions({ NODE_ENV: 'test' });
 
   assert.equal(options.ensureDatabase, false);
   assert.deepEqual(options.entities, [
+    ...USER_PERSISTENCE_ENTITIES,
     ...ONBOARDING_PERSISTENCE_ENTITIES,
     AiUsageRecordEntity,
     ...AUTH_PERSISTENCE_ENTITIES,

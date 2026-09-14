@@ -9,7 +9,7 @@ import { MikroOrmPipelineRepository } from '@newtine/core/pipeline/repository/mi
 import { PIPELINE_RUN_REPOSITORY } from '@newtine/core/pipeline/repository/pipeline.repository.js';
 import { ONBOARDING_REPOSITORY } from '@newtine/core/onboarding/onboarding.model.js';
 import { PostgresOnboardingRepository } from '@newtine/core/onboarding/postgresOnboarding.repository.js';
-import { AUTH_REPOSITORY } from '@newtine/core/auth/auth.model.js';
+import { AUTH_REPOSITORY } from '@newtine/core/auth/repository/auth.repository.js';
 import { PostgresAuthRepository } from '@newtine/core/auth/postgresAuth.repository.js';
 
 @Module({
