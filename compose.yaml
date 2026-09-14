@@ -9,6 +9,7 @@ services:
       - "127.0.0.1:${DB_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
+      - ./compose/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -p 5432 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 5s
@@ -20,7 +21,7 @@ services:
     build:
       context: .
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-production}
       API_HOST: 0.0.0.0
       API_PORT: "3000"
       DB_HOST: db
@@ -30,11 +31,18 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_SLOW_THRESHOLD_MS: ${HTTP_SLOW_THRESHOLD_MS:-1000}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env or the environment}
+      JWT_ISSUER: ${JWT_ISSUER:-newtine-api}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-newtine-client}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      AUTH_ALLOWED_ORIGINS: ${AUTH_ALLOWED_ORIGINS:-}
     ports:
       - "127.0.0.1:${API_PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -47,6 +55,22 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  migrate:
+    build:
+      context: .
+    command: ["node", "scripts/migrate.mjs", "up"]
+    environment:
+      NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-newtine}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
 
   batch:
     profiles:
