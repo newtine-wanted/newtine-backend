@@ -1,3 +1,8 @@
+import { Migration } from '@mikro-orm/migrations';
+
+export class Migration202609130002PipelineEmbeddingTasks extends Migration {
+  override up(): void {
+    this.addSql(String.raw`
 -- Durable, privacy-safe embedding repair work. The task stores only the
 -- published issue fields needed to reconstruct the embedding input.
 create table if not exists issue_embedding_tasks (
@@ -88,3 +93,14 @@ create index if not exists issue_embedding_tasks_pending_idx
 create index if not exists issue_embedding_tasks_claim_owner_idx
   on issue_embedding_tasks (status, claimed_by_process_execution_id)
   where status = 'RUNNING';
+    `);
+  }
+
+  override down(): void {
+    throw new Error(
+      'Pipeline embedding task migration is intentionally irreversible; review data removal before reverting it.',
+    );
+  }
+}
+
+export default Migration202609130002PipelineEmbeddingTasks;

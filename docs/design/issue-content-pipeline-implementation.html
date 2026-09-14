@@ -21,7 +21,7 @@
   </head>
   <body>
     <header>
-      <p>구현 제어 · 구현 완료(운영 공개 보류) · 재검토에서 수정 필요 finding 확인 · G24~G27 hardening 중 G26은 후속 보완 · High-risk(동시성·공개·외부 호출·복구·예외 경계)</p>
+      <p>구현 제어 · 구현 준비 · PR #2 최신 main 통합·migration 단일 runner 개선 진행 · 기존 G24~G27 hardening 중 G26은 후속 보완 · High-risk(동시성·공개·외부 호출·복구·예외 경계)</p>
       <h1>이슈·기사 콘텐츠 생성 파이프라인 구현 제어</h1>
       <p>설계 승인 이후 실제 변경, 검증 증거, 잔여 위험을 기록하는 living artifact다.</p>
       <dl>
@@ -30,7 +30,7 @@
         <dt>문제</dt><dd>승인된 파이프라인 계약을 API·워커·영속 경계로 구현하고 검증</dd>
         <dt>핵심 흐름</dt><dd>API 접수 → 단일 워커 선점 → SEARCH·FETCH·GENERATE·VALIDATE → 원자 공개·집계 → 수동 embedding repair</dd>
         <dt>기준 설계</dt><dd><a href="issue-content-pipeline-design.html">issue-content-pipeline-design.html</a></dd>
-        <dt>승인 시각</dt><dd><time datetime="2026-09-13">2026-09-13</time> · 사용자 “설계대로 구현 ㄱㄱ”, G22 “개선 ㄱㄱ”, G23 “구현 시작”, hardening “시작”</dd>
+        <dt>승인 시각</dt><dd><time datetime="2026-09-13">2026-09-13</time> 기존 pipeline 승인 · <time datetime="2026-09-14">2026-09-14</time> G28-A·G30-B·G31-A·G32-A 통합 설계 승인 · 사용자 “개선 ㄱ”</dd>
       </dl>
     </header>
     <nav aria-label="문서 탐색">
@@ -67,12 +67,12 @@
             <li><code>apps/batch/src/pipeline</code>: 단일 worker 조정, 네이버/OpenAI 어댑터, 단계별 실패 분류와 사용량 메타데이터.</li>
             <li>외부 adapter 실패는 <code>PipelineException</code>의 pipeline 의미 코드로 통일하고, retryable은 worker 내부 메타데이터로만 사용한다. provider HTTP/SDK 상세는 API·job 계약에 노출하지 않는다.</li>
             <li><code>POST/GET/POST retry/POST interrupt /pipeline/runs</code>와 generated SDK·E2E·OpenAPI를 계약 산출물에 반영했다. 운영자가 <code>executionId</code>로 종료를 확인한 뒤 중단 처리하고 재시도할 수 있다. CONTENT 재시도는 필수·최소 1건의 <code>failedJobIds</code>로 선택된 실패 job만 <code>retry_scope/retry_job_ids</code>에 기록하고 discovery를 건너뛰어 재확보한다. 임베딩 실패는 콘텐츠 성공을 되돌리지 않고 <code>embeddingPendingCount</code>로 표시한다.</li>
-            <li><code>libs/core/src/common/database/migration</code>: 자동 schema sync 없이 적용하는 SQL. 본문·프롬프트·원시 응답 컬럼은 만들지 않는다.</li>
+            <li><code>libs/core/src/pipeline/migrations</code>: MikroORM migration 클래스와 명시적 등록 순서로 온보딩·파이프라인 schema를 적용한다. <code>npm run db:migrate</code> 단일 runner를 사용하고, 본문·프롬프트·원시 응답 컬럼은 만들지 않는다.</li>
           </ul>
         </section>
         <section id="status">
           <h2>구현 상태</h2>
-          <p id="lifecycle">현재 lifecycle: 구현 완료(운영 공개 보류) · 구현 제어 상태: 운영 제어 보류</p>
+          <p id="lifecycle">현재 lifecycle: 구현 완료(운영 공개 보류) · 구현 제어 상태: 구현 완료(운영 공개 보류)</p>
           <table>
             <caption>완료 기준</caption>
             <thead><tr><th>검사 대상</th><th>통과 조건</th><th>현재 증거</th></tr></thead>
@@ -176,7 +176,7 @@ npm run test:smoke</code></pre>
               </tr>
               <tr>
                 <th scope="row">PIPE-REV-008<br><code>open</code> · Blocker</th>
-                <td>현재 <code>test/integration/pipelineLifecycle.test.ts</code>는 <code>InMemoryPipelineRepository</code>만 실행한다. 명시적 SQL migration을 적용하는 npm/배포 단계도 저장소에 연결되어 있지 않고, <code>saveJobSuccess</code>↔<code>interrupt</code> 경합·동시 retry의 실제 PostgreSQL 행 잠금·반환 행 수 실행 증거가 없다.</td>
+                <td>현재 <code>test/integration/pipelineLifecycle.test.ts</code>는 <code>InMemoryPipelineRepository</code>만 실행한다. MikroORM migration을 적용하는 npm/배포 단계와 연결은 추가했지만, <code>saveJobSuccess</code>↔<code>interrupt</code> 경합·동시 retry의 실제 PostgreSQL 행 잠금·반환 행 수 실행 증거가 없다.</td>
                 <td>격리 PostgreSQL에서 migration을 적용하고 배포 단계에 적용 명령/검증을 연결한 뒤, 두 transaction 경쟁·partial unique index·WITHDRAWN 경계를 자동 검증해야 운영 공개 수용이 가능하다.</td>
               </tr>
               <tr>
@@ -411,6 +411,23 @@ npm run test:smoke</code></pre>
             <dt>Residual risk</dt><dd>실제 provider의 모든 오류 payload는 자격증명 없는 환경에서 확인할 수 없으므로 HTTP 표본 검증은 운영 수용 단계에 남긴다.</dd>
           </dl>
           <p><strong>implementation-control-state: 구현 완료(운영 공개 보류).</strong> G23 코드 수정과 검증 결과를 반영했다. 실제 provider 오류 payload와 PostgreSQL 표본 실행은 기존 운영 수용 보류를 유지한다.</p>
+        </section>
+        <section id="pr-integration-implementation-control">
+          <h2>PR #2 최신 main 통합·migration 단일 runner 구현 제어</h2>
+          <p><strong>implementation-control-state: 구현 완료(운영 공개 보류).</strong> 설계 기준 <a href="issue-content-pipeline-design.html#pr-conflict-integration">PR 통합 설계</a>의 승인된 범위를 구현했다. 이 섹션은 기존 pipeline 구현 기록을 대체하지 않고, 최신 main 통합에 대한 새 lifecycle과 issue-register를 기록한다.</p>
+          <dl>
+            <dt>Baseline reference</dt><dd>PR #2 head <code>c9c81a5</code>, latest base <code>origin/main=4634e1c</code>, approved G28-A/G30-B/G31-A/G32-A.</dd>
+            <dt>Approved scope</dt><dd>PR branch에 최신 main merge, 13개 공통 충돌 파일의 온보딩·pipeline 합집합 해소, pipeline SQL 2개의 TypeScript <code>Migration</code> 변환, onboarding → pipeline → embedding-task ordered <code>migrationsList</code> 등록, generated 계약 재생성, 양쪽 기능을 보호하는 회귀 assertion 추가.</dd>
+            <dt>Forbidden changes</dt><dd>pipeline 공개 API·retry/interrupt 계약·상태 머신·본문 미저장 정책·JWT 범위 변경, destructive <code>down()</code>, 현재 <code>main</code> worktree의 미커밋 변경 수정, GitHub push.</dd>
+            <dt>Invariants</dt><dd>온보딩과 pipeline controller·provider·entity·migration이 모두 등록된다. generated SDK/e2e/OpenAPI에 두 API 집합이 모두 존재한다. migration up은 한 runner에서 순서대로 적용되고 재실행 시 seed·idempotent 보정이 안전해야 한다. pipeline migration down은 데이터 삭제 없이 명시적으로 중단한다.</dd>
+            <dt>Verification plan</dt><dd><code>git diff --check</code>, conflict marker 검색, <code>npm install</code>(lockfile 기준), <code>npm test</code>(unit 15 suites/79 tests, integration 2 suites/8 tests), <code>npm run typecheck</code>, <code>npm run build</code>, <code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run contracts:check</code>를 통과했다. 격리 PostgreSQL에서 migration up·재실행·down 실패 경계를 확인하는 운영 수용은 아직 보류한다.</dd>
+            <dt>Design delta</dt><dd>기존 PR은 pipeline raw SQL을 별도 명시 적용했지만, 이번 승인으로 <code>db:migrate</code> 단일 runner가 pipeline schema까지 소유한다. migration 표현과 down semantics만 변경하며 API·pipeline runtime behavior는 변경하지 않는다.</dd>
+            <dt>Developer operational understanding</dt><dd>미실시. 구현 후 migration 실패 시 첫 증거, 재실행 조건, irreversible down의 안전한 복구 절차를 별도 점검한다.</dd>
+          </dl>
+          <table><caption>통합 issue-register</caption><thead><tr><th>ID</th><th>상태</th><th>증상·영향</th><th>조치·증거</th><th>잔여 위험/다음 조치</th></tr></thead><tbody>
+            <tr><td>PR2-INT-001</td><td>해결됨</td><td>최신 main과 PR의 공통 통합 파일이 충돌해 한쪽 기능을 잃을 수 있음.</td><td>G28-A에 따라 merge 후 온보딩·pipeline 모듈/예외/exports를 합집합으로 해결하고 generated SDK·e2e·OpenAPI를 재생성했다. 계약 테스트·typecheck·build로 양쪽 endpoint를 확인했다.</td><td>GitHub push 및 원격 PR 상태 갱신은 사용자 승인 범위 밖이라 수행하지 않았다.</td></tr>
+            <tr><td>PR2-MIG-001</td><td>구현 완료·운영 보류</td><td>pipeline raw SQL이 기존 MikroORM migration history 밖에 있음.</td><td>G31-A로 두 SQL을 TypeScript <code>Migration</code> 클래스로 변환하고, G30-B에 따라 onboarding → pipeline → embedding-task를 하나의 <code>migrationsList</code>와 <code>db:migrate</code> runner로 등록했다. G32-A에 따라 <code>down()</code>은 명시적으로 중단한다.</td><td>실제 PostgreSQL/pgvector에서 fresh up·재실행·down 실패 경계를 확인해야 운영 수용을 닫을 수 있다.</td></tr>
+          </tbody></table>
         </section>
         <section id="hardening-implementation-control">
           <h2>G24~G27 hardening 구현 제어</h2>

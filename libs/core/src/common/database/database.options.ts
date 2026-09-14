@@ -1,7 +1,12 @@
 import type { MikroOrmModuleOptions } from '@mikro-orm/nestjs';
+import { Migrator } from '@mikro-orm/migrations';
 import { PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { AiUsageRecordEntity } from '@newtine/core/pipeline/repository/mikroOrm/aiUsageRecord.entity.js';
 import { DatabaseConfigurationException } from './databaseConfiguration.exception.js';
+import { ONBOARDING_PERSISTENCE_ENTITIES } from '../../onboarding/persistence/onboarding.persistence.entity.js';
+import { Migration20260913000000OnboardingPersistence } from '../../onboarding/migrations/Migration20260913000000OnboardingPersistence.js';
+import { Migration202609130001Pipeline } from '../../pipeline/migrations/Migration202609130001Pipeline.js';
+import { Migration202609130002PipelineEmbeddingTasks } from '../../pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
 
 export function createDatabaseOptions(
   env: NodeJS.ProcessEnv = process.env,
@@ -28,8 +33,22 @@ export function createDatabaseOptions(
     dbName: required('DB_NAME', 'newtine'),
     user: required('DB_USER', 'postgres'),
     password: required('DB_PASSWORD', 'postgres'),
-    entities: [AiUsageRecordEntity],
-    entitiesTs: [AiUsageRecordEntity],
+    entities: [...ONBOARDING_PERSISTENCE_ENTITIES, AiUsageRecordEntity],
+    entitiesTs: [...ONBOARDING_PERSISTENCE_ENTITIES, AiUsageRecordEntity],
+    extensions: [Migrator],
+    migrations: {
+      path: './dist/libs/core/src/pipeline/migrations',
+      pathTs: './libs/core/src/pipeline/migrations',
+      glob: '!(*.d).{js,ts}',
+      emit: 'ts',
+      migrationsList: [
+        Migration20260913000000OnboardingPersistence,
+        Migration202609130001Pipeline,
+        Migration202609130002PipelineEmbeddingTasks,
+      ],
+      transactional: true,
+      allOrNothing: true,
+    },
     discovery: { warnWhenNoEntities: false },
     allowGlobalContext: false,
     ensureDatabase: false,

@@ -1,5 +1,6 @@
 import { IssueExceptionCode, PipelineExceptionCode } from '@newtine/core';
 import type { DomainException } from '@newtine/core';
+import { OnboardingExceptionCode } from '@newtine/core';
 
 import {
   ApiException,
@@ -18,6 +19,10 @@ const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionS
     [PipelineExceptionCode.StaleAttempt]: ApiException.Conflict,
     [PipelineExceptionCode.RetryNotAllowed]: ApiException.Conflict,
     [PipelineExceptionCode.ClaimConflict]: ApiException.Conflict,
+  },
+  onboarding: {
+    [OnboardingExceptionCode.UserNotFound]: ApiException.Unauthorized,
+    [OnboardingExceptionCode.InvalidSelection]: ApiException.InvalidArgument,
   },
 };
 

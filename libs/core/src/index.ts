@@ -102,3 +102,38 @@ export type {
   NewsSearchProvider,
   SemanticValidator,
 } from './pipeline/domain/pipeline.ports.js';
+export {
+  AgeGroup,
+  EntityType,
+  OnboardingStatus,
+  ONBOARDING_REPOSITORY,
+} from './onboarding/onboarding.model.js';
+export type {
+  AgeGroupValue,
+  EntityTypeValue,
+  EntitySearchCommand,
+  EntitySearchResult,
+  OnboardingEntity,
+  OnboardingOptions,
+  OnboardingRepository,
+  OnboardingState,
+  OnboardingStateWithPreferences,
+  MaybePromise,
+  OnboardingTopicOption,
+  RegionOption,
+  CompleteOnboardingCommand,
+} from './onboarding/onboarding.model.js';
+export { OnboardingException, OnboardingExceptionCode } from './onboarding/onboarding.exception.js';
+export type { OnboardingExceptionCodeValue } from './onboarding/onboarding.exception.js';
+export {
+  ONBOARDING_AGE_GROUPS,
+  ONBOARDING_OPTIONS,
+  ONBOARDING_REGIONS,
+  ONBOARDING_TOPICS,
+} from './onboarding/onboarding.options.js';
+export {
+  DEFAULT_ONBOARDING_ENTITY_FIXTURES,
+  InMemoryOnboardingRepository,
+} from './onboarding/inMemoryOnboarding.repository.js';
+export { InMemoryOnboardingTransactionManager } from './onboarding/inMemoryOnboarding.transactionManager.js';
+export { PostgresOnboardingRepository } from './onboarding/postgresOnboarding.repository.js';

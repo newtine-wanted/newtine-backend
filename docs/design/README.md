@@ -32,6 +32,9 @@
 | [견고성 구현 제어](foundationRobustness.implementation.html)        | 보완 구현과 검증 결과                  |
 | [로깅 설계](logging.design.html)                                    | 구조화 로그·요청 지연 기록 설계        |
 | [로깅 구현 제어](logging.implementation.html)                       | 로깅 구현과 검증 결과                  |
+| [온보딩 API 설계](onboarding-api-design.html)                       | 승인된 온보딩 HTTP·상태·선호 계약      |
+| [온보딩 persistence 설계](onboarding-persistence-design.html)       | PostgreSQL schema delta·migration 경계  |
+| [온보딩 API 구현 제어](onboarding-api-implementation.html)          | 구현 범위·검증 증거·운영 보류           |
 
 구현 제어 문서는 설계 승인 이후 실제 변경과 검증을 기록한다. 새로운 정책을 추가하거나 기존 결정을
 바꿀 때는 먼저 [의사결정 기록](../decisions/README.md)을 갱신한다.

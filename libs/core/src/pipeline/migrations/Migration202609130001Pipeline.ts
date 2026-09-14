@@ -1,3 +1,8 @@
+import { Migration } from '@mikro-orm/migrations';
+
+export class Migration202609130001Pipeline extends Migration {
+  override up(): void {
+    this.addSql(String.raw`
 -- Pipeline v1.3. Apply explicitly with the project's migration runner.
 -- No article body, prompt, generated input, or raw provider response is stored.
 
@@ -163,3 +168,14 @@ create table if not exists issue_embeddings (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+    `);
+  }
+
+  override down(): void {
+    throw new Error(
+      'Pipeline schema migration is intentionally irreversible; review data removal before reverting it.',
+    );
+  }
+}
+
+export default Migration202609130001Pipeline;

@@ -7,6 +7,8 @@ import { TRANSACTION_MANAGER } from '@newtine/core/common/transaction/transactio
 import { PipelineRunService } from '@newtine/core/pipeline/application/pipeline.run.service.js';
 import { MikroOrmPipelineRepository } from '@newtine/core/pipeline/repository/mikroOrmPipeline.repository.js';
 import { PIPELINE_RUN_REPOSITORY } from '@newtine/core/pipeline/repository/pipeline.repository.js';
+import { ONBOARDING_REPOSITORY } from '@newtine/core/onboarding/onboarding.model.js';
+import { PostgresOnboardingRepository } from '@newtine/core/onboarding/postgresOnboarding.repository.js';
 
 @Module({
   imports: [MikroOrmModule.forRootAsync({ useFactory: () => createDatabaseOptions() })],
@@ -22,7 +24,16 @@ import { PIPELINE_RUN_REPOSITORY } from '@newtine/core/pipeline/repository/pipel
       provide: PIPELINE_RUN_REPOSITORY,
       useExisting: MikroOrmPipelineRepository,
     },
+    {
+      provide: ONBOARDING_REPOSITORY,
+      useClass: PostgresOnboardingRepository,
+    },
   ],
-  exports: [TRANSACTION_MANAGER, PIPELINE_RUN_REPOSITORY, PipelineRunService],
+  exports: [
+    TRANSACTION_MANAGER,
+    ONBOARDING_REPOSITORY,
+    PIPELINE_RUN_REPOSITORY,
+    PipelineRunService,
+  ],
 })
 export class CoreModule {}
