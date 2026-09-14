@@ -290,9 +290,9 @@ access JWT를 JSON으로 반환하고 `newtine_refresh` HttpOnly cookie를 설�
 cookie를 회전하고 새 access JWT를 반환하며, `POST /auth/logout`은 현재 refresh session만 revoke하고
 cookie를 삭제합니다. access JWT는 `Authorization: Bearer <token>`으로 `/me/**` 요청에 사용합니다.
 
-signup은 모든 계정을 `USER`로 만들며, `ADMIN` role은 운영자 절차로만 부여됩니다. 이번 범위에는
-소셜 로그인과 `kakao_id`가 없습니다. 인증 migration은 기존 base schema/data를 확인한 뒤 적용해야 하며,
-`kakao_id` 제거와 credential 상태 때문에 자동 down을 제공하지 않습니다.
+signup은 모든 계정을 `USER`로 만들며, `ADMIN` role은 운영자 절차로만 부여됩니다.
+자세한 인증·인가 정책과 migration 적용 조건은
+[인증·인가 설계 문서](docs/design/authentication-authorization-design.html)를 참고하세요.
 
 ## 구조
 
