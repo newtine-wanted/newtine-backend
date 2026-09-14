@@ -55,17 +55,7 @@ export class NaverNewsProvider implements NewsSearchProvider {
       );
     }
 
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch (error: unknown) {
-      if (isTimeoutError(error))
-        throw pipelineExternalException(PipelineExceptionCode.UpstreamError, {
-          retryable: true,
-          cause: error,
-        });
-      throw pipelineExternalException(PipelineExceptionCode.InvalidOutput);
-    }
+    const body = await readJsonBody(response);
     if (!isRecord(body) || !Array.isArray(body.items))
       throw pipelineExternalException(PipelineExceptionCode.InvalidOutput);
     return body.items.flatMap((item) => toArticle(item));
@@ -110,6 +100,7 @@ export class NaverArticleBodyProvider implements ArticleBodyProvider {
       if (error instanceof PipelineException) throw error;
       throw pipelineExternalException(PipelineExceptionCode.UpstreamError, {
         retryable: true,
+        resultUncertain: true,
         cause: error,
       });
     }
@@ -133,6 +124,7 @@ async function fetchOnce(url: URL, init: RequestInit, timeoutMs = 10_000): Promi
   } catch (error: unknown) {
     throw pipelineExternalException(PipelineExceptionCode.UpstreamError, {
       retryable: true,
+      resultUncertain: true,
       cause: error,
     });
   }
@@ -284,6 +276,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isTimeoutError(value: unknown): boolean {
-  return value instanceof Error && (value.name === 'AbortError' || value.name === 'TimeoutError');
+async function readJsonBody(response: Response): Promise<unknown> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch (error: unknown) {
+    throw pipelineExternalException(PipelineExceptionCode.UpstreamError, {
+      retryable: true,
+      resultUncertain: true,
+      cause: error,
+    });
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error: unknown) {
+    throw pipelineExternalException(PipelineExceptionCode.InvalidOutput, { cause: error });
+  }
 }

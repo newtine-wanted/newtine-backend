@@ -21,12 +21,12 @@ export class BatchRunner {
     this.logger.setContext(BatchRunner.name);
   }
 
-  async run(jobName: string | undefined): Promise<number> {
+  async run(jobName: string | undefined, signal?: AbortSignal): Promise<number> {
     const processExecutionId = generateUuidV7();
     const normalizedJobName = jobName ?? '(missing)';
 
     return this.logger.runInContext(
-      () => this.runInContext(normalizedJobName, processExecutionId),
+      () => this.runInContext(normalizedJobName, processExecutionId, signal),
       {
         bindings: { processExecutionId, jobName: normalizedJobName },
       },
@@ -36,16 +36,17 @@ export class BatchRunner {
   private async runInContext(
     jobName: string,
     processExecutionId: ReturnType<typeof generateUuidV7>,
+    signal?: AbortSignal,
   ): Promise<number> {
     if (jobName !== DATABASE_CHECK_JOB) {
       if (jobName === PIPELINE_WORKER_JOB && this.pipelineBatchJob !== undefined) {
-        return this.runPipelineWorker(processExecutionId);
+        return this.runPipelineWorker(processExecutionId, signal);
       }
       if (
         jobName === PIPELINE_EMBEDDING_REPAIR_JOB &&
         this.pipelineEmbeddingRepairJob !== undefined
       ) {
-        return this.runEmbeddingRepair(processExecutionId);
+        return this.runEmbeddingRepair(processExecutionId, signal);
       }
       this.logger.error({ event: 'batch.unknown_job' }, 'Unknown batch job');
       return 1;
@@ -76,11 +77,12 @@ export class BatchRunner {
 
   private async runPipelineWorker(
     processExecutionId: ReturnType<typeof generateUuidV7>,
+    signal?: AbortSignal,
   ): Promise<number> {
     const startedAt = process.hrtime.bigint();
     this.logger.info({ event: 'batch.pipeline_worker.started' }, 'Pipeline worker started');
     try {
-      await this.pipelineBatchJob!.run(processExecutionId);
+      await this.pipelineBatchJob!.run(processExecutionId, signal);
       this.logger.info(
         { event: 'batch.pipeline_worker.completed', durationMs: elapsedMilliseconds(startedAt) },
         'Pipeline worker completed',
@@ -101,6 +103,7 @@ export class BatchRunner {
 
   private async runEmbeddingRepair(
     processExecutionId: ReturnType<typeof generateUuidV7>,
+    signal?: AbortSignal,
   ): Promise<number> {
     const startedAt = process.hrtime.bigint();
     this.logger.info(
@@ -111,6 +114,7 @@ export class BatchRunner {
       await this.pipelineEmbeddingRepairJob!.run(
         processExecutionId,
         resolveReclaimProcessExecutionId(),
+        signal,
       );
       this.logger.info(
         {

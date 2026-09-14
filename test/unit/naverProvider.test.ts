@@ -30,6 +30,54 @@ test('Naver adapter translates missing credentials into a pipeline exception', a
   }
 });
 
+test('Naver search separates response body transport failures from malformed JSON', async () => {
+  const previousClientId = process.env.NAVER_CLIENT_ID;
+  const previousClientSecret = process.env.NAVER_CLIENT_SECRET;
+  const previousFetch = globalThis.fetch;
+  process.env.NAVER_CLIENT_ID = 'test-client-id';
+  process.env.NAVER_CLIENT_SECRET = 'test-client-secret';
+  try {
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"items":'));
+            controller.error(new Error('connection reset while reading response'));
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    await assert.rejects(
+      () => new NaverNewsProvider().search('정책', 1),
+      (error: unknown) =>
+        error instanceof PipelineException &&
+        error.code === PipelineExceptionCode.UpstreamError &&
+        error.retryable === true &&
+        error.resultUncertain === true,
+    );
+
+    globalThis.fetch = async () =>
+      new Response('{"items":', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    await assert.rejects(
+      () => new NaverNewsProvider().search('정책', 1),
+      (error: unknown) =>
+        error instanceof PipelineException &&
+        error.code === PipelineExceptionCode.InvalidOutput &&
+        error.retryable === false &&
+        error.resultUncertain === false,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousClientId === undefined) delete process.env.NAVER_CLIENT_ID;
+    else process.env.NAVER_CLIENT_ID = previousClientId;
+    if (previousClientSecret === undefined) delete process.env.NAVER_CLIENT_SECRET;
+    else process.env.NAVER_CLIENT_SECRET = previousClientSecret;
+  }
+});
+
 test('Naver article adapter rejects redirects outside the Naver allowlist', async () => {
   const previousFetch = globalThis.fetch;
   let calls = 0;

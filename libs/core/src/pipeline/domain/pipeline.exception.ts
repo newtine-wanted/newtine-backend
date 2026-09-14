@@ -26,11 +26,14 @@ export type PipelineExternalExceptionCode =
 export interface PipelineExceptionOptions extends ErrorOptions {
   /** Internal worker hint; never part of an API response or persisted failure code. */
   readonly retryable?: boolean;
+  /** True only when the provider result is not known to have been accepted or rejected. */
+  readonly resultUncertain?: boolean;
 }
 
 export class PipelineException extends DomainException<PipelineExceptionCodeValue> {
   readonly domain = 'pipeline';
   readonly retryable: boolean;
+  readonly resultUncertain: boolean;
 
   constructor(
     code: PipelineExceptionCodeValue,
@@ -39,6 +42,7 @@ export class PipelineException extends DomainException<PipelineExceptionCodeValu
   ) {
     super(code, message, options);
     this.retryable = options?.retryable ?? false;
+    this.resultUncertain = options?.resultUncertain ?? false;
   }
 }
 
@@ -51,7 +55,7 @@ const PIPELINE_EXTERNAL_MESSAGES: Record<PipelineExternalExceptionCode, string> 
 
 export function pipelineExternalException(
   code: PipelineExternalExceptionCode,
-  options: Pick<PipelineExceptionOptions, 'cause' | 'retryable'> = {},
+  options: Pick<PipelineExceptionOptions, 'cause' | 'retryable' | 'resultUncertain'> = {},
 ): PipelineException {
   return new PipelineException(code, PIPELINE_EXTERNAL_MESSAGES[code], options);
 }

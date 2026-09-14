@@ -11,6 +11,7 @@ import type {
   PipelineRunCreateRequest,
   PipelineRunInterruptRequest,
   PipelineRunRetryRequest,
+  PipelineUuidV7,
 } from "../../../../../apps/api/src/pipeline/type/pipelineRun.input";
 import type {
   PipelineRunAcceptedResponse,
@@ -69,6 +70,7 @@ export namespace create {
 }
 
 /**
+ * @throws 400 The request is invalid.
  * @throws 404 The requested resource was not found.
  * @throws 500 The server could not complete the request.
  * @controller PipelineController.get
@@ -78,7 +80,7 @@ export namespace create {
  */
 export async function get(
   connection: IConnection,
-  runId: string,
+  runId: PipelineUuidV7,
 ): Promise<get.Output> {
   return PlainFetcher.fetch(connection, {
     ...get.METADATA,
@@ -100,7 +102,7 @@ export namespace get {
     status: 200,
   } as const;
 
-  export const path = (runId: string) =>
+  export const path = (runId: PipelineUuidV7) =>
     `/pipeline/runs/${encodeURIComponent(runId?.toString() ?? "null")}`;
 }
 
@@ -116,7 +118,7 @@ export namespace get {
  */
 export async function retry(
   connection: IConnection,
-  runId: string,
+  runId: PipelineUuidV7,
   request: retry.Body,
 ): Promise<retry.Output> {
   return PlainFetcher.fetch(
@@ -153,7 +155,7 @@ export namespace retry {
     status: 202,
   } as const;
 
-  export const path = (runId: string) =>
+  export const path = (runId: PipelineUuidV7) =>
     `/pipeline/runs/${encodeURIComponent(runId?.toString() ?? "null")}/retry`;
 }
 
@@ -169,7 +171,7 @@ export namespace retry {
  */
 export async function interrupt(
   connection: IConnection,
-  runId: string,
+  runId: PipelineUuidV7,
   request: interrupt.Body,
 ): Promise<interrupt.Output> {
   return PlainFetcher.fetch(
@@ -206,7 +208,7 @@ export namespace interrupt {
     status: 202,
   } as const;
 
-  export const path = (runId: string) =>
+  export const path = (runId: PipelineUuidV7) =>
     `/pipeline/runs/${encodeURIComponent(
       runId?.toString() ?? "null",
     )}/interrupt`;

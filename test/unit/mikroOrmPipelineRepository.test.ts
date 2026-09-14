@@ -275,6 +275,7 @@ test('MikroORM embedding repair uses an atomic claim query and maps immutable ru
   assert.equal(tasks[0]?.claimedByProcessExecutionId, processExecutionId);
   assert.equal(tasks[0]?.claimToken, claimToken);
   assert.match(calls[0]?.query ?? '', /for update of t skip locked/);
+  assert.match(calls[0]?.query ?? '', /publication_status = 'PUBLISHED'/);
   assert.ok(calls.every((call) => call.context === transactionContext));
 });
 
@@ -287,7 +288,7 @@ test('MikroORM embedding completion rejects a stale claim before writing the vec
   const connection = {
     execute: async (query: string) => {
       calls.push(query);
-      if (query.startsWith('select id, input_hash')) {
+      if (query.startsWith('select t.id, t.input_hash')) {
         return [
           {
             id: taskId,
@@ -337,7 +338,7 @@ test('MikroORM embedding failure requeues only the matching claim token', async 
   const connection = {
     execute: async (query: string, _params?: unknown[], _method?: unknown, context?: unknown) => {
       calls.push({ query, context });
-      if (query.startsWith('update issue_embedding_tasks set status =')) return [{ id: taskId }];
+      if (query.startsWith('update issue_embedding_tasks t set status =')) return [{ id: taskId }];
       return [];
     },
   };
@@ -353,5 +354,6 @@ test('MikroORM embedding failure requeues only the matching claim token', async 
 
   assert.equal(await repository.failEmbeddingTask(taskId, claimToken, 'provider failed'), true);
   assert.match(calls[0]?.query ?? '', /claim_token = \$2/);
+  assert.match(calls[0]?.query ?? '', /publication_status = 'PUBLISHED'/);
   assert.ok(calls.every((call) => call.context === transactionContext));
 });

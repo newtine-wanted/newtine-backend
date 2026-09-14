@@ -61,3 +61,25 @@ test('BatchRunner gives pipeline jobs a process execution id separate from the r
   assert.ok(processExecutionId);
   assert.equal(isUuidV7(processExecutionId), true);
 });
+
+test('BatchRunner forwards the shutdown signal to embedding repair', async () => {
+  let receivedSignal: AbortSignal | undefined;
+  const runner = new BatchRunner(
+    { run: async () => undefined } as never,
+    createLogger(),
+    undefined,
+    {
+      run: async (
+        _processExecutionId: string,
+        _reclaimProcessExecutionId: string,
+        signal?: AbortSignal,
+      ) => {
+        receivedSignal = signal;
+      },
+    } as never,
+  );
+  const controller = new AbortController();
+
+  assert.equal(await runner.run('pipelineEmbeddingRepair', controller.signal), 0);
+  assert.equal(receivedSignal, controller.signal);
+});

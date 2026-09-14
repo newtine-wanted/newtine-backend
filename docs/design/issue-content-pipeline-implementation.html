@@ -34,11 +34,94 @@
       </dl>
     </header>
     <nav aria-label="문서 탐색">
-      <a href="#baseline">기준</a> · <a href="#implementation">구현</a> · <a href="#status">상태</a> ·
+      <a href="#pr-review-hardening-followup-implementation-control">G41~G44</a> · <a href="#baseline">기준</a> · <a href="#implementation">구현</a> · <a href="#status">상태</a> ·
       <a href="#verification">검증</a> · <a href="#issues">이슈</a> · <a href="#review">리뷰</a> · <a href="#control">이해 점검</a>
     </nav>
     <main>
       <article>
+        <section id="pr-review-hardening-followup-implementation-control">
+          <h2>PR #2 재리뷰 잔여 위험 보강 구현 제어 · G41~G44</h2>
+          <p><strong>implementation-control-state: 구현 완료 · 운영 검증 보류.</strong> 2026-09-14 사용자 “개선 ㄱ”으로 설계 기준 문서의 G41-A·G42-A·G43-A·G44-A 후속 보강 구현을 승인했다. 승인된 코드·회귀 테스트·focused/full gate는 완료했으며, 이 section은 기존 G38~G40 구현 기록을 대체하지 않고 재리뷰에서 열린 네 경계의 결과와 잔여 위험을 추적한다.</p>
+          <dl>
+            <dt>Baseline reference</dt><dd><a href="issue-content-pipeline-design.html#pr-review-hardening-followup">issue-content-pipeline-design.html#pr-review-hardening-followup</a> · 승인 시각 <time datetime="2026-09-14">2026-09-14</time> · 대상 워크트리 <code>.worktrees/data-pipeline</code>.</dd>
+            <dt>Goal</dt><dd>외부 응답 body stream read 오류를 결과 불명 transport로 보존하고, embedding repair가 철회·종료 경계에서 불필요한 provider 호출과 RUNNING claim 잔류를 만들지 않게 하며, 장기 idle worker의 abort listener 누수를 제거한다.</dd>
+            <dt>Files and symbols</dt><dd><code>apps/batch/src/pipeline/openAi.provider.ts</code>, <code>naverNews.provider.ts</code>, <code>pipeline.embeddingRepair.job.ts</code>, <code>pipeline.worker.ts</code>, <code>apps/batch/src/runner/batch.runner.ts</code>, <code>libs/core/src/pipeline/repository/pipeline.repository.ts</code> 및 SQL/InMemory adapter와 focused tests.</dd>
+            <dt>Invariants</dt><dd>body read 실패는 <code>UpstreamError + retryable + UNKNOWN</code>, 완전 수신 후 parse 실패는 <code>InvalidOutput</code>이다. repair는 관찰한 publication 상태가 PUBLISHED가 아니면 provider를 시작하지 않고 현재 claim을 release한다. signal 이후 새 task를 시작하지 않고 남은 owner claim을 release한다. timer 완료·abort 어느 경로에서도 listener가 남지 않는다.</dd>
+            <dt>Forbidden changes</dt><dd>withdrawal writer와의 절대 lock/lease 통합, transaction 안 외부 호출, provider port의 강제 signal 계약, 새 WITHDRAWN task status/migration, 자동 RUNNING takeover, 실제 DB/외부 자격증명 실행, PR push.</dd>
+            <dt>Focused verification</dt><dd><code>npm run test:jest -- test/unit/openAiProvider.test.ts test/unit/naverProvider.test.ts test/unit/pipelineEmbeddingRepair.test.ts test/unit/batchRunner.test.ts test/unit/pipelineWorker.test.ts</code> · 5 suites/27 tests 통과.</dd>
+          </dl>
+          <table><caption>후속 보강 구현 결과</caption><thead><tr><th>항목</th><th>구현 결과</th><th>증거·잔여 위험</th></tr></thead><tbody>
+            <tr><td>G41 · body stream</td><td>OpenAI JSON/embedding과 Naver search에서 response text read와 JSON parse를 분리했다. read 오류는 <code>UpstreamError + retryable + resultUncertain</code>, parse 오류는 <code>InvalidOutput</code>이다.</td><td>stream-error·parse-error 회귀 테스트 통과. 실제 provider stream 표본은 운영 검증 보류.</td></tr>
+            <tr><td>G42 · withdrawal check</td><td>repair가 provider 직전에 <code>loadIssue</code>로 PUBLISHED를 재확인하고, 아니면 token-fenced 현재 claim을 release한다.</td><td>claim 후 WITHDRAWN fixture에서 provider 호출 0회·claim 잔류 0회. withdrawal writer와의 절대 race-free 동기화는 후속 설계로 보류.</td></tr>
+            <tr><td>G43 · repair drain</td><td><code>BatchRunner → PipelineEmbeddingRepairJob</code>으로 signal을 전달하고 task 사이 abort를 확인하며, 현재 owner의 남은 claim을 graceful release한다.</td><td>signal 전파·claim release 회귀 테스트 통과. 현재 provider 호출은 adapter timeout까지 완료될 수 있고 실제 subprocess SIGTERM은 보류.</td></tr>
+            <tr><td>G44 · wait listener</td><td>timer 완료·abort 양쪽에서 named handler와 settled guard로 listener를 제거한다.</td><td>반복 idle polling에서 동시 listener 최대 1개, abort 완료 후 0개를 검증했다.</td></tr>
+          </tbody></table>
+          <div class="flow"><span>body read/parse 분리</span><span>→ publication 재확인</span><span>→ provider 또는 release</span><span>→ signal drain</span><span>→ claim/listener 정리</span></div>
+          <dl>
+            <dt>Verification evidence</dt><dd><code>npm run typecheck</code>, <code>npm run lint</code>, <code>npm run format:check</code>, <code>npm test -- --runInBand</code>(unit 17 suites/91 tests, integration 2 suites/11 tests), <code>npm run build</code>, <code>npm run contracts:check</code>, <code>npm run test:smoke</code>, <code>git diff --check</code> 통과.</dd>
+            <dt>No-write critical review</dt><dd>별도 critical-review lane은 결과를 반환하지 않아 종료했고, 동일 diff에 대해 독립 read-only 재점검을 수행했다. 승인 범위 안의 추가 정적 blocker는 확인하지 않았다. claim-after-withdrawal check와 absolute writer synchronization, 실제 DB/외부 provider/subprocess 경계는 구분해 잔여 위험으로 유지한다.</dd>
+            <dt>Residual risk</dt><dd>실제 PostgreSQL/pgvector의 migration·lock·rollback·withdrawal race, 실제 provider response stream, 실제 subprocess SIGTERM은 실행하지 않았다. <code>loadIssue</code>·claim release 자체의 DB 장애 시에는 confirmed-dead owner 수동 reclaim 운영 절차가 필요하다.</dd>
+            <dt>Developer operational understanding</dt><dd>미실시. 기술 검증과 운영자 이해 확인은 분리하며, 운영 공개·merge sign-off는 위 잔여 위험의 별도 수용 이후로 보류한다.</dd>
+          </dl>
+        </section>
+        <section id="pr-review-hardening-implementation-control">
+          <h2>PR #2 리뷰 보완 구현 제어 · G38~G40</h2>
+          <p><strong>implementation-control-state: 구현 완료 · 운영 검증 보류.</strong> 2026-09-14 사용자 “개선 ㄱㄱ”을 G38-A·G39-A·G40-A 및 기존 계약 정합화 범위에 대한 명시적 구현 승인으로 기록한다. 승인된 코드·테스트·계약·문서 변경은 완료했으며, 실제 PostgreSQL/pgvector 실행 증거는 별도 운영 수용으로 남긴다.</p>
+          <dl>
+            <dt>Approved scope</dt><dd>WITHDRAWN issue의 embedding task를 두 adapter에서 PUBLISHED fence로 숨기고 repair/provider/vector 저장을 차단한다. 이미 SUCCEEDED인 동일 입력 task가 provider 실패로 PENDING으로 역행하지 않게 한다. API UUID 입력을 UUIDv7 계약과 GET 400 응답에 맞춘다. FETCH 실패를 G39-A 규칙으로 분류한다. 확정 provider 실패는 usage <code>FAILED</code>, 결과 불명만 <code>UNKNOWN</code>으로 기록한다. SIGTERM/SIGINT를 worker <code>AbortSignal</code>에 전달하고, <code>CANCELLED</code> 문서와 실제 <code>FAILED + INTERRUPTED</code>를 정합화한다.</dd>
+            <dt>Deferred scope</dt><dd>pre-call usage <code>RUNNING</code> row/finalize, 실패 response metadata 확장(G26-B), 새 WITHDRAWN task status/migration, DB canonical URL column, repository transaction boundary 전면 개편, 실제 PostgreSQL migration·lock·rollback·partial unique 운영 검증은 이번 구현에서 닫지 않는다.</dd>
+            <dt>Invariants</dt><dd>WITHDRAWN issue에는 embedding provider 호출과 새 vector 저장이 없다. 동일 입력으로 SUCCEEDED인 task는 실패 처리로 PENDING이 되지 않는다. <code>retryable</code>은 재시도 정책이고 <code>UNKNOWN</code>은 결과 불확실성이다. 기존 G4 단일 worker·수동 복구와 공개 API·본문 미저장 정책은 유지한다.</dd>
+            <dt>Acceptance</dt><dd>SQL/InMemory adapter의 claim·save·list·count·pending 전환 fence와 회귀 테스트, UUIDv7/OpenAPI GET 400 계약 테스트, FETCH 분류 테스트, usage status 매핑 테스트, signal drain 테스트, interrupt 문서 정합화가 모두 통과한다.</dd>
+            <dt>No-write critical review</dt><dd>구현 직후의 1차 read-only 점검 기록이다. 최신 재리뷰에서는 응답 body stream 분류, claim 이후 withdrawal 경합, repair signal 전달, idle <code>AbortSignal</code> listener 수명을 추가로 점검했으며 현재 판정은 아래 최신 재리뷰 섹션이 우선한다. 실제 PostgreSQL lock 경합과 migration 실행은 여전히 검증하지 않았다.</dd>
+            <dt>Verification plan</dt><dd>변경 파일 focused test → <code>npm run typecheck</code> → <code>npm test -- --runInBand</code> → 가능한 저장소 gate를 순서대로 실행한다. 실제 PostgreSQL/pgvector 실행 증거가 없으면 구현 문서에 운영 해결로 표시하지 않는다.</dd>
+            <dt>Forbidden changes</dt><dd>현재 main worktree의 변경 수정, 승인되지 않은 category/schema/API breaking change, 자동 RUNNING takeover, G26-B 범위 확장, GitHub push/PR 원격 상태 변경.</dd>
+          </dl>
+          <table><caption>현재 구현 결과</caption><thead><tr><th>항목</th><th>결과</th><th>증거·잔여 위험</th></tr></thead><tbody>
+            <tr><td>G38 · withdrawn embedding fence</td><td>해결</td><td>SQL/InMemory의 claim·save·list·count·pending 전환에 PUBLISHED fence를 적용하고 withdrawn·SUCCEEDED 역행 회귀 테스트를 통과했다. 실제 PostgreSQL lock 경합은 운영 검증 보류.</td></tr>
+            <tr><td>G39 · FETCH failure classification</td><td>해결</td><td>전부 upstream/source unavailable인 경우와 혼합 실패를 구분하는 integration test를 통과했다.</td></tr>
+            <tr><td>G40 · usage certainty</td><td>해결</td><td>확정 HTTP/provider 실패는 FAILED, transport/timeout 결과 불명은 UNKNOWN으로 구분하고 provider·repair test를 통과했다. pre-call RUNNING/failure metadata는 G26-B 보류.</td></tr>
+            <tr><td>계약·종료·문서 정합화</td><td>해결</td><td>UUIDv7 pattern·GET 400 OpenAPI, SIGTERM/SIGINT 전달, CANCELLED 예약 상태 문서화를 반영했다. contracts, smoke, build, full test gate 통과.</td></tr>
+          </tbody></table>
+        </section>
+        <section id="pr-review-hardening-review">
+          <h2>PR #2 리뷰 보완 구현 1차 재리뷰 기록</h2>
+          <p><strong>review-status: 후속 보강으로 대체됨.</strong> 이 section은 G41~G44 구현 전의 발견 기록이다. 최신 구현·검증 판정은 위 <a href="#pr-review-hardening-followup-implementation-control">후속 보강 구현 제어</a> section을 우선한다.</p>
+          <dl>
+            <dt>Review scope</dt><dd><a href="https://github.com/newtine-wanted/newtine-backend/pull/2">PR #2</a> 권고 반영분의 SQL/InMemory embedding fence, provider 실패 확실성, FETCH 분류, UUIDv7/OpenAPI, batch signal lifecycle과 generated contract를 대상으로 한다.</dd>
+            <dt>Review context</dt><dd>작성자: Codex 자기 변경 · 기준점: <code>0ec43fca7b83aeb198549440ecee0d5dac47744d</code> · 대상: uncommitted working tree · 리뷰 유형: implementation 후 critical review.</dd>
+            <dt>Vertical flow</dt><dd>API UUIDv7 입력 → batch signal/외부 실패 분류 → PUBLISHED task claim → embedding provider 호출 → claim-token·publication fence 저장 → pending count/usage/로그 관찰.</dd>
+            <dt>Invariants</dt><dd>withdrawn task는 새 vector를 저장하지 않고, 동일 입력의 SUCCEEDED task는 provider 실패로 PENDING으로 역행하지 않으며, retryable과 UNKNOWN은 각각 재시도 정책과 결과 확실성을 뜻한다. signal은 새 pipeline run을 시작하지 않고, API/OpenAPI가 UUIDv7 계약과 GET 400을 함께 노출해야 한다.</dd>
+          </dl>
+          <figure>
+            <div class="flow"><span>HTTP·URL 입력</span><span>FETCH/usage 분류</span><span>claim·PUBLISHED fence</span><span>provider side effect</span><span>token-fenced save</span><span>signal drain·운영 관찰</span></div>
+            <figcaption>재리뷰에서 확인한 핵심 경계의 텍스트 등가: provider 호출 전/후의 publication 상태와 transport 결과 확실성, batch 모드별 종료 전파를 분리해 확인한다.</figcaption>
+          </figure>
+          <table><caption>최신 review issue-register</caption><thead><tr><th scope="col">ID·상태</th><th scope="col">심각도</th><th scope="col">기대 동작과 실제 동작</th><th scope="col">조건·영향</th><th scope="col">최소 조치</th></tr></thead><tbody>
+            <tr><td>PR2-HARD-REV-001 · open</td><td>P2 · Non-blocking risk</td><td>응답 header 뒤 body stream 단절도 결과 불명 transport 오류로 <code>UNKNOWN</code>·재시도 가능해야 한다. 현재 OpenAI JSON/embedding과 Naver search는 timeout 이름만 uncertain으로 바꾸고, 일반 <code>Error</code>/<code>TypeError</code>는 <code>InvalidOutput</code>으로 끝낸다.</td><td>HTTP 200 뒤 connection reset 또는 중간 stream error. 호출 결과·비용이 불명인데 usage는 <code>FAILED</code>, <code>retryable=false</code>가 되어 일시 장애가 영구 pipeline 실패로 바뀐다. <code>openAi.provider.ts:58-70,101-119</code>, <code>naverNews.provider.ts:58-71</code>.</td><td>body stream 읽기 실패와 읽기 완료 후 JSON 문법 오류를 분리해 전자는 <code>UpstreamError + retryable + resultUncertain</code>로 매핑하고, 두 adapter의 stream-error test를 추가한다.</td></tr>
+            <tr><td>PR2-HARD-REV-002 · open</td><td>P2 · Non-blocking risk</td><td>withdrawn issue의 repair provider 호출도 차단해야 한다. 현재 claim 시점과 save 시점에는 PUBLISHED fence가 있지만, repair가 task를 반환받은 뒤 provider 호출 직전에 publication 상태를 다시 확인하지 않는다.</td><td>최대 100개를 claim한 후 뒤 task가 처리되기 전에 issue가 WITHDRAWN으로 바뀌면 외부 provider로 제목·요약이 전송되고 usage 비용이 발생한다. vector 저장만 <code>saveEmbedding</code>에서 stale 처리된다. <code>pipeline.embeddingRepair.job.ts:49-88</code>, <code>mikroOrmPipeline.repository.ts:993-1015</code>.</td><td>provider 직전 상태 재확인과 claim-after-withdrawal 회귀 테스트를 추가한다. 절대적인 race-free 보장이 필요하면 withdrawal writer와 RUNNING claim의 동기화/lease 규칙을 별도 결정한다.</td></tr>
+            <tr><td>PR2-HARD-REV-003 · open</td><td>P2 · Non-blocking risk</td><td>batch 프로세스의 SIGTERM/SIGINT는 실행 중인 장기 batch 모드에도 전달되어야 한다. 현재 signal은 <code>pipelineWorker</code>만 <code>PipelineBatchJob → PipelineWorker.runForever</code>로 전달되고, <code>pipelineEmbeddingRepair</code>는 100개 task loop와 provider 호출을 끝까지 수행한다.</td><td>repair provider가 느리거나 100개 task가 남은 상태에서 배포 grace period를 초과할 수 있고, 강제 종료되면 RUNNING claim reclaim이 추가로 필요하다. <code>batch.runner.ts:41-49,104-116</code>, <code>pipeline.embeddingRepair.job.ts:35-64</code>.</td><td>signal을 repair job까지 전달하고 task 사이 중단을 지원한다. 중단 시 미처리 claim의 반환/reclaim 절차와 subprocess SIGTERM test를 함께 고정한다.</td></tr>
+            <tr><td>PR2-HARD-REV-004 · open</td><td>P2 · Non-blocking risk</td><td>signal을 장기 worker에 연결한 뒤 idle polling의 abort listener도 timer 종료 시 정리되어야 한다. 현재 <code>wait()</code>는 매 poll마다 anonymous listener를 추가하고 abort 때만 <code>once</code>로 제거한다.</td><td>run이 장시간 idle이면 정상 timer 경로에서 listener와 closure가 signal에 계속 남아 listener 수와 메모리가 poll 횟수에 비례해 증가한다. <code>pipeline.worker.ts:688-703</code>; signal 전달 활성화는 <code>pipeline.batch.job.ts:10-17</code>.</td><td>named abort handler를 두고 timer 완료·abort 양쪽에서 <code>removeEventListener</code>하는 구현과 장기 idle listener-count test를 추가한다.</td></tr>
+            <tr><td>PR2-HARD-REV-005 · open</td><td>논의 필요 · 운영 검증 보류</td><td>SQL adapter의 PUBLISHED fence·<code>FOR UPDATE OF t SKIP LOCKED</code>·transaction rollback이 실제 PostgreSQL/pgvector에서 같은 의미로 동작하는지 확인되어야 한다. 현재 test는 SQL 문자열·mock transaction context만 검증한다.</td><td>실제 DB에서 SQL 문법, lock 경합, withdrawal 동시성, partial migration/rollback, vector upsert를 아직 실행하지 않았다. 코드 gate 통과만으로 production data/state 경계를 증명할 수 없다.</td><td>격리 pgvector DB에서 fresh/기존 schema migration, 재실행, 두 repair 경쟁, withdrawal 전후 claim/save, rollback/down 실패 경계를 실행하고 증거를 남긴다.</td></tr>
+          </tbody></table>
+          <h3>해결 확인</h3>
+          <table><caption>이전 권고 대비 fixed 항목</caption><thead><tr><th scope="col">항목</th><th scope="col">상태</th><th scope="col">증거</th></tr></thead><tbody>
+            <tr><td>G38 · withdrawn fence / SUCCEEDED 역행</td><td>fixed · 범위 내</td><td>SQL/InMemory claim·save·list·count·pending/failure/requeue에 PUBLISHED 조건을 적용하고, withdrawn 선행·SUCCEEDED 유지 테스트를 통과했다. claim 이후 provider race는 위 PR2-HARD-REV-002로 남는다.</td></tr>
+            <tr><td>G39 · FETCH classification</td><td>fixed · 범위 내</td><td>all-upstream, all-source-unavailable, mixed failure integration test가 통과했다. 응답 body stream 오류의 provider mapping은 PR2-HARD-REV-001로 남는다.</td></tr>
+            <tr><td>G40 · usage certainty</td><td>fixed · 범위 내</td><td>known 429/5xx는 FAILED, fetch/timeout transport는 UNKNOWN으로 구분하는 provider·repair test가 통과했다. pre-call RUNNING/failure metadata는 승인된 G26-B 보류 범위다.</td></tr>
+            <tr><td>API·문서·worker drain</td><td>fixed · 부분 범위</td><td>UUIDv7 pattern·GET 400 generated contract, CANCELLED/FAILED+INTERRUPTED 문서, pipeline worker signal forwarding을 확인했다. repair signal은 PR2-HARD-REV-003으로 남는다.</td></tr>
+          </tbody></table>
+          <h3>검증 증거와 공백</h3>
+          <details><summary>현재 로컬 gate</summary><samp>npm test -- --runInBand: unit 16 suites/85 tests, integration 2 suites/11 tests passed
+npm run typecheck: passed
+npm run lint: passed
+npm run format:check: passed
+npm run build: passed
+npm run contracts:check: passed
+npm run test:smoke: passed
+git diff --check: passed</samp></details>
+          <aside>실제 PostgreSQL/pgvector migration·SQL lock semantics·rollback·withdrawal race와 실제 subprocess SIGTERM, 실제 provider response stream 오류는 이번 재리뷰에서 실행하지 않았다. 이 공백은 기존 구현 제어 문서의 “운영 검증 보류”와 일치하며, 해결로 표시하지 않는다.</aside>
+          <p><strong>최종 판단: 논의 필요.</strong> P1 blocker급의 정적 코드 결함은 확인하지 않았지만, body stream 분류·withdrawal 이후 provider 호출·repair shutdown·idle listener 수명이라는 P2 risk 4건과 실제 PostgreSQL 운영 검증 공백이 남아 있다. 이 판정은 merge/release 최종 승인과 별개다.</p>
+        </section>
         <section id="baseline">
           <h2>승인된 기준과 범위</h2>
           <p>G1~G17과 통합 실행 계약, G18~G21 AI 설정 분리, G22 서버 소유 limits 비공개, G23 pipeline 도메인 예외 경계를 구현 기준으로 고정한다. 운영자 JWT 발급·검증·Guard는 별도 설계로 남기며 이번 변경에서 호출하지 않는다.</p>
@@ -479,17 +562,18 @@ npm run test:smoke</code></pre>
               <tr><td>Batch DI / runtime config</td><td>해결</td><td><code>BatchModule</code> factory provider, runtime <code>config/</code> copy, unknown-job bootstrap smoke 통과.</td></tr>
               <tr><td>공유 category schema</td><td>해결</td><td><code>issue_categories.code</code> PK, canonical lowercase 10개, <code>issues.category_code</code>·preference <code>category_code</code> FK/UNIQUE로 통일.</td></tr>
               <tr><td>레거시 변환 안전성</td><td>해결</td><td>승인된 legacy mapping만 backfill하고 <code>YOUTH_GENERATION</code>/<code>MEDIA</code>는 fail-closed. 미지원 row fixture에서 전체 transaction rollback 확인.</td></tr>
-              <tr><td>pgvector / migration</td><td>해결</td><td>pgvector Compose DB에서 fresh legacy up, 재실행, 최종 schema·data·vector extension 확인.</td></tr>
-              <tr><td>base schema 경계</td><td>해결</td><td><code>db:migrate up</code> preflight가 외부 base table 누락을 명시적으로 거절한다. 빈 DB에서 partial migration은 남기지 않는다.</td></tr>
+              <tr><td>pgvector / migration</td><td>운영 검증 보류</td><td>host build와 정적 migration 등록은 확인했지만, 실제 PostgreSQL/pgvector Compose에서 fresh up·재실행·schema·vector extension 실행 증거는 없다.</td></tr>
+              <tr><td>base schema 경계</td><td>운영 검증 보류</td><td>코드의 preflight 경계는 존재하지만, 외부 base table fixture와 빈 DB에서 partial migration이 남지 않는지 실제 실행하지 않았다.</td></tr>
               <tr><td>Docker cold build</td><td>환경 보류</td><td>host build는 통과했지만 2 GiB ARM Docker Desktop에서 cold <code>ttsc</code> Go compiler가 OOM kill되어 image artifact 검증은 재현하지 못했다.</td></tr>
             </tbody>
           </table>
           <p>
-            최종 로컬 gate는 <code>npm test</code>(unit 15 suites/79 tests, integration 2 suites/8 tests),
+            이전 통합 변경의 최종 로컬 gate는 <code>npm test</code>(unit 15 suites/79 tests, integration 2 suites/8 tests),
             <code>npm run typecheck</code>, <code>npm run build</code>, <code>npm run format:check</code>,
             <code>npm run lint</code>, <code>npm run contracts:check</code>, <code>npm run test:smoke</code>,
-            conflict marker 검색과 <code>git diff --check</code>를 통과했다. GitHub push와 PR 원격 상태
-            갱신은 수행하지 않았다.
+            conflict marker 검색과 <code>git diff --check</code>를 통과했다. 다만 PR body에 기록된 대로
+            실제 PostgreSQL/pgvector migration 실행은 수행하지 않았고, GitHub push와 PR 원격 상태 갱신도
+            수행하지 않았다.
           </p>
         </section>
       </article>

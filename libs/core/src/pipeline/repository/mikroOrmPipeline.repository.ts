@@ -886,9 +886,10 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     return this.entityManager.transactional(async (em) => {
       const taskRows = await executeInTransaction<Row[]>(
         em,
-        `select id, input_hash, model, status, claim_token
-         from issue_embedding_tasks
-         where issue_id = $1 and input_hash = $2
+        `select t.id, t.input_hash, t.model, t.status, t.claim_token
+         from issue_embedding_tasks t
+         join issues i on i.id = t.issue_id and i.publication_status = 'PUBLISHED'
+         where t.issue_id = $1 and t.input_hash = $2
          for update`,
         [issueId, inputHash],
       );
@@ -912,14 +913,16 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
 
       const updateRows = await executeInTransaction<Row[]>(
         em,
-        `update issue_embedding_tasks set status = 'SUCCEEDED',
+        `update issue_embedding_tasks t set status = 'SUCCEEDED',
            attempt_count = attempt_count + case when $4::uuid is null then 1 else 0 end,
            last_error = null, claim_token = null, claimed_by_process_execution_id = null,
            claimed_at = null, completed_at = now(), updated_at = now()
-         where id = $1 and input_hash = $2 and model = $3
-           and (($4::uuid is null and status = 'PENDING' and claim_token is null)
-             or ($4::uuid is not null and status = 'RUNNING' and claim_token = $4))
-         returning id`,
+         from issues i
+         where t.id = $1 and t.issue_id = i.id and i.publication_status = 'PUBLISHED'
+           and t.input_hash = $2 and t.model = $3
+           and (($4::uuid is null and t.status = 'PENDING' and t.claim_token is null)
+             or ($4::uuid is not null and t.status = 'RUNNING' and t.claim_token = $4))
+         returning t.id`,
         [task.id, inputHash, targetModel, claimToken ?? null],
       );
       if (updateRows.length !== 1) return 'STALE';
@@ -957,6 +960,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
         `select t.id from issue_embedding_tasks t
          join issue_content_jobs j on j.id = t.issue_content_job_id
          join pipeline_runs r on r.id = t.pipeline_run_id
+         join issues i on i.id = t.issue_id and i.publication_status = 'PUBLISHED'
          where r.id = $1 and r.attempt = $2 and r.execution_id = $3
            and r.status in ('RUNNING', 'SUCCEEDED', 'PARTIALLY_SUCCEEDED')
            and j.id = $4 and j.attempt = $2 and j.status = 'SUCCEEDED'
@@ -970,7 +974,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
         `update issue_embedding_tasks set status = 'PENDING', attempt_count = attempt_count + 1,
            last_error = $2, claim_token = null, claimed_by_process_execution_id = null,
            claimed_at = null, completed_at = null, updated_at = now()
-         where id = $1 and status <> 'RUNNING'`,
+         where id = $1 and status = 'PENDING'`,
         [task.id, message === undefined ? null : safeError(message)],
       );
       await refreshEmbeddingPendingCounts(em);
@@ -989,6 +993,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
         `with candidates as (
            select t.id
            from issue_embedding_tasks t
+           join issues i on i.id = t.issue_id and i.publication_status = 'PUBLISHED'
            left join issue_embeddings e on e.issue_id = t.issue_id
            where t.status = 'PENDING'
               or (t.status = 'SUCCEEDED' and (
@@ -1003,6 +1008,10 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
                claimed_at = now(), attempt_count = attempt_count + 1, updated_at = now()
            from candidates c
            where t.id = c.id
+             and exists (
+               select 1 from issues i
+               where i.id = t.issue_id and i.publication_status = 'PUBLISHED'
+             )
            returning t.*
          )
          select c.id, c.issue_id, c.pipeline_run_id, c.issue_content_job_id, c.run_attempt,
@@ -1010,7 +1019,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
                 c.claim_token, c.claimed_by_process_execution_id, c.claimed_at,
                 i.title, d.integrated_summary
          from claimed c
-         join issues i on i.id = c.issue_id
+         join issues i on i.id = c.issue_id and i.publication_status = 'PUBLISHED'
          join issue_details d on d.issue_id = c.issue_id
          order by c.updated_at, c.id`,
         [safeLimit, claimToken, processExecutionId],
@@ -1031,8 +1040,9 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
        join issues i on i.id = t.issue_id
        join issue_details d on d.issue_id = t.issue_id
        left join issue_embeddings e on e.issue_id = t.issue_id
-       where t.status in ('PENDING', 'RUNNING')
-          or e.id is null or e.input_hash <> t.input_hash or e.model <> t.model or e.dimension <> 1536
+       where i.publication_status = 'PUBLISHED'
+         and (t.status in ('PENDING', 'RUNNING')
+          or e.id is null or e.input_hash <> t.input_hash or e.model <> t.model or e.dimension <> 1536)
        order by t.updated_at, t.id
        limit $1`,
       [safeLimit],
@@ -1044,11 +1054,13 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     return this.entityManager.transactional(async (em) => {
       const rows = await executeInTransaction<Row[]>(
         em,
-        `update issue_embedding_tasks set status = 'PENDING', last_error = $3,
+        `update issue_embedding_tasks t set status = 'PENDING', last_error = $3,
            claim_token = null, claimed_by_process_execution_id = null, claimed_at = null,
            completed_at = null, updated_at = now()
-         where id = $1 and status = 'RUNNING' and claim_token = $2
-         returning id`,
+         from issues i
+         where t.id = $1 and t.issue_id = i.id and i.publication_status = 'PUBLISHED'
+           and t.status = 'RUNNING' and t.claim_token = $2
+         returning t.id`,
         [taskId, claimToken, safeError(message)],
       );
       if (rows.length === 0) return false;
@@ -1057,14 +1069,49 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     });
   }
 
+  async releaseEmbeddingClaim(taskId: UuidV7, claimToken: UuidV7): Promise<boolean> {
+    return this.entityManager.transactional(async (em) => {
+      const rows = await executeInTransaction<Row[]>(
+        em,
+        `update issue_embedding_tasks
+         set status = 'PENDING', claim_token = null, claimed_by_process_execution_id = null,
+             claimed_at = null, completed_at = null, updated_at = now()
+         where id = $1 and status = 'RUNNING' and claim_token = $2
+         returning id`,
+        [taskId, claimToken],
+      );
+      if (rows.length === 0) return false;
+      await refreshEmbeddingPendingCounts(em);
+      return true;
+    });
+  }
+
+  async releaseEmbeddingClaims(processExecutionId: UuidV7): Promise<number> {
+    return this.entityManager.transactional(async (em) => {
+      const rows = await executeInTransaction<Row[]>(
+        em,
+        `update issue_embedding_tasks
+         set status = 'PENDING', claim_token = null, claimed_by_process_execution_id = null,
+             claimed_at = null, completed_at = null, updated_at = now()
+         where status = 'RUNNING' and claimed_by_process_execution_id = $1
+         returning id`,
+        [processExecutionId],
+      );
+      if (rows.length > 0) await refreshEmbeddingPendingCounts(em);
+      return rows.length;
+    });
+  }
+
   async requeueEmbeddingClaims(deadProcessExecutionId: UuidV7): Promise<number> {
     return this.entityManager.transactional(async (em) => {
       const rows = await executeInTransaction<Row[]>(
         em,
-        `update issue_embedding_tasks set status = 'PENDING', claim_token = null,
+        `update issue_embedding_tasks t set status = 'PENDING', claim_token = null,
            claimed_by_process_execution_id = null, claimed_at = null, updated_at = now()
-         where status = 'RUNNING' and claimed_by_process_execution_id = $1
-         returning id`,
+         from issues i
+         where t.issue_id = i.id and i.publication_status = 'PUBLISHED'
+           and t.status = 'RUNNING' and t.claimed_by_process_execution_id = $1
+         returning t.id`,
         [deadProcessExecutionId],
       );
       if (rows.length > 0) await refreshEmbeddingPendingCounts(em);
@@ -1095,6 +1142,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
       await this.entityManager.getConnection().execute<Row[]>(
         `select count(*)::int as count
          from issue_embedding_tasks t
+         join issues i on i.id = t.issue_id and i.publication_status = 'PUBLISHED'
          left join issue_embeddings e on e.issue_id = t.issue_id
          where t.pipeline_run_id = $1
            and (t.status in ('PENDING', 'RUNNING')
@@ -1256,6 +1304,7 @@ async function refreshEmbeddingPendingCounts(em: EntityManager): Promise<void> {
     `update pipeline_runs r set embedding_pending_count = (
        select count(*)::int
        from issue_embedding_tasks t
+       join issues i on i.id = t.issue_id and i.publication_status = 'PUBLISHED'
        left join issue_embeddings e on e.issue_id = t.issue_id
        where t.pipeline_run_id = r.id
          and (t.status in ('PENDING', 'RUNNING')

@@ -18,7 +18,7 @@ const EXPECTED_FAILURE_STATUSES = {
   '/me/onboarding/complete': ['400', '401', '500'],
   '/me/onboarding/skip': ['401', '500'],
   '/pipeline/runs': ['400', '409', '500'],
-  '/pipeline/runs/{runId}': ['404', '500'],
+  '/pipeline/runs/{runId}': ['400', '404', '500'],
   '/pipeline/runs/{runId}/retry': ['400', '404', '409', '500'],
   '/pipeline/runs/{runId}/interrupt': ['400', '404', '409', '500'],
 };

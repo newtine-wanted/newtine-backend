@@ -289,6 +289,7 @@ export class PipelineWorker implements OnModuleDestroy {
       await this.repository.updateRunStage(run.id, run.attempt, run.executionId, 'FETCH');
       await this.repository.updateJobStage(job.id, run.attempt, run.executionId, 'FETCH');
       const fetched: FetchedArticle[] = [];
+      const fetchFailures: PipelineFailureKind[] = [];
       for (const article of candidates) {
         if (fetched.length >= run.request.limits.validBodiesTarget) break;
         try {
@@ -306,6 +307,8 @@ export class PipelineWorker implements OnModuleDestroy {
           }
           if (body.body.trim().length > 0) fetched.push(body);
         } catch (error: unknown) {
+          const failureKind = toFailureKind(error);
+          fetchFailures.push(failureKind);
           this.logger.warn(
             {
               event: 'pipeline.article.fetch_failed',
@@ -313,14 +316,13 @@ export class PipelineWorker implements OnModuleDestroy {
               runExecutionId: run.executionId,
               jobId: job.id,
               ...(processExecutionId === undefined ? {} : { processExecutionId }),
-              failureKind: toFailureKind(error),
+              failureKind,
             },
             'Article body fetch failed',
           );
         }
       }
-      if (fetched.length < 2)
-        throw pipelineExternalException(PipelineExceptionCode.InsufficientEvidence);
+      if (fetched.length < 2) throw classifyFetchFailure(fetched.length, fetchFailures);
 
       await this.repository.updateRunStage(run.id, run.attempt, run.executionId, 'GENERATE');
       await this.repository.updateJobStage(job.id, run.attempt, run.executionId, 'GENERATE');
@@ -366,6 +368,9 @@ export class PipelineWorker implements OnModuleDestroy {
         this.aiConfiguration?.stage('embedding').model,
       );
       if (!accepted) return;
+
+      const currentIssue = await this.repository.loadIssue(job.issueId);
+      if (currentIssue?.publicationStatus !== 'PUBLISHED') return;
 
       try {
         const embeddingModel =
@@ -502,7 +507,7 @@ export class PipelineWorker implements OnModuleDestroy {
               : { promptHash: usageContext.promptHash }),
             provider: operation === 'SEARCH' || operation === 'FETCH' ? 'naver' : 'openai',
             model: usageContext?.model ?? usageModel(operation),
-            status: error instanceof PipelineException && error.retryable ? 'UNKNOWN' : 'FAILED',
+            status: usageStatusForFailure(error),
             errorCode: toFailureKind(error),
             startedAt,
             finishedAt: new Date().toISOString(),
@@ -640,6 +645,31 @@ function toFailureKind(error: unknown): PipelineFailureKind {
   return 'UPSTREAM_ERROR';
 }
 
+function classifyFetchFailure(
+  fetchedCount: number,
+  failures: readonly PipelineFailureKind[],
+): PipelineException {
+  if (
+    fetchedCount === 0 &&
+    failures.length > 0 &&
+    failures.every((failure) => failure === 'UPSTREAM_ERROR')
+  ) {
+    return pipelineExternalException(PipelineExceptionCode.UpstreamError);
+  }
+  if (
+    fetchedCount === 0 &&
+    failures.length > 0 &&
+    failures.every((failure) => failure === 'SOURCE_UNAVAILABLE')
+  ) {
+    return pipelineExternalException(PipelineExceptionCode.SourceUnavailable);
+  }
+  return pipelineExternalException(PipelineExceptionCode.InsufficientEvidence);
+}
+
+function usageStatusForFailure(error: unknown): 'FAILED' | 'UNKNOWN' {
+  return error instanceof PipelineException && error.resultUncertain ? 'UNKNOWN' : 'FAILED';
+}
+
 function safeFailureMessage(kind: PipelineFailureKind): string {
   switch (kind) {
     case 'SOURCE_UNAVAILABLE':
@@ -661,14 +691,20 @@ function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {
       resolve();
       return;
     }
-    const timer = setTimeout(resolve, milliseconds);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    let settled = false;
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const onAbort = (): void => finish();
+    const timer = setTimeout(finish, milliseconds);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) finish();
   });
 }

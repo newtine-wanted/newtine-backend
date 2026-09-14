@@ -137,6 +137,10 @@ export interface PipelineRunRepository {
   listPendingEmbeddingTasks(limit: number): Promise<PipelineEmbeddingTask[]>;
   /** Return a currently-owned task to PENDING after a provider/application failure. */
   failEmbeddingTask(taskId: UuidV7, claimToken: UuidV7, message: string): Promise<boolean>;
+  /** Release one currently-owned claim without classifying it as a provider failure. */
+  releaseEmbeddingClaim(taskId: UuidV7, claimToken: UuidV7): Promise<boolean>;
+  /** Release all claims held by the current process during graceful shutdown. */
+  releaseEmbeddingClaims(processExecutionId: UuidV7): Promise<number>;
   /** Explicit recovery only after the supervisor confirms the prior process is dead. */
   requeueEmbeddingClaims(deadProcessExecutionId: UuidV7): Promise<number>;
 }

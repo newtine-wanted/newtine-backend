@@ -10,6 +10,7 @@ import type {
   PipelineRunCreateRequest,
   PipelineRunInterruptRequest,
   PipelineRunRetryRequest,
+  PipelineUuidV7,
 } from './type/pipelineRun.input.js';
 import type {
   PipelineRunAcceptedResponse,
@@ -48,9 +49,10 @@ export class PipelineController {
   }
 
   @TypedException<ProblemDetails>(ApiException.NotFound)
+  @TypedException<ProblemDetails>(ApiException.InvalidArgument)
   @TypedException<ProblemDetails>(ApiException.InternalError)
   @TypedRoute.Get(':runId')
-  async get(@TypedParam('runId') runId: string): Promise<PipelineRunResponse> {
+  async get(@TypedParam('runId') runId: PipelineUuidV7): Promise<PipelineRunResponse> {
     return toPipelineRunResponse(await this.pipelineRunService.get(runId));
   }
 
@@ -61,7 +63,7 @@ export class PipelineController {
   @HttpCode(HttpStatus.ACCEPTED)
   @TypedRoute.Post(':runId/retry')
   async retry(
-    @TypedParam('runId') runId: string,
+    @TypedParam('runId') runId: PipelineUuidV7,
     @TypedBody<PipelineRunRetryRequest>({
       type: 'validate',
       validate: (input) => typia.validateEquals<PipelineRunRetryRequest>(input),
@@ -82,7 +84,7 @@ export class PipelineController {
   @HttpCode(HttpStatus.ACCEPTED)
   @TypedRoute.Post(':runId/interrupt')
   async interrupt(
-    @TypedParam('runId') runId: string,
+    @TypedParam('runId') runId: PipelineUuidV7,
     @TypedBody<PipelineRunInterruptRequest>({
       type: 'validate',
       validate: (input) => typia.validateEquals<PipelineRunInterruptRequest>(input),

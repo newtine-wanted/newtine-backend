@@ -337,8 +337,8 @@
           },
           "failedJobIds": {
             "items": {
-              "type": "string",
-              "format": "uuid"
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
             },
             "minItems": 1,
             "type": "array"
@@ -364,8 +364,8 @@
           },
           "failedJobIds": {
             "items": {
-              "type": "string",
-              "format": "uuid"
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
             },
             "minItems": 1,
             "type": "array"
@@ -386,8 +386,8 @@
             "type": "integer"
           },
           "executionId": {
-            "type": "string",
-            "format": "uuid"
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+            "type": "string"
           }
         },
         "required": [
@@ -951,6 +951,7 @@
             "name": "runId",
             "in": "path",
             "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
               "type": "string"
             },
             "required": true
@@ -963,6 +964,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PipelineRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -1004,6 +1015,7 @@
             "name": "runId",
             "in": "path",
             "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
               "type": "string"
             },
             "required": true
@@ -1101,6 +1113,7 @@
             "name": "runId",
             "in": "path",
             "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
               "type": "string"
             },
             "required": true
@@ -1449,50 +1462,6 @@
         "x-samchon-controller": "OnboardingController"
       }
     },
-    "/health": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "status": {
-                      "const": "ok",
-                      "title": null,
-                      "description": null
-                    }
-                  },
-                  "required": [
-                    "status"
-                  ],
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "health",
-          "getHealth"
-        ],
-        "x-samchon-controller": "HealthController"
-      }
-    },
     "/issues/search": {
       "post": {
         "tags": [],
@@ -1554,6 +1523,50 @@
           "search"
         ],
         "x-samchon-controller": "IssueController"
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "const": "ok",
+                      "title": null,
+                      "description": null
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "health",
+          "getHealth"
+        ],
+        "x-samchon-controller": "HealthController"
       }
     }
   },

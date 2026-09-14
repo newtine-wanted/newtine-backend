@@ -100,6 +100,47 @@ async function createPendingTask(repository: InMemoryPipelineRepository) {
   return { run, executionId, job: registration.job, issueId: registration.job.issueId };
 }
 
+function setPublicationStatus(
+  repository: InMemoryPipelineRepository,
+  issueId: ReturnType<typeof generateUuidV7>,
+  publicationStatus: 'PUBLISHED' | 'WITHDRAWN',
+): void {
+  const state = repository as unknown as {
+    issues: Array<{ id: ReturnType<typeof generateUuidV7>; publicationStatus: string }>;
+  };
+  const issue = state.issues.find((item) => item.id === issueId);
+  assert.ok(issue);
+  issue.publicationStatus = publicationStatus;
+}
+
+class WithdrawnAfterClaimRepository extends InMemoryPipelineRepository {
+  override async claimPendingEmbeddingTasks(
+    limit: number,
+    processExecutionId: ReturnType<typeof generateUuidV7>,
+    claimToken: ReturnType<typeof generateUuidV7>,
+  ) {
+    const tasks = await super.claimPendingEmbeddingTasks(limit, processExecutionId, claimToken);
+    for (const task of tasks) setPublicationStatus(this, task.issueId, 'WITHDRAWN');
+    return tasks;
+  }
+}
+
+class AbortAfterClaimRepository extends InMemoryPipelineRepository {
+  constructor(private readonly controller: AbortController) {
+    super();
+  }
+
+  override async claimPendingEmbeddingTasks(
+    limit: number,
+    processExecutionId: ReturnType<typeof generateUuidV7>,
+    claimToken: ReturnType<typeof generateUuidV7>,
+  ) {
+    const tasks = await super.claimPendingEmbeddingTasks(limit, processExecutionId, claimToken);
+    this.controller.abort();
+    return tasks;
+  }
+}
+
 function logger() {
   return {
     setContext: () => undefined,
@@ -143,6 +184,138 @@ test('published content leaves a durable pending task that repair can complete a
   assert.equal((await repository.listPendingEmbeddingTasks(10)).length, 0);
 });
 
+test('withdrawn issues are fenced out of embedding repair paths', async () => {
+  const repository = new InMemoryPipelineRepository();
+  const pending = await createPendingTask(repository);
+  const task = (await repository.listPendingEmbeddingTasks(10))[0]!;
+  setPublicationStatus(repository, pending.issueId, 'WITHDRAWN');
+
+  assert.equal(
+    (await repository.claimPendingEmbeddingTasks(10, generateUuidV7(), generateUuidV7())).length,
+    0,
+  );
+  assert.equal((await repository.listPendingEmbeddingTasks(10)).length, 0);
+  assert.equal(
+    await repository.saveEmbedding(
+      pending.issueId,
+      task.title,
+      task.integratedSummary,
+      new Array(1_536).fill(0),
+      task.model,
+    ),
+    'STALE',
+  );
+
+  const state = repository as unknown as {
+    embeddingTasks: Map<ReturnType<typeof generateUuidV7>, { attempts: number; status: string }>;
+  };
+  const stored = state.embeddingTasks.get(pending.issueId)!;
+  const attemptsBefore = stored.attempts;
+  await repository.markEmbeddingPending(
+    pending.run.id,
+    pending.run.attempt,
+    pending.executionId,
+    pending.job.id,
+    'withdrawn',
+  );
+  assert.equal(stored.status, 'PENDING');
+  assert.equal(stored.attempts, attemptsBefore);
+  assert.equal((await repository.findById(pending.run.id))?.embeddingPendingCount, 0);
+});
+
+test('repair rechecks publication before the provider and releases a withdrawn claim', async () => {
+  const repository = new WithdrawnAfterClaimRepository();
+  const pending = await createPendingTask(repository);
+  let calls = 0;
+  const embeddingProvider: EmbeddingProvider = {
+    embed: async () => {
+      calls += 1;
+      return { model: 'text-embedding-3-small', vector: new Array(1_536).fill(0) };
+    },
+  };
+  const repair = new PipelineEmbeddingRepairJob(repository, embeddingProvider, logger());
+
+  await repair.run(generateUuidV7());
+
+  assert.equal(calls, 0);
+  const state = repository as unknown as {
+    embeddingTasks: Map<
+      ReturnType<typeof generateUuidV7>,
+      {
+        status: string;
+        claimToken?: ReturnType<typeof generateUuidV7>;
+      }
+    >;
+  };
+  const task = state.embeddingTasks.get(pending.issueId);
+  assert.equal(task?.status, 'PENDING');
+  assert.equal(task?.claimToken, undefined);
+});
+
+test('repair stops after shutdown and releases claims it did not start', async () => {
+  const controller = new AbortController();
+  const repository = new AbortAfterClaimRepository(controller);
+  const pending = await createPendingTask(repository);
+  let calls = 0;
+  const embeddingProvider: EmbeddingProvider = {
+    embed: async () => {
+      calls += 1;
+      return { model: 'text-embedding-3-small', vector: new Array(1_536).fill(0) };
+    },
+  };
+  const owner = generateUuidV7();
+  const repair = new PipelineEmbeddingRepairJob(repository, embeddingProvider, logger());
+
+  await repair.run(owner, undefined, controller.signal);
+
+  assert.equal(calls, 0);
+  const state = repository as unknown as {
+    embeddingTasks: Map<
+      ReturnType<typeof generateUuidV7>,
+      {
+        status: string;
+        claimedByProcessExecutionId?: ReturnType<typeof generateUuidV7>;
+      }
+    >;
+  };
+  const task = state.embeddingTasks.get(pending.issueId);
+  assert.equal(task?.status, 'PENDING');
+  assert.equal(task?.claimedByProcessExecutionId, undefined);
+  assert.equal((await repository.listPendingEmbeddingTasks(10)).length, 1);
+});
+
+test('embedding success is not regressed to pending by a later maintenance failure', async () => {
+  const repository = new InMemoryPipelineRepository();
+  const pending = await createPendingTask(repository);
+  const task = (await repository.listPendingEmbeddingTasks(10))[0]!;
+  assert.equal(
+    await repository.saveEmbedding(
+      pending.issueId,
+      task.title,
+      task.integratedSummary,
+      new Array(1_536).fill(0),
+      task.model,
+    ),
+    'SAVED',
+  );
+
+  const state = repository as unknown as {
+    embeddingTasks: Map<ReturnType<typeof generateUuidV7>, { attempts: number; status: string }>;
+  };
+  const stored = state.embeddingTasks.get(pending.issueId)!;
+  const attemptsAfterSuccess = stored.attempts;
+  await repository.markEmbeddingPending(
+    pending.run.id,
+    pending.run.attempt,
+    pending.executionId,
+    pending.job.id,
+    'provider failed after an existing success',
+  );
+  assert.equal(stored.status, 'SUCCEEDED');
+  assert.equal(stored.attempts, attemptsAfterSuccess);
+  assert.equal((await repository.findById(pending.run.id))?.embeddingPendingCount, 0);
+});
+
 test('stale embedding input cannot complete a newer pending task', async () => {
   const repository = new InMemoryPipelineRepository();
   const pending = await createPendingTask(repository);
@@ -165,8 +338,9 @@ test('repair failure keeps the task pending for the next manual run', async () =
   const pending = await createPendingTask(repository);
   const embeddingProvider: EmbeddingProvider = {
     embed: async () => {
-      throw new PipelineException(PipelineExceptionCode.UpstreamError, 'upstream', {
+      throw new PipelineException(PipelineExceptionCode.UpstreamError, 'network timeout', {
         retryable: true,
+        resultUncertain: true,
       });
     },
   };
@@ -179,6 +353,25 @@ test('repair failure keeps the task pending for the next manual run', async () =
   assert.equal((await repository.findById(pending.run.id))?.embeddingPendingCount, 1);
   assert.equal((await repository.findById(pending.run.id))?.usageSummary.calls, 1);
   assert.equal((await repository.findById(pending.run.id))?.usageSummary.unknownCalls, 1);
+});
+
+test('known retryable provider failures are recorded as failed rather than unknown', async () => {
+  const repository = new InMemoryPipelineRepository();
+  const pending = await createPendingTask(repository);
+  const embeddingProvider: EmbeddingProvider = {
+    embed: async () => {
+      throw new PipelineException(PipelineExceptionCode.UpstreamError, 'HTTP 429', {
+        retryable: true,
+      });
+    },
+  };
+  const repair = new PipelineEmbeddingRepairJob(repository, embeddingProvider, logger());
+  await repair.run(generateUuidV7());
+
+  const usage = (await repository.findById(pending.run.id))?.usageSummary;
+  assert.equal(usage?.calls, 1);
+  assert.equal(usage?.failedCalls, 1);
+  assert.equal(usage?.unknownCalls, 0);
 });
 
 test('embedding repair claims are exclusive and only a confirmed-dead owner can be requeued', async () => {

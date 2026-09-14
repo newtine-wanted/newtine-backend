@@ -7,13 +7,14 @@ import { PipelineWorker } from '@newtine/batch/pipeline/pipeline.worker.js';
 export class PipelineBatchJob {
   constructor(private readonly worker: PipelineWorker) {}
 
-  async run(processExecutionId?: UuidV7): Promise<void> {
+  async run(processExecutionId?: UuidV7, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return;
     const once = process.env.PIPELINE_WORKER_ONCE === '1';
     if (once) {
       await this.worker.runOnce(undefined, processExecutionId);
       return;
     }
-    await this.worker.runForever(resolvePollInterval(), undefined, processExecutionId);
+    await this.worker.runForever(resolvePollInterval(), signal, processExecutionId);
   }
 }
 

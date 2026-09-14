@@ -492,7 +492,7 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
         ...(completed || existingTask?.claimedAt === undefined ? {} : { claimedAt: undefined }),
         ...(completed || existingTask?.lastError === undefined ? {} : { lastError: undefined }),
       });
-      recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks);
+      recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks, this.issues);
     }
     owner.run.updatedAt = new Date().toISOString();
     return true;
@@ -565,8 +565,10 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
       );
     }
     const task = this.embeddingTasks.get(issueId);
+    const issue = this.issues.find((item) => item.id === issueId);
     const targetModel = expectedModel ?? task?.model;
     if (
+      issue?.publicationStatus !== 'PUBLISHED' ||
       task === undefined ||
       task.inputHash !== embeddingInputHash(title, integratedSummary) ||
       (taskId !== undefined && task.id !== taskId) ||
@@ -584,7 +586,7 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
     task.claimToken = undefined;
     task.claimedByProcessExecutionId = undefined;
     task.claimedAt = undefined;
-    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks);
+    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks, this.issues);
     return 'SAVED';
   }
 
@@ -610,15 +612,16 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
     )
       return;
     const task = this.embeddingTasks.get(owner.job.issueId);
-    if (task === undefined) return;
-    if (task.status === 'RUNNING') return;
+    const issue = this.issues.find((item) => item.id === owner.job.issueId);
+    if (task === undefined || issue?.publicationStatus !== 'PUBLISHED') return;
+    if (task.status !== 'PENDING') return;
     task.status = 'PENDING';
     task.attempts += 1;
     task.lastError = message === undefined ? undefined : safeError(message);
     task.claimToken = undefined;
     task.claimedByProcessExecutionId = undefined;
     task.claimedAt = undefined;
-    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks);
+    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks, this.issues);
     run.updatedAt = new Date().toISOString();
   }
 
@@ -629,7 +632,13 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
   ): Promise<PipelineEmbeddingTask[]> {
     const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 100) : 100;
     const tasks = [...this.embeddingTasks.values()]
-      .filter((task) => task.status === 'PENDING')
+      .filter(
+        (task) =>
+          task.status === 'PENDING' &&
+          this.issues.some(
+            (issue) => issue.id === task.issueId && issue.publicationStatus === 'PUBLISHED',
+          ),
+      )
       .slice(0, safeLimit);
     for (const task of tasks) {
       task.status = 'RUNNING';
@@ -638,29 +647,70 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
       task.claimedAt = new Date().toISOString();
       task.attempts += 1;
     }
-    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks);
+    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks, this.issues);
     return tasks.map((task) => cloneEmbeddingTask(task));
   }
 
   async listPendingEmbeddingTasks(limit: number): Promise<PipelineEmbeddingTask[]> {
     const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 100) : 100;
     return [...this.embeddingTasks.values()]
-      .filter((task) => task.status === 'PENDING' || task.status === 'RUNNING')
+      .filter(
+        (task) =>
+          (task.status === 'PENDING' || task.status === 'RUNNING') &&
+          this.issues.some(
+            (issue) => issue.id === task.issueId && issue.publicationStatus === 'PUBLISHED',
+          ),
+      )
       .slice(0, safeLimit)
       .map((task) => cloneEmbeddingTask(task));
   }
 
   async failEmbeddingTask(taskId: UuidV7, claimToken: UuidV7, message: string): Promise<boolean> {
     const task = [...this.embeddingTasks.values()].find((item) => item.id === taskId);
-    if (task === undefined || task.status !== 'RUNNING' || task.claimToken !== claimToken)
+    const issue =
+      task === undefined ? undefined : this.issues.find((item) => item.id === task.issueId);
+    if (
+      task === undefined ||
+      issue?.publicationStatus !== 'PUBLISHED' ||
+      task.status !== 'RUNNING' ||
+      task.claimToken !== claimToken
+    )
       return false;
     task.status = 'PENDING';
     task.lastError = safeError(message);
     task.claimToken = undefined;
     task.claimedByProcessExecutionId = undefined;
     task.claimedAt = undefined;
-    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks);
+    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks, this.issues);
     return true;
+  }
+
+  async releaseEmbeddingClaim(taskId: UuidV7, claimToken: UuidV7): Promise<boolean> {
+    const task = [...this.embeddingTasks.values()].find((item) => item.id === taskId);
+    if (task === undefined || task.status !== 'RUNNING' || task.claimToken !== claimToken)
+      return false;
+    task.status = 'PENDING';
+    task.claimToken = undefined;
+    task.claimedByProcessExecutionId = undefined;
+    task.claimedAt = undefined;
+    recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks, this.issues);
+    return true;
+  }
+
+  async releaseEmbeddingClaims(processExecutionId: UuidV7): Promise<number> {
+    let count = 0;
+    for (const task of this.embeddingTasks.values()) {
+      if (task.status !== 'RUNNING' || task.claimedByProcessExecutionId !== processExecutionId) {
+        continue;
+      }
+      task.status = 'PENDING';
+      task.claimToken = undefined;
+      task.claimedByProcessExecutionId = undefined;
+      task.claimedAt = undefined;
+      count += 1;
+    }
+    if (count > 0) recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks, this.issues);
+    return count;
   }
 
   async requeueEmbeddingClaims(deadProcessExecutionId: UuidV7): Promise<number> {
@@ -668,7 +718,10 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
     for (const task of this.embeddingTasks.values()) {
       if (
         task.status === 'RUNNING' &&
-        task.claimedByProcessExecutionId === deadProcessExecutionId
+        task.claimedByProcessExecutionId === deadProcessExecutionId &&
+        this.issues.some(
+          (issue) => issue.id === task.issueId && issue.publicationStatus === 'PUBLISHED',
+        )
       ) {
         task.status = 'PENDING';
         task.claimToken = undefined;
@@ -677,7 +730,7 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
         count += 1;
       }
     }
-    if (count > 0) recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks);
+    if (count > 0) recomputeEmbeddingPendingCounts(this.runs, this.embeddingTasks, this.issues);
     return count;
   }
 
@@ -730,10 +783,16 @@ function cloneEmbeddingTask(task: PipelineEmbeddingTask): PipelineEmbeddingTask 
 function recomputeEmbeddingPendingCounts(
   runs: Map<UuidV7, PipelineRunSnapshot>,
   tasks: Map<UuidV7, PipelineEmbeddingTask>,
+  issues: readonly ExistingIssueSummary[],
 ): void {
   for (const run of runs.values()) {
     run.embeddingPendingCount = [...tasks.values()].filter(
-      (task) => task.runId === run.id && (task.status === 'PENDING' || task.status === 'RUNNING'),
+      (task) =>
+        task.runId === run.id &&
+        (task.status === 'PENDING' || task.status === 'RUNNING') &&
+        issues.some(
+          (issue) => issue.id === task.issueId && issue.publicationStatus === 'PUBLISHED',
+        ),
     ).length;
   }
 }

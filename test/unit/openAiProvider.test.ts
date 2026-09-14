@@ -107,3 +107,80 @@ test('OpenAI embedding repair can request the model recorded on the task', async
     else process.env.OPENAI_API_KEY = previousApiKey;
   }
 });
+
+test('OpenAI distinguishes known HTTP failures from uncertain transport failures', async () => {
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.OPENAI_API_KEY = 'test-key';
+  try {
+    globalThis.fetch = async () => new Response(null, { status: 429 });
+    await assert.rejects(
+      () => new OpenAiResponsesClient(new PipelineAiConfiguration()).embedding('known-failure'),
+      (error: unknown) =>
+        error instanceof PipelineException &&
+        error.code === PipelineExceptionCode.UpstreamError &&
+        error.retryable === true &&
+        error.resultUncertain === false,
+    );
+
+    globalThis.fetch = async () => {
+      throw new Error('connection reset');
+    };
+    await assert.rejects(
+      () => new OpenAiResponsesClient(new PipelineAiConfiguration()).embedding('unknown-result'),
+      (error: unknown) =>
+        error instanceof PipelineException &&
+        error.code === PipelineExceptionCode.UpstreamError &&
+        error.retryable === true &&
+        error.resultUncertain === true,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+  }
+});
+
+test('OpenAI separates response body transport failures from malformed JSON', async () => {
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousFetch = globalThis.fetch;
+  process.env.OPENAI_API_KEY = 'test-key';
+  try {
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"partial":'));
+            controller.error(new Error('connection reset while reading response'));
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    await assert.rejects(
+      () => new OpenAiResponsesClient(new PipelineAiConfiguration()).embedding('stream-error'),
+      (error: unknown) =>
+        error instanceof PipelineException &&
+        error.code === PipelineExceptionCode.UpstreamError &&
+        error.retryable === true &&
+        error.resultUncertain === true,
+    );
+
+    globalThis.fetch = async () =>
+      new Response('{"malformed":', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    await assert.rejects(
+      () => new OpenAiResponsesClient(new PipelineAiConfiguration()).embedding('parse-error'),
+      (error: unknown) =>
+        error instanceof PipelineException &&
+        error.code === PipelineExceptionCode.InvalidOutput &&
+        error.retryable === false &&
+        error.resultUncertain === false,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+  }
+});

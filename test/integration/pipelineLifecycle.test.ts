@@ -3,6 +3,8 @@ import { test } from '@jest/globals';
 
 import {
   InMemoryPipelineRepository,
+  PipelineException,
+  PipelineExceptionCode,
   generateUuidV7,
   type ArticleBodyProvider,
   type CandidateClassifier,
@@ -20,6 +22,93 @@ function logger() {
     warn: () => undefined,
     error: () => undefined,
   } as never;
+}
+
+async function runWithFetchFailures(
+  createFailure: (attempt: number) => PipelineException,
+): Promise<NonNullable<Awaited<ReturnType<InMemoryPipelineRepository['findById']>>>> {
+  const repository = new InMemoryPipelineRepository();
+  const run = await repository.enqueue({
+    idempotencyKey: `fetch-failure-${generateUuidV7()}`,
+    requestHash: `fetch-failure-${generateUuidV7()}`,
+    request: {
+      query: '정책',
+      limits: {
+        discoveryQueries: 1,
+        discoveryNews: 20,
+        maxCandidates: 5,
+        maxNewIssues: 1,
+        issueSearchQueries: 1,
+        relatedArticlesPerQuery: 2,
+        maxBodyAttempts: 3,
+        validBodiesTarget: 2,
+        transientRetries: 0,
+      },
+    },
+  });
+  let searchCall = 0;
+  const search: NewsSearchProvider = {
+    search: async () => {
+      searchCall += 1;
+      return [0, 1].map((index) => ({
+        title: `실패 분류 기사 ${searchCall}-${index}`,
+        description: '설명',
+        sourceUrl: `https://news.example/fetch-failure-${searchCall}-${index}`,
+        publisherName: 'publisher',
+      }));
+    },
+  };
+  let fetchAttempt = 0;
+  const body: ArticleBodyProvider = {
+    fetch: async () => {
+      fetchAttempt += 1;
+      throw createFailure(fetchAttempt);
+    },
+  };
+  const classifier: CandidateClassifier = {
+    classify: async ({ articles }) => [
+      {
+        disposition: 'NEW',
+        reason: 'new',
+        candidate: {
+          title: '본문 실패 분류 이슈',
+          scope: '정책 범위',
+          confirmedFacts: ['발표'],
+          sourceArticleIds: [articles[0]!.id!],
+          categoryCode: 'politics',
+        },
+      },
+    ],
+  };
+  const neverGenerator: ContentGenerator = {
+    generate: async () => {
+      throw new Error('must not generate');
+    },
+  };
+  const neverValidator: SemanticValidator = {
+    validate: async () => {
+      throw new Error('must not validate');
+    },
+  };
+  const neverEmbedding: EmbeddingProvider = {
+    embed: async () => {
+      throw new Error('must not embed');
+    },
+  };
+  const worker = new PipelineWorker(
+    repository,
+    search,
+    body,
+    classifier,
+    neverGenerator,
+    neverValidator,
+    neverEmbedding,
+    logger(),
+  );
+  await worker.runOnce(generateUuidV7());
+  const snapshot = await repository.findById(run.id);
+  assert.ok(snapshot);
+  return snapshot;
 }
 
 test('single worker creates and publishes only after independent evidence validation', async () => {
@@ -231,6 +320,36 @@ test('invalid or insufficient article bodies keep the issue unpublished and fail
   assert.equal(snapshot?.status, 'FAILED');
   assert.equal(snapshot?.jobs[0]?.status, 'FAILED');
   assert.equal(snapshot?.jobs[0]?.failureKind, 'INSUFFICIENT_EVIDENCE');
+});
+
+test('all upstream article fetch failures are classified as upstream error', async () => {
+  const snapshot = await runWithFetchFailures(
+    () => new PipelineException(PipelineExceptionCode.UpstreamError, 'HTTP 503'),
+  );
+  assert.equal(snapshot.status, 'FAILED');
+  assert.equal(snapshot.jobs[0]?.failureKind, 'UPSTREAM_ERROR');
+});
+
+test('all unavailable article sources keep the source-unavailable classification', async () => {
+  const snapshot = await runWithFetchFailures(
+    () => new PipelineException(PipelineExceptionCode.SourceUnavailable, 'article unavailable'),
+  );
+  assert.equal(snapshot.status, 'FAILED');
+  assert.equal(snapshot.jobs[0]?.failureKind, 'SOURCE_UNAVAILABLE');
+});
+
+test('mixed article fetch failures remain insufficient evidence', async () => {
+  const snapshot = await runWithFetchFailures(
+    (attempt) =>
+      new PipelineException(
+        attempt === 1
+          ? PipelineExceptionCode.UpstreamError
+          : PipelineExceptionCode.SourceUnavailable,
+        'mixed fetch failure',
+      ),
+  );
+  assert.equal(snapshot.status, 'FAILED');
+  assert.equal(snapshot.jobs[0]?.failureKind, 'INSUFFICIENT_EVIDENCE');
 });
 
 test('content retry resumes selected jobs without repeating discovery', async () => {

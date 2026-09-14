@@ -32,8 +32,13 @@ export class PipelineEmbeddingRepairJob {
     this.logger.setContext(PipelineEmbeddingRepairJob.name);
   }
 
-  async run(processExecutionId?: UuidV7, reclaimProcessExecutionId?: UuidV7): Promise<void> {
+  async run(
+    processExecutionId?: UuidV7,
+    reclaimProcessExecutionId?: UuidV7,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const owner = processExecutionId ?? generateUuidV7();
+    if (signal?.aborted) return;
     if (reclaimProcessExecutionId !== undefined) {
       const reclaimed = await this.repository.requeueEmbeddingClaims(reclaimProcessExecutionId);
       this.logger.warn(
@@ -61,7 +66,19 @@ export class PipelineEmbeddingRepairJob {
       'Embedding repair started',
     );
     for (const task of tasks) {
-      await this.repairTask(task, owner, claimToken);
+      if (signal?.aborted) {
+        const releasedTaskCount = await this.repository.releaseEmbeddingClaims(owner);
+        this.logger.warn(
+          {
+            event: 'pipeline.embedding_repair.stopped',
+            releasedTaskCount,
+            processExecutionId: owner,
+          },
+          'Embedding repair stopped before the next task',
+        );
+        return;
+      }
+      await this.repairTask(task, owner, claimToken, signal);
     }
     this.logger.info(
       {
@@ -77,7 +94,32 @@ export class PipelineEmbeddingRepairJob {
     task: PipelineEmbeddingTask,
     processExecutionId: UuidV7,
     claimToken: UuidV7,
+    signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) {
+      await this.repository.releaseEmbeddingClaims(processExecutionId);
+      return;
+    }
+    const issue = await this.repository.loadIssue(task.issueId);
+    if (issue?.publicationStatus !== 'PUBLISHED') {
+      const released = await this.repository.releaseEmbeddingClaim(task.id, claimToken);
+      if (released) {
+        this.logger.warn(
+          {
+            event: 'pipeline.embedding_repair.skipped_withdrawn',
+            taskId: task.id,
+            issueId: task.issueId,
+            processExecutionId,
+          },
+          'Embedding repair skipped a non-published issue',
+        );
+      }
+      return;
+    }
+    if (signal?.aborted) {
+      await this.repository.releaseEmbeddingClaims(processExecutionId);
+      return;
+    }
     const startedAt = new Date().toISOString();
     let result:
       | { value: { model: string; vector: number[] }; usage?: ProviderUsageMetadata }
@@ -198,7 +240,7 @@ export class PipelineEmbeddingRepairJob {
         purpose: 'issue embedding repair',
         provider: 'openai',
         model: result?.usage?.model ?? result?.value?.model ?? task.model,
-        status: error instanceof PipelineException && error.retryable ? 'UNKNOWN' : 'FAILED',
+        status: usageStatusForFailure(error),
         errorCode: failureKind,
         ...(result?.usage?.requestId === undefined ? {} : { requestId: result.usage.requestId }),
         ...(result?.usage?.inputTokens === undefined
@@ -274,6 +316,10 @@ function isProviderResult<T>(output: ProviderOutput<T>): output is {
     'value' in output &&
     (Object.keys(output).length === 1 || 'usage' in output)
   );
+}
+
+function usageStatusForFailure(error: unknown): 'FAILED' | 'UNKNOWN' {
+  return error instanceof PipelineException && error.resultUncertain ? 'UNKNOWN' : 'FAILED';
 }
 
 function toFailureKind(error: unknown): PipelineFailureKind {

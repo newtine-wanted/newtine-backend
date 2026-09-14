@@ -66,15 +66,15 @@ stateDiagram-v2
  QUEUED --> RUNNING: 원자적 선점
  RUNNING --> SUCCEEDED: 검증 결과 채택
  RUNNING --> FAILED: 최종 실패
- QUEUED --> CANCELLED: 운영 취소
- RUNNING --> CANCELLED: 중단 확인 후 취소
+ QUEUED --> FAILED: 운영 중단 확인
+ RUNNING --> FAILED: 중단 확인 후 INTERRUPTED 기록
  FAILED --> QUEUED: 명시적 재시도
  RUNNING --> FAILED: 소유 프로세스 종료 확인 후 복구
  SUCCEEDED --> [*]
- CANCELLED --> [*]
+ FAILED --> [*]
 ```
 
-RUNNING 중 stage는 SEARCH → FETCH → GENERATE → VALIDATE로 진행한다. stage는 현재 진행 위치이며 중간 결과의 존재를 보장하지 않는다. 재시도에는 필요한 시작 stage를 다시 지정한다.
+현재 구현의 interrupt는 `CANCELLED`를 emit하지 않는다. 확인된 프로세스 종료 후 미완료 job을 `FAILED`와 `failure_kind=INTERRUPTED`로 기록하고, 실행은 성공 job 유무에 따라 `FAILED` 또는 `PARTIALLY_SUCCEEDED`가 된다. `CANCELLED`는 DB/public type에 남아 있는 예약 상태이며 별도 취소 유즈케이스가 확정되기 전에는 상태 전이로 문서화하지 않는다. RUNNING 중 stage는 SEARCH → FETCH → GENERATE → VALIDATE로 진행한다. stage는 현재 진행 위치이며 중간 결과의 존재를 보장하지 않는다. 재시도에는 필요한 시작 stage를 다시 지정한다.
 
 ```mermaid
 stateDiagram-v2
