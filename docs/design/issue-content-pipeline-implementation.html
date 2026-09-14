@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>이슈·기사 콘텐츠 생성 파이프라인 구현 제어</title>
+    <meta name="purpose" content="뉴스 메타데이터에서 검증된 이슈 콘텐츠를 비동기로 생성·공개" />
+    <meta name="audience" content="NEWTINE 백엔드·콘텐츠 파이프라인 개발자와 운영자" />
+    <meta name="problem" content="승인된 파이프라인 계약을 API·워커·영속 경계로 구현하고 검증" />
+    <meta name="core-flow" content="API 접수 → 단일 워커 선점 → SEARCH·FETCH·GENERATE·VALIDATE → 원자 공개·집계 → 수동 embedding repair" />
+    <style>
+      body { font: 16px/1.7 system-ui, sans-serif; max-width: 1080px; margin: 0 auto; padding: 24px; color: #203047; background: #f5f7fa; }
+      section { background: #fff; border: 1px solid #d9e0e9; border-radius: 12px; padding: 24px; margin: 20px 0; }
+      h1, h2, h3 { line-height: 1.35; } a { color: #195abb; }
+      table { border-collapse: collapse; width: 100%; } th, td { border: 1px solid #d9e0e9; padding: 10px; text-align: left; vertical-align: top; }
+      figure { margin: 0; padding: 18px; background: #eef4fc; } .flow { display: flex; flex-wrap: wrap; gap: 8px; }
+      .flow span { padding: 7px 10px; border: 1px solid #a6b7d0; border-radius: 6px; background: #fff; }
+      pre { overflow: auto; padding: 16px; background: #edf2f9; } aside { border-left: 4px solid #bd7524; padding: 12px 16px; background: #fff7e9; }
+      code { background: #edf2f9; padding: 1px 4px; border-radius: 3px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>구현 제어 · 구현 준비 · PR #2 최신 main 통합·migration 단일 runner 개선 진행 · 기존 G24~G27 hardening 중 G26은 후속 보완 · High-risk(동시성·공개·외부 호출·복구·예외 경계)</p>
+      <h1>이슈·기사 콘텐츠 생성 파이프라인 구현 제어</h1>
+      <p>설계 승인 이후 실제 변경, 검증 증거, 잔여 위험을 기록하는 living artifact다.</p>
+      <dl>
+        <dt>목적 지문</dt><dd>뉴스 메타데이터에서 검증된 이슈 콘텐츠를 비동기로 생성·공개</dd>
+        <dt>사용자</dt><dd>NEWTINE 백엔드·콘텐츠 파이프라인 개발자와 운영자</dd>
+        <dt>문제</dt><dd>승인된 파이프라인 계약을 API·워커·영속 경계로 구현하고 검증</dd>
+        <dt>핵심 흐름</dt><dd>API 접수 → 단일 워커 선점 → SEARCH·FETCH·GENERATE·VALIDATE → 원자 공개·집계 → 수동 embedding repair</dd>
+        <dt>기준 설계</dt><dd><a href="issue-content-pipeline-design.html">issue-content-pipeline-design.html</a></dd>
+        <dt>승인 시각</dt><dd><time datetime="2026-09-13">2026-09-13</time> 기존 pipeline 승인 · <time datetime="2026-09-14">2026-09-14</time> G28-A·G30-B·G31-A·G32-A 통합 설계 승인 · 사용자 “개선 ㄱ”</dd>
+      </dl>
+    </header>
+    <nav aria-label="문서 탐색">
+      <a href="#pr-review-hardening-followup-implementation-control">G41~G44</a> · <a href="#baseline">기준</a> · <a href="#implementation">구현</a> · <a href="#status">상태</a> ·
+      <a href="#verification">검증</a> · <a href="#issues">이슈</a> · <a href="#review">리뷰</a> · <a href="#control">이해 점검</a>
+    </nav>
+    <main>
+      <article>
+        <section id="pr-review-hardening-followup-implementation-control">
+          <h2>PR #2 재리뷰 잔여 위험 보강 구현 제어 · G41~G44</h2>
+          <p><strong>implementation-control-state: 구현 완료 · 운영 검증 보류.</strong> 2026-09-14 사용자 “개선 ㄱ”으로 설계 기준 문서의 G41-A·G42-A·G43-A·G44-A 후속 보강 구현을 승인했다. 승인된 코드·회귀 테스트·focused/full gate는 완료했으며, 이 section은 기존 G38~G40 구현 기록을 대체하지 않고 재리뷰에서 열린 네 경계의 결과와 잔여 위험을 추적한다.</p>
+          <dl>
+            <dt>Baseline reference</dt><dd><a href="issue-content-pipeline-design.html#pr-review-hardening-followup">issue-content-pipeline-design.html#pr-review-hardening-followup</a> · 승인 시각 <time datetime="2026-09-14">2026-09-14</time> · 대상 워크트리 <code>.worktrees/data-pipeline</code>.</dd>
+            <dt>Goal</dt><dd>외부 응답 body stream read 오류를 결과 불명 transport로 보존하고, embedding repair가 철회·종료 경계에서 불필요한 provider 호출과 RUNNING claim 잔류를 만들지 않게 하며, 장기 idle worker의 abort listener 누수를 제거한다.</dd>
+            <dt>Files and symbols</dt><dd><code>apps/batch/src/pipeline/openAi.provider.ts</code>, <code>naverNews.provider.ts</code>, <code>pipeline.embeddingRepair.job.ts</code>, <code>pipeline.worker.ts</code>, <code>apps/batch/src/runner/batch.runner.ts</code>, <code>libs/core/src/pipeline/repository/pipeline.repository.ts</code> 및 SQL/InMemory adapter와 focused tests.</dd>
+            <dt>Invariants</dt><dd>body read 실패는 <code>UpstreamError + retryable + UNKNOWN</code>, 완전 수신 후 parse 실패는 <code>InvalidOutput</code>이다. repair는 관찰한 publication 상태가 PUBLISHED가 아니면 provider를 시작하지 않고 현재 claim을 release한다. signal 이후 새 task를 시작하지 않고 남은 owner claim을 release한다. timer 완료·abort 어느 경로에서도 listener가 남지 않는다.</dd>
+            <dt>Forbidden changes</dt><dd>withdrawal writer와의 절대 lock/lease 통합, transaction 안 외부 호출, provider port의 강제 signal 계약, 새 WITHDRAWN task status/migration, 자동 RUNNING takeover, 실제 DB/외부 자격증명 실행, PR push.</dd>
+            <dt>Focused verification</dt><dd><code>npm run test:jest -- test/unit/openAiProvider.test.ts test/unit/naverProvider.test.ts test/unit/pipelineEmbeddingRepair.test.ts test/unit/batchRunner.test.ts test/unit/pipelineWorker.test.ts</code> · 5 suites/27 tests 통과.</dd>
+          </dl>
+          <table><caption>후속 보강 구현 결과</caption><thead><tr><th>항목</th><th>구현 결과</th><th>증거·잔여 위험</th></tr></thead><tbody>
+            <tr><td>G41 · body stream</td><td>OpenAI JSON/embedding과 Naver search에서 response text read와 JSON parse를 분리했다. read 오류는 <code>UpstreamError + retryable + resultUncertain</code>, parse 오류는 <code>InvalidOutput</code>이다.</td><td>stream-error·parse-error 회귀 테스트 통과. 실제 provider stream 표본은 운영 검증 보류.</td></tr>
+            <tr><td>G42 · withdrawal check</td><td>repair가 provider 직전에 <code>loadIssue</code>로 PUBLISHED를 재확인하고, 아니면 token-fenced 현재 claim을 release한다.</td><td>claim 후 WITHDRAWN fixture에서 provider 호출 0회·claim 잔류 0회. withdrawal writer와의 절대 race-free 동기화는 후속 설계로 보류.</td></tr>
+            <tr><td>G43 · repair drain</td><td><code>BatchRunner → PipelineEmbeddingRepairJob</code>으로 signal을 전달하고 task 사이 abort를 확인하며, 현재 owner의 남은 claim을 graceful release한다.</td><td>signal 전파·claim release 회귀 테스트 통과. 현재 provider 호출은 adapter timeout까지 완료될 수 있고 실제 subprocess SIGTERM은 보류.</td></tr>
+            <tr><td>G44 · wait listener</td><td>timer 완료·abort 양쪽에서 named handler와 settled guard로 listener를 제거한다.</td><td>반복 idle polling에서 동시 listener 최대 1개, abort 완료 후 0개를 검증했다.</td></tr>
+          </tbody></table>
+          <div class="flow"><span>body read/parse 분리</span><span>→ publication 재확인</span><span>→ provider 또는 release</span><span>→ signal drain</span><span>→ claim/listener 정리</span></div>
+          <dl>
+            <dt>Verification evidence</dt><dd><code>npm run typecheck</code>, <code>npm run lint</code>, <code>npm run format:check</code>, <code>npm test -- --runInBand</code>(unit 17 suites/91 tests, integration 2 suites/11 tests), <code>npm run build</code>, <code>npm run contracts:check</code>, <code>npm run test:smoke</code>, <code>git diff --check</code> 통과.</dd>
+            <dt>No-write critical review</dt><dd>별도 critical-review lane은 결과를 반환하지 않아 종료했고, 동일 diff에 대해 독립 read-only 재점검을 수행했다. 승인 범위 안의 추가 정적 blocker는 확인하지 않았다. claim-after-withdrawal check와 absolute writer synchronization, 실제 DB/외부 provider/subprocess 경계는 구분해 잔여 위험으로 유지한다.</dd>
+            <dt>Residual risk</dt><dd>실제 PostgreSQL/pgvector의 migration·lock·rollback·withdrawal race, 실제 provider response stream, 실제 subprocess SIGTERM은 실행하지 않았다. <code>loadIssue</code>·claim release 자체의 DB 장애 시에는 confirmed-dead owner 수동 reclaim 운영 절차가 필요하다.</dd>
+            <dt>Developer operational understanding</dt><dd>미실시. 기술 검증과 운영자 이해 확인은 분리하며, 운영 공개·merge sign-off는 위 잔여 위험의 별도 수용 이후로 보류한다.</dd>
+          </dl>
+        </section>
+        <section id="pr-review-hardening-implementation-control">
+          <h2>PR #2 리뷰 보완 구현 제어 · G38~G40</h2>
+          <p><strong>implementation-control-state: 구현 완료 · 운영 검증 보류.</strong> 2026-09-14 사용자 “개선 ㄱㄱ”을 G38-A·G39-A·G40-A 및 기존 계약 정합화 범위에 대한 명시적 구현 승인으로 기록한다. 승인된 코드·테스트·계약·문서 변경은 완료했으며, 실제 PostgreSQL/pgvector 실행 증거는 별도 운영 수용으로 남긴다.</p>
+          <dl>
+            <dt>Approved scope</dt><dd>WITHDRAWN issue의 embedding task를 두 adapter에서 PUBLISHED fence로 숨기고 repair/provider/vector 저장을 차단한다. 이미 SUCCEEDED인 동일 입력 task가 provider 실패로 PENDING으로 역행하지 않게 한다. API UUID 입력을 UUIDv7 계약과 GET 400 응답에 맞춘다. FETCH 실패를 G39-A 규칙으로 분류한다. 확정 provider 실패는 usage <code>FAILED</code>, 결과 불명만 <code>UNKNOWN</code>으로 기록한다. SIGTERM/SIGINT를 worker <code>AbortSignal</code>에 전달하고, <code>CANCELLED</code> 문서와 실제 <code>FAILED + INTERRUPTED</code>를 정합화한다.</dd>
+            <dt>Deferred scope</dt><dd>pre-call usage <code>RUNNING</code> row/finalize, 실패 response metadata 확장(G26-B), 새 WITHDRAWN task status/migration, DB canonical URL column, repository transaction boundary 전면 개편, 실제 PostgreSQL migration·lock·rollback·partial unique 운영 검증은 이번 구현에서 닫지 않는다.</dd>
+            <dt>Invariants</dt><dd>WITHDRAWN issue에는 embedding provider 호출과 새 vector 저장이 없다. 동일 입력으로 SUCCEEDED인 task는 실패 처리로 PENDING이 되지 않는다. <code>retryable</code>은 재시도 정책이고 <code>UNKNOWN</code>은 결과 불확실성이다. 기존 G4 단일 worker·수동 복구와 공개 API·본문 미저장 정책은 유지한다.</dd>
+            <dt>Acceptance</dt><dd>SQL/InMemory adapter의 claim·save·list·count·pending 전환 fence와 회귀 테스트, UUIDv7/OpenAPI GET 400 계약 테스트, FETCH 분류 테스트, usage status 매핑 테스트, signal drain 테스트, interrupt 문서 정합화가 모두 통과한다.</dd>
+            <dt>No-write critical review</dt><dd>구현 직후의 1차 read-only 점검 기록이다. 최신 재리뷰에서는 응답 body stream 분류, claim 이후 withdrawal 경합, repair signal 전달, idle <code>AbortSignal</code> listener 수명을 추가로 점검했으며 현재 판정은 아래 최신 재리뷰 섹션이 우선한다. 실제 PostgreSQL lock 경합과 migration 실행은 여전히 검증하지 않았다.</dd>
+            <dt>Verification plan</dt><dd>변경 파일 focused test → <code>npm run typecheck</code> → <code>npm test -- --runInBand</code> → 가능한 저장소 gate를 순서대로 실행한다. 실제 PostgreSQL/pgvector 실행 증거가 없으면 구현 문서에 운영 해결로 표시하지 않는다.</dd>
+            <dt>Forbidden changes</dt><dd>현재 main worktree의 변경 수정, 승인되지 않은 category/schema/API breaking change, 자동 RUNNING takeover, G26-B 범위 확장, GitHub push/PR 원격 상태 변경.</dd>
+          </dl>
+          <table><caption>현재 구현 결과</caption><thead><tr><th>항목</th><th>결과</th><th>증거·잔여 위험</th></tr></thead><tbody>
+            <tr><td>G38 · withdrawn embedding fence</td><td>해결</td><td>SQL/InMemory의 claim·save·list·count·pending 전환에 PUBLISHED fence를 적용하고 withdrawn·SUCCEEDED 역행 회귀 테스트를 통과했다. 실제 PostgreSQL lock 경합은 운영 검증 보류.</td></tr>
+            <tr><td>G39 · FETCH failure classification</td><td>해결</td><td>전부 upstream/source unavailable인 경우와 혼합 실패를 구분하는 integration test를 통과했다.</td></tr>
+            <tr><td>G40 · usage certainty</td><td>해결</td><td>확정 HTTP/provider 실패는 FAILED, transport/timeout 결과 불명은 UNKNOWN으로 구분하고 provider·repair test를 통과했다. pre-call RUNNING/failure metadata는 G26-B 보류.</td></tr>
+            <tr><td>계약·종료·문서 정합화</td><td>해결</td><td>UUIDv7 pattern·GET 400 OpenAPI, SIGTERM/SIGINT 전달, CANCELLED 예약 상태 문서화를 반영했다. contracts, smoke, build, full test gate 통과.</td></tr>
+          </tbody></table>
+        </section>
+        <section id="pr-review-hardening-review">
+          <h2>PR #2 리뷰 보완 구현 1차 재리뷰 기록</h2>
+          <p><strong>review-status: 후속 보강으로 대체됨.</strong> 이 section은 G41~G44 구현 전의 발견 기록이다. 최신 구현·검증 판정은 위 <a href="#pr-review-hardening-followup-implementation-control">후속 보강 구현 제어</a> section을 우선한다.</p>
+          <dl>
+            <dt>Review scope</dt><dd><a href="https://github.com/newtine-wanted/newtine-backend/pull/2">PR #2</a> 권고 반영분의 SQL/InMemory embedding fence, provider 실패 확실성, FETCH 분류, UUIDv7/OpenAPI, batch signal lifecycle과 generated contract를 대상으로 한다.</dd>
+            <dt>Review context</dt><dd>작성자: Codex 자기 변경 · 기준점: <code>0ec43fca7b83aeb198549440ecee0d5dac47744d</code> · 대상: uncommitted working tree · 리뷰 유형: implementation 후 critical review.</dd>
+            <dt>Vertical flow</dt><dd>API UUIDv7 입력 → batch signal/외부 실패 분류 → PUBLISHED task claim → embedding provider 호출 → claim-token·publication fence 저장 → pending count/usage/로그 관찰.</dd>
+            <dt>Invariants</dt><dd>withdrawn task는 새 vector를 저장하지 않고, 동일 입력의 SUCCEEDED task는 provider 실패로 PENDING으로 역행하지 않으며, retryable과 UNKNOWN은 각각 재시도 정책과 결과 확실성을 뜻한다. signal은 새 pipeline run을 시작하지 않고, API/OpenAPI가 UUIDv7 계약과 GET 400을 함께 노출해야 한다.</dd>
+          </dl>
+          <figure>
+            <div class="flow"><span>HTTP·URL 입력</span><span>FETCH/usage 분류</span><span>claim·PUBLISHED fence</span><span>provider side effect</span><span>token-fenced save</span><span>signal drain·운영 관찰</span></div>
+            <figcaption>재리뷰에서 확인한 핵심 경계의 텍스트 등가: provider 호출 전/후의 publication 상태와 transport 결과 확실성, batch 모드별 종료 전파를 분리해 확인한다.</figcaption>
+          </figure>
+          <table><caption>최신 review issue-register</caption><thead><tr><th scope="col">ID·상태</th><th scope="col">심각도</th><th scope="col">기대 동작과 실제 동작</th><th scope="col">조건·영향</th><th scope="col">최소 조치</th></tr></thead><tbody>
+            <tr><td>PR2-HARD-REV-001 · open</td><td>P2 · Non-blocking risk</td><td>응답 header 뒤 body stream 단절도 결과 불명 transport 오류로 <code>UNKNOWN</code>·재시도 가능해야 한다. 현재 OpenAI JSON/embedding과 Naver search는 timeout 이름만 uncertain으로 바꾸고, 일반 <code>Error</code>/<code>TypeError</code>는 <code>InvalidOutput</code>으로 끝낸다.</td><td>HTTP 200 뒤 connection reset 또는 중간 stream error. 호출 결과·비용이 불명인데 usage는 <code>FAILED</code>, <code>retryable=false</code>가 되어 일시 장애가 영구 pipeline 실패로 바뀐다. <code>openAi.provider.ts:58-70,101-119</code>, <code>naverNews.provider.ts:58-71</code>.</td><td>body stream 읽기 실패와 읽기 완료 후 JSON 문법 오류를 분리해 전자는 <code>UpstreamError + retryable + resultUncertain</code>로 매핑하고, 두 adapter의 stream-error test를 추가한다.</td></tr>
+            <tr><td>PR2-HARD-REV-002 · open</td><td>P2 · Non-blocking risk</td><td>withdrawn issue의 repair provider 호출도 차단해야 한다. 현재 claim 시점과 save 시점에는 PUBLISHED fence가 있지만, repair가 task를 반환받은 뒤 provider 호출 직전에 publication 상태를 다시 확인하지 않는다.</td><td>최대 100개를 claim한 후 뒤 task가 처리되기 전에 issue가 WITHDRAWN으로 바뀌면 외부 provider로 제목·요약이 전송되고 usage 비용이 발생한다. vector 저장만 <code>saveEmbedding</code>에서 stale 처리된다. <code>pipeline.embeddingRepair.job.ts:49-88</code>, <code>mikroOrmPipeline.repository.ts:993-1015</code>.</td><td>provider 직전 상태 재확인과 claim-after-withdrawal 회귀 테스트를 추가한다. 절대적인 race-free 보장이 필요하면 withdrawal writer와 RUNNING claim의 동기화/lease 규칙을 별도 결정한다.</td></tr>
+            <tr><td>PR2-HARD-REV-003 · open</td><td>P2 · Non-blocking risk</td><td>batch 프로세스의 SIGTERM/SIGINT는 실행 중인 장기 batch 모드에도 전달되어야 한다. 현재 signal은 <code>pipelineWorker</code>만 <code>PipelineBatchJob → PipelineWorker.runForever</code>로 전달되고, <code>pipelineEmbeddingRepair</code>는 100개 task loop와 provider 호출을 끝까지 수행한다.</td><td>repair provider가 느리거나 100개 task가 남은 상태에서 배포 grace period를 초과할 수 있고, 강제 종료되면 RUNNING claim reclaim이 추가로 필요하다. <code>batch.runner.ts:41-49,104-116</code>, <code>pipeline.embeddingRepair.job.ts:35-64</code>.</td><td>signal을 repair job까지 전달하고 task 사이 중단을 지원한다. 중단 시 미처리 claim의 반환/reclaim 절차와 subprocess SIGTERM test를 함께 고정한다.</td></tr>
+            <tr><td>PR2-HARD-REV-004 · open</td><td>P2 · Non-blocking risk</td><td>signal을 장기 worker에 연결한 뒤 idle polling의 abort listener도 timer 종료 시 정리되어야 한다. 현재 <code>wait()</code>는 매 poll마다 anonymous listener를 추가하고 abort 때만 <code>once</code>로 제거한다.</td><td>run이 장시간 idle이면 정상 timer 경로에서 listener와 closure가 signal에 계속 남아 listener 수와 메모리가 poll 횟수에 비례해 증가한다. <code>pipeline.worker.ts:688-703</code>; signal 전달 활성화는 <code>pipeline.batch.job.ts:10-17</code>.</td><td>named abort handler를 두고 timer 완료·abort 양쪽에서 <code>removeEventListener</code>하는 구현과 장기 idle listener-count test를 추가한다.</td></tr>
+            <tr><td>PR2-HARD-REV-005 · open</td><td>논의 필요 · 운영 검증 보류</td><td>SQL adapter의 PUBLISHED fence·<code>FOR UPDATE OF t SKIP LOCKED</code>·transaction rollback이 실제 PostgreSQL/pgvector에서 같은 의미로 동작하는지 확인되어야 한다. 현재 test는 SQL 문자열·mock transaction context만 검증한다.</td><td>실제 DB에서 SQL 문법, lock 경합, withdrawal 동시성, partial migration/rollback, vector upsert를 아직 실행하지 않았다. 코드 gate 통과만으로 production data/state 경계를 증명할 수 없다.</td><td>격리 pgvector DB에서 fresh/기존 schema migration, 재실행, 두 repair 경쟁, withdrawal 전후 claim/save, rollback/down 실패 경계를 실행하고 증거를 남긴다.</td></tr>
+          </tbody></table>
+          <h3>해결 확인</h3>
+          <table><caption>이전 권고 대비 fixed 항목</caption><thead><tr><th scope="col">항목</th><th scope="col">상태</th><th scope="col">증거</th></tr></thead><tbody>
+            <tr><td>G38 · withdrawn fence / SUCCEEDED 역행</td><td>fixed · 범위 내</td><td>SQL/InMemory claim·save·list·count·pending/failure/requeue에 PUBLISHED 조건을 적용하고, withdrawn 선행·SUCCEEDED 유지 테스트를 통과했다. claim 이후 provider race는 위 PR2-HARD-REV-002로 남는다.</td></tr>
+            <tr><td>G39 · FETCH classification</td><td>fixed · 범위 내</td><td>all-upstream, all-source-unavailable, mixed failure integration test가 통과했다. 응답 body stream 오류의 provider mapping은 PR2-HARD-REV-001로 남는다.</td></tr>
+            <tr><td>G40 · usage certainty</td><td>fixed · 범위 내</td><td>known 429/5xx는 FAILED, fetch/timeout transport는 UNKNOWN으로 구분하는 provider·repair test가 통과했다. pre-call RUNNING/failure metadata는 승인된 G26-B 보류 범위다.</td></tr>
+            <tr><td>API·문서·worker drain</td><td>fixed · 부분 범위</td><td>UUIDv7 pattern·GET 400 generated contract, CANCELLED/FAILED+INTERRUPTED 문서, pipeline worker signal forwarding을 확인했다. repair signal은 PR2-HARD-REV-003으로 남는다.</td></tr>
+          </tbody></table>
+          <h3>검증 증거와 공백</h3>
+          <details><summary>현재 로컬 gate</summary><samp>npm test -- --runInBand: unit 16 suites/85 tests, integration 2 suites/11 tests passed
+npm run typecheck: passed
+npm run lint: passed
+npm run format:check: passed
+npm run build: passed
+npm run contracts:check: passed
+npm run test:smoke: passed
+git diff --check: passed</samp></details>
+          <aside>실제 PostgreSQL/pgvector migration·SQL lock semantics·rollback·withdrawal race와 실제 subprocess SIGTERM, 실제 provider response stream 오류는 이번 재리뷰에서 실행하지 않았다. 이 공백은 기존 구현 제어 문서의 “운영 검증 보류”와 일치하며, 해결로 표시하지 않는다.</aside>
+          <p><strong>최종 판단: 논의 필요.</strong> P1 blocker급의 정적 코드 결함은 확인하지 않았지만, body stream 분류·withdrawal 이후 provider 호출·repair shutdown·idle listener 수명이라는 P2 risk 4건과 실제 PostgreSQL 운영 검증 공백이 남아 있다. 이 판정은 merge/release 최종 승인과 별개다.</p>
+        </section>
+        <section id="baseline">
+          <h2>승인된 기준과 범위</h2>
+          <p>G1~G17과 통합 실행 계약, G18~G21 AI 설정 분리, G22 서버 소유 limits 비공개, G23 pipeline 도메인 예외 경계를 구현 기준으로 고정한다. 운영자 JWT 발급·검증·Guard는 별도 설계로 남기며 이번 변경에서 호출하지 않는다.</p>
+          <table>
+            <caption>이번 구현 범위와 불변식</caption>
+            <thead><tr><th>범위</th><th>구현 계약</th><th>금지·보류</th></tr></thead>
+            <tbody>
+              <tr><td>접수·재시도</td><td>멱등 키·정규화 요청 해시, 활성 run 1개, stale attempt 거절, API 202. 프로세스 종료 확인 시 executionId를 지정해 INTERRUPTED 처리 후 수동 재시도. CONTENT는 명시된 하나 이상의 실패 job만 선택하고, DISCOVERY의 job 목록은 선택사항이다.</td><td>JWT·TTL 자동 장애 회수·무한 재시도</td></tr>
+              <tr><td>콘텐츠</td><td>SEARCH→FETCH→GENERATE→VALIDATE, 본문/GENERATE 입력 미저장</td><td>검증 전 공개·입력 원문 로그·재보도 자동 근거 연결</td></tr>
+              <tr><td>공개</td><td>독립 근거 2개 이상과 서버/의미 검증 통과 시 상세·영향·근거·PUBLISHED·job 성공 원자 반영</td><td>UNCERTAIN 공개·WITHDRAWN 재공개</td></tr>
+              <tr><td>실행</td><td>단일 장기 워커, 이전 프로세스 종료 확인 뒤 운영자 수동 재시도</td><td>TTL만으로 RUNNING takeover·멀티 워커 failover</td></tr>
+              <tr><td>외부 공급자</td><td>네이버 뉴스 검색·본문 fetch, OpenAI Responses/Embeddings 어댑터(현재 공식 HTTP API를 native fetch로 호출)</td><td>자격증명 없는 실제 공개·우회 수집</td></tr>
+            </tbody>
+          </table>
+          <aside>문서의 수치·상태·실패 분류를 바꾸면 설계 승인 범위를 다시 검토한다. 실제 네이버/OpenAI 표본과 PostgreSQL 연결은 별도 수용 증거로 표시한다.</aside>
+        </section>
+        <section id="implementation">
+          <h2>구현(as-built)</h2>
+          <figure>
+            <div class="flow"><span>POST /pipeline/runs</span><span>pipeline run 저장</span><span>단일 worker claim</span><span>SEARCH</span><span>FETCH</span><span>GENERATE</span><span>VALIDATE</span><span>원자 공개</span><span>run 집계</span></div>
+            <figcaption>API와 미래 스케줄러는 공통 실행 접수 경계를 사용하고, 외부 호출은 DB 트랜잭션 밖에서 수행한다.</figcaption>
+          </figure>
+          <ul>
+            <li><code>libs/core/src/pipeline</code>: 상태·상한·도메인 검증, 실행 접수/상태/수동 재시도 유즈케이스, repository port와 PostgreSQL adapter.</li>
+            <li><code>apps/api/src/pipeline</code>: Nestia·Typia endpoint와 API 오류 매핑. 인증은 외부 의존성으로 남긴다.</li>
+            <li><code>apps/batch/src/pipeline</code>: 단일 worker 조정, 네이버/OpenAI 어댑터, 단계별 실패 분류와 사용량 메타데이터.</li>
+            <li>외부 adapter 실패는 <code>PipelineException</code>의 pipeline 의미 코드로 통일하고, retryable은 worker 내부 메타데이터로만 사용한다. provider HTTP/SDK 상세는 API·job 계약에 노출하지 않는다.</li>
+            <li><code>POST/GET/POST retry/POST interrupt /pipeline/runs</code>와 generated SDK·E2E·OpenAPI를 계약 산출물에 반영했다. 운영자가 <code>executionId</code>로 종료를 확인한 뒤 중단 처리하고 재시도할 수 있다. CONTENT 재시도는 필수·최소 1건의 <code>failedJobIds</code>로 선택된 실패 job만 <code>retry_scope/retry_job_ids</code>에 기록하고 discovery를 건너뛰어 재확보한다. 임베딩 실패는 콘텐츠 성공을 되돌리지 않고 <code>embeddingPendingCount</code>로 표시한다.</li>
+            <li><code>libs/core/src/pipeline/migrations</code>: MikroORM migration 클래스와 명시적 등록 순서로 온보딩·파이프라인 schema를 적용한다. <code>npm run db:migrate</code> 단일 runner를 사용하고, 본문·프롬프트·원시 응답 컬럼은 만들지 않는다.</li>
+          </ul>
+        </section>
+        <section id="status">
+          <h2>구현 상태</h2>
+          <p id="lifecycle">현재 lifecycle: 구현 완료(운영 공개 보류) · 구현 제어 상태: 구현 완료(운영 공개 보류)</p>
+          <table>
+            <caption>완료 기준</caption>
+            <thead><tr><th>검사 대상</th><th>통과 조건</th><th>현재 증거</th></tr></thead>
+            <tbody>
+              <tr><td>접수 경계</td><td>같은 키·같은 해시는 기존 run, 다른 해시/활성 신규는 409</td><td>집중 unit/integration 테스트에 기록</td></tr>
+              <tr><td>상태 전이</td><td>QUEUED→RUNNING 선점과 attempt/execution_id 조건부 갱신</td><td>repository/worker 테스트에 기록</td></tr>
+              <tr><td>검증·공개</td><td>구조·참조·독립성 실패는 공개 없음, 통과만 원자 채택</td><td>순수 validator 테스트와 저장 경계 테스트</td></tr>
+              <tr><td>복구</td><td>성공 job 보존, CONTENT에서는 명시된 하나 이상의 실패 job만 수동 재시도, DISCOVERY 목록은 선택사항, stale attempt 409</td><td>retry 테스트에 기록</td></tr>
+              <tr><td>중단 확인</td><td>실제 종료를 확인한 운영자만 일치하는 executionId로 RUNNING을 INTERRUPTED/FAILED로 정리</td><td>interrupt 유즈케이스·계약 테스트와 raw transaction 경계에 기록</td></tr>
+              <tr><td>비밀·입력</td><td>본문/원시 prompt/output을 DB·로그에 남기지 않음</td><td>adapter 사용량 기록·로그 필드 검사</td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="verification">
+          <h2>검증 증거와 실행 명령</h2>
+          <pre><code>npm run test:jest -- test/unit/pipelineValidation.test.ts
+npm run test:jest -- test/unit/pipelineEmbeddingRepair.test.ts test/unit/mikroOrmPipelineRepository.test.ts
+npm run test:jest -- test/integration/pipelineLifecycle.test.ts
+npm run format:check
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run contracts:check
+npm run test:smoke</code></pre>
+          <p><time datetime="2026-09-13">2026-09-13</time> 기준 위 명령은 모두 통과했다. <code>npm run test:smoke</code>도 API 포트 바인딩 권한을 허용한 환경에서 health·기존 계약·로그 상관관계를 포함해 통과했다. 실제 네이버/OpenAI 자격증명과 격리 PostgreSQL을 이용한 파이프라인 표본 실행 및 migration 적용은 아직 미실행이다. 성공 로그나 응답에 본문·프롬프트를 복사하지 않는다.</p>
+        </section>
+        <section id="issues">
+          <h2>이슈·잔여 위험</h2>
+          <table>
+            <thead><tr><th>ID</th><th>위험/이슈</th><th>처리</th><th>상태</th></tr></thead>
+            <tbody>
+              <tr><td>PIPE-IMPL-001</td><td>기존 저장소에는 업무 테이블과 실행 migration이 없었다.</td><td>pipeline 전용 SQL과 raw repository를 함께 추가했다. 실제 DB 적용 증거는 별도 수용 단계로 남긴다.</td><td>구현 완료 · DB 적용 미검증</td></tr>
+              <tr><td>PIPE-IMPL-002</td><td>네이버 원문 접근·한국어 품질·OpenAI 계정 모델 접근은 자격증명에 의존한다.</td><td>어댑터 경계와 실패 분류를 먼저 검증하고 표본 실행은 별도 운영 승인으로 남긴다.</td><td>보류</td></tr>
+              <tr><td>PIPE-IMPL-003</td><td>운영자 JWT는 별도 작업이다.</td><td>이번 API는 인증 Guard를 추가하지 않고 외부 인증 경계로 문서화한다.</td><td>범위 밖</td></tr>
+              <tr><td>PIPE-IMPL-004</td><td>외부 adapter가 <code>Error</code> 기반 <code>PipelineAdapterError</code>를 worker까지 전달해 provider 세부와 도메인 실패가 섞였다.</td><td><code>PipelineException</code>의 pipeline 의미 코드와 내부 retryable 메타데이터로 번역하고, adapter·worker·예외 테스트를 갱신했다.</td><td>해결됨 · 실제 provider 표본은 보류</td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="review">
+          <h2>자기 변경 리뷰</h2>
+          <dl>
+            <dt>리뷰 유형</dt><dd>자기 변경 리뷰 · 작성자/리뷰어: Codex</dd>
+            <dt>저장소·브랜치</dt><dd><code>newtine-backend / codex/data-pipeline</code></dd>
+            <dt>기준점·대상점</dt><dd><code>e360b1c</code> 이후 working tree 전체 · PR/이슈 없음</dd>
+            <dt>범위</dt><dd>pipeline API, worker, Naver/OpenAI adapter, core repository·migration, generated contract와 focused tests</dd>
+            <dt>갱신 시각</dt><dd><time datetime="2026-09-14">2026-09-14</time> · 상태: <strong>재검토 완료(수정 필요·운영 수용 보류)</strong></dd>
+          </dl>
+          <h3>검토 범위와 실제 흐름</h3>
+          <p>승인된 계약과 실제 diff를 대조하고 <code>입력 → 판단 → 상태 변화 → 외부 부작용 → 조회 결과</code> 수직 경로를 추적했다. API 접수·멱등성, 단일 worker 선점, SEARCH/FETCH/GENERATE/VALIDATE, 원자 공개, 중단·재시도, 실패 시 사용량 기록을 검토했다. JWT는 승인된 범위 밖이므로 결함으로 판정하지 않았다. 이번 재검토에서는 일반 HTTP 헤더를 포함한 Nestia validator 경계와 MikroORM transaction context 전달 여부도 확인했다.</p>
+          <figure>
+            <figcaption>리뷰에서 확인한 위험 경계</figcaption>
+            <pre><code>DB run/job owner 확인
+  → 외부 호출(트랜잭션 밖)
+  → 생성·의미 검증
+  → issue_details/impacts/articles + PUBLISHED + job SUCCEEDED 원자 커밋(동일 transaction context)
+  → run 집계
+
+운영자 interrupt ─────┘ (같은 run/job 상태와 충돌 가능)
+동시 retry ────────────┘ (expectedAttempt stale 검증과 충돌 가능)</code></pre>
+          </figure>
+          <h3>발견 사항</h3>
+          <table>
+            <caption>재검토 findings와 현재 상태</caption>
+            <thead><tr><th scope="col">ID·상태·심각도</th><th scope="col">증거·발생 조건·영향</th><th scope="col">기대 동작·최소 보완 방향</th></tr></thead>
+            <tbody>
+              <tr>
+                <th scope="row">PIPE-REV-001<br><code>fixed</code> · Blocker</th>
+                <td><code>saveJobSuccess</code>의 owner lock, issue 상세·영향·근거·공개·job 성공 쿼리를 공통 <code>executeInTransaction</code>으로 전환해 <code>em.getTransactionContext()</code>를 전달했다. 코드 경계에서는 모든 side effect가 같은 transaction context를 사용한다.</td>
+                <td>실제 PostgreSQL에서 partial rollback·interrupt 경합을 확인하는 운영 검증은 <code>PIPE-REV-008</code>로 남긴다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-002<br><code>fixed</code> · Blocker</th>
+                <td><code>retry</code>와 <code>interrupt</code>의 run/job lock·검증·상태 갱신 쿼리를 공통 <code>executeInTransaction</code>으로 전환했다. callback의 raw query가 pool client로 빠지지 않고 transaction context를 공유한다.</td>
+                <td>같은 <code>expectedAttempt</code>의 동시 재시도와 interrupt 경합을 실제 PostgreSQL에서 검증하는 수용 조건은 <code>PIPE-REV-008</code>로 남긴다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-003<br><code>fixed</code> · Blocker</th>
+                <td><code>IssueCandidate.categoryCode</code>가 10개 allow-list 타입을 사용하고 OpenAI strict schema도 같은 enum을 요구한다. <code>mikroOrmPipeline.repository.ts:421-452</code>는 후보 값을 검증한 뒤 INSERT parameter로 전달하며 migration FK가 재확인한다.</td>
+                <td>정치 외 후보는 해당 category code로 저장되고, 미지원 값은 INVALID_INPUT/INVALID_OUTPUT로 등록·공개 경로에 들어가지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-004<br><code>fixed</code> · Blocker</th>
+                <td><code>pipeline.worker.ts:109-170</code>가 NEW 후보의 비어 있지 않은 고유 <code>sourceArticleIds</code>가 현재 discovery 저장 집합의 부분집합인지 확인하고, 저장소도 seed/source lineage를 재검증한다. 실패 후보는 UNCERTAIN으로 집계한다.</td>
+                <td>발견 URL에서 벗어난 ID·빈 seed·중복 seed는 job 등록 전에 거절된다. integration은 외부 ID 후보가 job을 만들지 않는 것을 확인한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-005<br><code>fixed</code> · Non-blocking risk</th>
+                <td><code>pipeline.limits.ts:28-57</code>와 API 입력이 <code>validBodiesTarget ≥ 2</code>, <code>maxBodyAttempts ≥ validBodiesTarget</code>를 함께 강제한다. worker의 독립 근거 최소2와 접수 상한이 더 이상 성공 불가능한 조합을 허용하지 않는다.</td>
+                <td>unit에서 target 1, attempts 2/default target 3, 명시 불일치가 모두 거절되고 OpenAPI도 최소값을 반영한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-006<br><code>fixed</code> · Non-blocking risk</th>
+                <td><code>openAi.provider.ts:31-107,352-370</code>가 Responses/Embeddings 응답의 request ID와 token usage만 <code>ProviderResult</code>로 전달한다. worker가 호출별 row를 기록하고 DB/API snapshot은 run 전체의 호출·성공/실패/UNKNOWN·토큰·비용 집계를 제공한다.</td>
+                <td>본문·prompt·원시 응답은 저장하지 않는다. 실제 provider payload의 usage 필드 표본은 운영 수용 단계에서 확인한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-007<br><code>fixed</code> · Blocker</th>
+                <td>재검토에서 <code>POST retry scope=CONTENT</code>가 discovery를 건너뛰어야 한다는 계약과 worker의 단일 경로가 충돌할 수 있음을 추가 확인했다.</td>
+                <td><code>pipeline_runs.retry_scope/retry_job_ids</code>를 저장하고 <code>pipeline.worker.ts:95-100,241-266</code>가 CONTENT 재시도에서는 retry transaction이 다시 큐에 넣은 실패 job만 seed부터 재확보한다. DISCOVERY 재시도는 중단/미완료 또는 명시 실패 job만 재개한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-008<br><code>open</code> · Blocker</th>
+                <td>현재 <code>test/integration/pipelineLifecycle.test.ts</code>는 <code>InMemoryPipelineRepository</code>만 실행한다. MikroORM migration을 적용하는 npm/배포 단계와 연결은 추가했지만, <code>saveJobSuccess</code>↔<code>interrupt</code> 경합·동시 retry의 실제 PostgreSQL 행 잠금·반환 행 수 실행 증거가 없다.</td>
+                <td>격리 PostgreSQL에서 migration을 적용하고 배포 단계에 적용 명령/검증을 연결한 뒤, 두 transaction 경쟁·partial unique index·WITHDRAWN 경계를 자동 검증해야 운영 공개 수용이 가능하다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-009<br><code>fixed</code> · Blocker</th>
+                <td>save-success가 stale owner에서 no-op으로 끝난 뒤 worker가 임베딩 보완을 계속하면, 중단된 job의 issue에 파생 벡터만 남을 수 있었다.</td>
+                <td><code>saveJobSuccess</code>가 채택 여부를 boolean으로 반환하고 worker가 false이면 즉시 종료한다. 따라서 현재 attempt가 아닌 결과는 공개·임베딩 side effect를 만들지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-010<br><code>fixed</code> · Blocker</th>
+                <td>OpenAI 후보 adapter가 잘못된 <code>sourceArticleIds</code>를 필터링하면 일부 유효 ID만 남은 malformed 출력이 정상 후보처럼 보일 수 있었다.</td>
+                <td><code>openAi.provider.ts:196-204</code>가 원래 ID를 보존하고 worker/repository의 lineage 검증이 하나라도 잘못된 ID를 포함한 후보를 등록하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-011<br><code>fixed</code> · Blocker</th>
+                <td>FETCH adapter가 요청한 기사와 다른 <code>articleId</code>의 본문을 반환해도 GENERATE 입력으로 채택될 수 있었다.</td>
+                <td><code>pipeline.worker.ts:245-251,441-459</code>가 요청 기사 ID·필수 필드·본문 형태를 재확인한다. 불일치 결과는 외부 오류로 처리하고 근거 부족 상태를 유지한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-012<br><code>fixed</code> · Blocker</th>
+                <td>의미 검증 결과가 <code>PASS</code>이면서 충돌 목록을 함께 반환하면 상충 사실이 있는 콘텐츠가 공개될 수 있었다.</td>
+                <td><code>pipeline.validator.ts:94-108</code>가 빈 충돌 항목과 <code>PASS + conflicts</code> 조합을 거절한다. 단위 검증에 충돌 PASS 사례를 추가했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-013<br><code>fixed</code> · Blocker</th>
+                <td>Responses API가 <code>incomplete</code> 상태인데 출력 텍스트가 함께 존재하는 경우 부분 응답을 성공 JSON으로 시도할 수 있었다.</td>
+                <td><code>openAi.provider.ts:343-359</code>가 상태가 있으면 <code>completed</code>만 허용하고 <code>output_text</code> 타입의 텍스트만 파싱한다. 거절·불완전 응답은 INVALID_OUTPUT으로 남긴다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-014<br><code>fixed</code> · Non-blocking risk</th>
+                <td>초기 구현은 전역 모델·embedding 상수에 의존해 단계별 교체와 실제 provider model 추적이 어려웠다.</td>
+                <td><code>config/pipeline-ai.yml</code>의 단계별 model/dimension과 worker 시작 snapshot을 도입하고, provider 응답의 실제 model을 usage에 기록했다. embedding 차원은 현재 migration의 1536 경계로 검증한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-015<br><code>fixed</code> · Non-blocking risk</th>
+                <td>초기 구현은 프롬프트를 코드에 인라인하고 공통 <code>pipeline-v1</code>만 usage에 기록했다.</td>
+                <td>YAML instruction·prompt id/version을 worker 시작 snapshot으로 읽고, immutable SHA-256 hash와 단계별 version을 usage에 기록한다. 원문 prompt는 저장하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-016<br><code>fixed</code> · Non-blocking risk</th>
+                <td>초기 구현은 실제 OpenAI adapter payload·usage parsing을 직접 고정하지 않았다.</td>
+                <td><code>openAiProvider.test.ts</code>가 fetch mock으로 stage model, strict schema, store=false, actual model/request ID/token/prompt metadata를 검증하고, config test가 hash·dimension validation을 검증한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-017<br><code>fixed</code> · Non-blocking risk</th>
+                <td>외부 adapter가 <code>PipelineAdapterError extends Error</code>를 사용해 pipeline 도메인 예외 경계와 어긋났고, worker가 adapter 전용 failure kind를 직접 분기했다.</td>
+                <td><code>pipeline.exception.ts</code>의 <code>PipelineException</code>에 외부 실패 의미 코드와 내부 retryable을 추가하고, Naver/OpenAI·worker의 분기와 회귀 테스트를 전환했다. provider 전용 타입은 경계를 넘지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-018<br><code>fixed</code> · Blocker</th>
+                <td>재분석에서 확인한 transaction context 누락을 공통 <code>executeInTransaction</code> helper로 수정했다. retry·interrupt·registerIssue·saveJobSuccess의 모든 transaction callback raw query가 네 번째 context 인자로 <code>em.getTransactionContext()</code>를 받는다. fake transaction 회귀 테스트에서 모든 호출의 context가 동일함을 확인했다.</td>
+                <td>코드 수정은 완료했다. 실제 PostgreSQL에서 lock 유지·rollback·동시 경쟁을 확인하는 운영 수용 증거는 <code>PIPE-REV-008</code>에 남긴다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-019<br><code>fixed</code> · Blocker</th>
+                <td><code>TypedHeaders</code> validator가 전체 Express headers를 직접 exact 검증하던 문제를 header projection으로 수정했다. compiled Nestia metadata factory에 <code>host</code>, <code>content-type</code>, <code>content-length</code>, <code>idempotency-key</code>를 넣어도 정상 통과하고, key 누락은 400으로 거절된다.</td>
+                <td>필수 <code>Idempotency-Key</code> 계약과 OpenAPI metadata는 유지하면서 표준 HTTP headers를 허용한다. 직접 runtime 재현과 contracts check를 통과했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-020<br><code>fixed</code> · Non-blocking risk</th>
+                <td><code>registerIssue</code>가 run lock을 획득한 뒤 전체 이슈를 정규화 제목으로 재조회한다. 후보 문맥의 최근 100건 제한과 저장 직전 최종 gate를 분리했으며, 동일 제목이면 job을 만들지 않고 <code>{ outcome: 'duplicate' }</code>를 반환한다.</td>
+                <td>worker와 InMemory/SQL repository가 <code>created | duplicate</code> 결과를 처리한다. 전역 unique normalized-title은 반복 사건·후속 이슈를 막을 수 있어 도입하지 않았다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-021<br><code>fixed</code> · Blocker</th>
+                <td><code>NaverArticleBodyProvider</code>가 초기 URL과 각 redirect target을 허용된 Naver News host로 제한하고, 자동 redirect 대신 수동으로 최대 3 hop을 검증한다. HTML/XHTML content-type과 2 MiB stream byte cap을 적용한다.</td>
+                <td>외부 redirect와 큰 HTML 응답을 <code>PIPELINE_SOURCE_UNAVAILABLE</code>로 차단한다. allowlist·redirect·body cap 단위 테스트를 추가했다. 실제 Naver 표본·네트워크 egress 검증은 운영 수용 단계에 남긴다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-022<br><code>open</code> · Non-blocking risk</th>
+                <td><code>pipeline.worker.ts:308-351</code>에서 텍스트 공개와 job 성공 커밋 후 별도 embedding 호출을 한다. 프로세스가 커밋 직후 종료되거나 <code>markEmbeddingPending</code> 전에 죽으면 공개 이슈는 벡터 없이 남고 <code>embeddingPendingCount</code>도 증가하지 않는다. 누락 벡터를 찾는 보완 명령도 없다.</td>
+                <td>공개 시 pending 상태를 먼저 영속화하거나 완료 시 누락 벡터를 재조정하고, 실제 repair/reconcile 작업을 제공한다. 텍스트 공개를 embedding 성공에 종속할 필요는 없지만 누락을 복구 가능하게 관측해야 한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-023<br><code>fixed</code> · Non-blocking risk</th>
+                <td><code>pipeline.worker.ts:473-491</code>의 FETCH 결과 검증이 <code>articleId</code>와 필드 타입만 확인해 다른 기사 메타데이터·본문 조합을 허용할 수 있었다.</td>
+                <td>요청한 기사와 반환된 title/sourceUrl/publisher/publishedAt를 비교하도록 보완했다. 불일치 결과는 FETCH 실패로 처리되어 GENERATE에 들어가지 않는다. 동일성 비교 회귀를 통합 테스트로 확인했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-027<br><code>fixed</code> · Non-blocking risk</th>
+                <td>InMemory repository의 <code>saveJobFailure</code>가 terminal job에도 failure를 덮어쓸 수 있어 PostgreSQL adapter와 상태 경계가 달랐다. 이중 worker 또는 stale callback을 흉내 내는 통합 테스트가 실제보다 느슨해질 수 있었다.</td>
+                <td>run이 RUNNING이고 job이 RUNNING인 경우에만 실패를 반영하도록 SQL adapter와 동일한 guard를 추가했다. terminal failure 재기록이 기존 상태·오류를 보존하는 회귀 테스트를 추가했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-028<br><code>fixed</code> · Non-blocking risk</th>
+                <td>SQL retry가 명시된 빈 <code>failedJobIds: []</code>를 DISCOVERY 범위에서 허용해 InMemory와 API 의미가 달라질 수 있었다.</td>
+                <td>service·SQL repository·Typia 계약에서 명시된 목록은 최소 1개로 제한한다. 빈 목록은 INVALID_INPUT/RETRY_NOT_ALLOWED로 종료하고 run을 변경하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-024<br><code>open</code> · Non-blocking risk</th>
+                <td><code>pipeline.worker.ts:447-454</code>의 discovery dedup key는 <code>sourceUrl.trim()</code>뿐이고, migration의 <code>articles.article_url</code> UNIQUE도 raw 문자열 기준이다. host 대소문자·기본 포트·trailing slash·query 정책이 다른 동일 URL은 별도 기사로 저장될 수 있다.</td>
+                <td>수집·dedup·DB upsert에서 하나의 canonical URL 정책을 적용하고, 정책을 테스트와 운영 문서에 고정한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-025<br><code>open</code> · Non-blocking risk</th>
+                <td><code>openAi.provider.ts:58-80</code>는 JSON parse와 <code>extractUsageMetadata</code>가 성공 경로에만 있다. malformed/incomplete/refusal 응답은 provider request ID·token usage를 예외와 함께 반환하지 않아 실제 비용 호출이 FAILED row에서 미측정으로 남는다.</td>
+                <td>응답 semantic parse와 usage 추출을 분리하고, 실패 예외에도 request ID·input/output tokens를 내부 메타데이터로 보존해 비용·재호출 관측을 유지한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-026<br><code>open</code> · Non-blocking risk</th>
+                <td><code>batch.runner.ts:21-27</code>가 로그 binding에 process executionId를 만들지만 <code>pipeline.worker.ts:64-67</code>는 run마다 별도 executionId를 생성한다. worker 로그에는 DB에 저장된 executionId가 없어 GET 응답의 interrupt 대상과 프로세스 로그를 직접 상관시킬 수 없다.</td>
+                <td>프로세스 식별자와 run 소유 executionId를 명시적으로 함께 로그하고, 운영자가 GET 결과의 executionId로 해당 프로세스 종료를 확인할 수 있게 한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-029<br><code>fixed</code> · Blocker</th>
+                <td><code>PipelineRunRetryRequest.failedJobIds</code>가 선택사항이다. CONTENT에서 생략하면 SQL/InMemory 모두 모든 FAILED job을 재큐잉하지만 SQL snapshot의 <code>retry_job_ids</code>는 빈 배열로 남아 실제 대상과 관찰 결과도 어긋난다. 승인 문서의 “명시한 실패 job만”과 달리 예기치 않은 GENERATE·VALIDATE·자동 공개 부작용을 만들 수 있다.</td>
+                <td>CONTENT 요청을 <code>failedJobIds</code> 필수·최소 1건인 discriminated contract로 고정하고 service·InMemory·MikroORM repository를 동일하게 강제했다. 누락 요청은 상태 변경·SQL transaction 전에 거절하고, 선택된 실패 job ID만 <code>retry_job_ids</code> snapshot과 재큐에 반영한다. DISCOVERY의 선택적 목록과 기존 검증은 유지한다. 생성 SDK·E2E·OpenAPI와 누락 회귀 테스트를 재생성·검증했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-035<br><code>fixed</code> · Non-blocking risk</th>
+                <td>CONTENT 재시도 후 InMemory run이 이전 <code>lastError</code>를 유지해 SQL adapter와 GET 관찰값이 달라질 수 있었다.</td>
+                <td>InMemory retry도 run-level 오류를 초기화하도록 맞추고, 통합 테스트에서 재시도 직후 <code>lastError</code>가 비어 있음을 확인했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-036<br><code>fixed</code> · Non-blocking risk</th>
+                <td>정상 CONTENT retry의 MikroORM 경로가 선택 ID를 job UPDATE와 run snapshot에 동일하게 전달하는지 직접 검증하지 않았다.</td>
+                <td>선택된 실패 job 1건을 대상으로 SQL UPDATE 파라미터와 반환 snapshot의 <code>retryJobIds</code>를 확인하는 repository 회귀 테스트를 추가했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-037<br><code>fixed</code> · Non-blocking risk</th>
+                <td>구현 문서의 CONTENT worker 라인 근거가 현재 소스 위치와 어긋나 감사 시 잘못된 위치를 가리켰다.</td>
+                <td>현재 worker의 CONTENT 분기와 재확보 경로를 가리키도록 문서 참조를 갱신했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-030<br><code>open</code> · 논의 필요</th>
+                <td><code>claimPendingEmbeddingTasks</code>와 token-fenced <code>saveEmbedding</code>이 issue의 <code>publication_status</code>를 확인하지 않는다. pending 후 WITHDRAWN 되거나 claim 후 철회되어도 repair가 벡터를 생성·저장할 수 있다.</td>
+                <td>repair claim과 저장 transaction에서 <code>PUBLISHED</code> fence를 추가할지 결정한다. 철회 task를 CANCEL/delete/exclude-count 중 어떤 종결 상태로 둘지는 제품 정책으로 확정한 뒤 구현한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-031<br><code>open</code> · Non-blocking risk</th>
+                <td>GET의 <code>runId</code> path는 plain <code>string</code>으로 계약 생성되지만 service는 UUIDv7만 허용한다. 잘못된 ID는 실제로 400인데 controller/OpenAPI에는 GET 400이 없다. retry/interrupt의 path와 <code>executionId</code>도 UUIDv7보다 넓은 UUID 계약이다.</td>
+                <td>path·execution 식별자 계약을 실제 허용 형식과 일치시키고 GET 400을 OpenAPI·Nestia metadata에 명시한다. generated E2E의 임의 문자열을 실제 fixture 기반 상태 흐름으로 대체한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-032<br><code>open</code> · Non-blocking risk</th>
+                <td><code>contracts:e2e</code>는 generated 함수 파일만 만들고 실행하지 않는다. GET/retry/interrupt generated 테스트는 임의 ID·독립 상태를 사용하므로 실제 runner에서 성공 경로를 검증하지 못한다.</td>
+                <td>create→get→상태 준비→interrupt/retry를 하나의 실제 HTTP fixture 흐름으로 실행하는 E2E runner를 별도로 둔다. generated 파일은 Nestia 계약 산출물로 유지하되 business-state 테스트의 대체물로 간주하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-033<br><code>open</code> · Non-blocking risk</th>
+                <td><code>batch/main.ts</code>는 shutdown hook/signal을 연결하지 않고 <code>runForever</code>에도 항상 <code>undefined</code> signal을 전달한다. <code>app.close()</code>는 worker가 반환한 뒤에만 호출되므로 graceful drain은 동작하지 않는다.</td>
+                <td>배포 종료 grace 정책을 정하고 signal→AbortSignal→현재 호출 완료 후 정지 경로를 연결한다. 현 정책을 유지하면 SIGTERM 뒤 RUNNING run을 매번 수동 interrupt해야 함을 운영 절차로 명시한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">PIPE-REV-034<br><code>open</code> · Non-blocking risk</th>
+                <td><code>pipeline.worker.ts:292-323</code>가 개별 FETCH 오류를 모두 삼킨 뒤 유효 본문이 2건 미만이면 항상 <code>INSUFFICIENT_EVIDENCE</code>로 저장한다. Naver 5xx/timeout 소진과 실제 근거 부족이 구분되지 않는다.</td>
+                <td>성공 fetch 수와 공급자 실패 원인을 별도로 집계해, 공급자 장애가 지배적인 경우 <code>UPSTREAM_ERROR</code>를 보존하고 근거 부족만 <code>INSUFFICIENT_EVIDENCE</code>로 분류한다.</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>영향받는 불변식과 잔여 위험</h3>
+          <ul>
+            <li>자동 공개의 의도된 불변식은 <code>검증 통과 → 동일 소유 attempt의 상세·근거·PUBLISHED·job 성공 원자 반영</code>이다. transaction callback의 모든 raw query에 context를 전달하도록 수정했다. 실제 DB 경합 증거는 PIPE-REV-008이다.</li>
+            <li>재시도는 <code>expectedAttempt</code>가 현재 상태와 일치할 때 한 번만 전환되어야 한다. retry·interrupt의 lock/update 모두 같은 transaction context로 실행하도록 수정했다.</li>
+            <li>의도된 CONTENT 재시도는 discovery·후보 추출을 반복하지 않고 요청에 명시된 하나 이상의 실패 job만 처리한다. service와 두 repository가 누락 목록을 각각 방어하고, 선택 목록과 <code>retry_job_ids</code> snapshot을 동일하게 유지한다.</li>
+            <li>등록 중복은 후보 문맥 조회와 분리된 transaction 최종 gate에서 정규화 제목을 재확인한다. URL canonicalization은 별도 hardening 항목(PIPE-REV-024)이다.</li>
+            <li>외부 기사 URL은 Naver host allowlist·3-hop redirect·HTML content-type·2 MiB body cap으로 제한한다. 실제 egress 정책 검증은 운영 수용 단계에 남긴다(PIPE-REV-021).</li>
+            <li>텍스트 공개 후 embedding은 별도 부작용이므로 commit 직후 crash 시 pending 관측이 누락될 수 있다(PIPE-REV-022).</li>
+            <li>실제 Naver 본문 추출 품질, OpenAI 계정의 snapshot 접근성, pgvector 설치·migration 적용은 아직 운영 증거가 없다. JWT 미구현은 별도 승인된 범위 밖이다.</li>
+          </ul>
+          <h3>검증 증거와 공백</h3>
+          <ul>
+            <li>개선 후 <code>npm test</code>: unit 13 suites/66 tests, integration 2 suites/8 tests 통과. 추가 focused retry 검증(<code>npm run test:jest -- test/unit/pipelineValidation.test.ts test/unit/mikroOrmPipelineRepository.test.ts test/integration/pipelineLifecycle.test.ts</code>)은 3 suites/27 tests를 통과했으며, CONTENT 누락 목록의 service·InMemory·MikroORM 방어, 선택 목록 재큐·snapshot, InMemory/SQL 오류 초기화 parity, DISCOVERY 선택 목록을 포함한다. <code>git diff --check</code>도 통과했다.</li>
+            <li>개선 후 게이트: format check, lint, typecheck, build, contracts check와 API smoke를 모두 통과했다. smoke는 포트 바인딩 허용 환경에서 실행했다. generated E2E 함수 자체는 생성·typecheck 대상이며 실제 상태ful HTTP runner로 실행되지 않았다.</li>
+            <li>focused integration은 <code>InMemoryPipelineRepository</code>를 사용한다. PostgreSQL adapter의 migration 적용, 실제 lock/rollback, interrupt/save-success 경쟁, 동시 retry, partial unique-index 경쟁은 PIPE-REV-008로 남아 있다. InMemory의 <code>saveJobFailure</code> 상태 경계는 PIPE-REV-027로 정합화하고 회귀 테스트를 추가했다.</li>
+            <li>정상 HTTP 표준 헤더를 포함한 <code>POST /pipeline/runs</code> validator는 compiled Nestia metadata factory 직접 호출로 통과를 확인했고, key 누락은 400을 확인했다. GET의 잘못된 UUIDv7 400 계약과 실제 Naver/OpenAI 자격증명 표본 실행은 미검증이다.</li>
+            <li>따라서 PIPE-REV-029 계약 blocker는 해소되었고, 로컬 정적·단위 게이트도 통과했다. 다만 PIPE-REV-008의 실제 PostgreSQL 운영 수용 blocker와 실제 provider 표본 공백이 남아 자동 공개 배포 승인을 할 수 없다.</li>
+          </ul>
+          <p><strong>리뷰 판단: blocker 있음.</strong> 수직 흐름의 owner fence·검증 후 원자 공개·embedding pending 기록과 CONTENT 재시도 계약(PIPE-REV-029)은 정적·focused 검증상 일관되게 보완되었다. 실제 PostgreSQL migration/transaction 경쟁 검증(PIPE-REV-008)과 PIPE-REV-030~034는 운영 수용 전에 결정·보완해야 하며, 이 판단은 최종 출시 승인과 별개다.</p>
+        </section>
+        <section id="control">
+          <h2>개발자 운영 이해 점검</h2>
+          <p>아래 질문은 구현 승인과 별개인 운영 이해 확인이다. 브라우저에서 제출할 수 있지만 결과는 Codex에 자동 전송되지 않는다.</p>
+          <form id="control-form">
+            <fieldset>
+              <legend>프로세스가 GENERATE 중 종료되면 무엇을 하는가?</legend>
+              <label><input type="radio" name="q1" value="retry" /> 이전 프로세스 종료를 확인하고 성공 커밋을 재조회한 뒤 실패 job만 수동 재시도한다.</label>
+              <label><input type="radio" name="q1" value="ttl" /> heartbeat가 없어도 TTL이 지나면 새 워커가 자동 takeover한다.</label>
+            </fieldset>
+            <fieldset>
+              <legend>검증 통과 전 생성 결과는 어디에 공개하는가?</legend>
+              <label><input type="radio" name="q2" value="publish" /> 독립 근거와 서버·의미 검증을 통과한 결과만 원자 공개한다.</label>
+              <label><input type="radio" name="q2" value="draft" /> 검토 편의를 위해 검증 전 결과를 공개 API에 먼저 노출한다.</label>
+            </fieldset>
+            <button type="submit">점검 결과 보기</button>
+          </form>
+          <div id="control-result" hidden role="status" class="result"><strong id="control-status"></strong><p id="control-explanation"></p><p id="control-next"></p></div>
+          <script>
+            document.body.classList.add('enhanced');
+            document.getElementById('control-form').addEventListener('submit', function (event) {
+              event.preventDefault();
+              const ok = document.querySelector('input[name="q1"]:checked')?.value === 'retry' && document.querySelector('input[name="q2"]:checked')?.value === 'publish';
+              document.getElementById('control-result').hidden = false;
+              document.getElementById('control-status').textContent = ok ? '상태: 이해 확인 통과' : '상태: 추가 확인 필요';
+              document.getElementById('control-explanation').textContent = ok ? '단일 워커·수동 재시도와 검증 후 자동 공개의 경계를 선택했다.' : 'TTL 자동 takeover와 검증 전 공개는 승인된 계약이 아니다.';
+              document.getElementById('control-next').textContent = ok ? '다음: 실제 검증 명령과 잔여 위험을 확인한다.' : '다음: 기준 설계의 복구·공개 불변식을 다시 읽는다.';
+            });
+          </script>
+        </section>
+        <section id="ai-config-implementation-control">
+          <h2>AI 설정 분리 구현 제어</h2>
+          <p><strong>technical lifecycle: 구현 완료(운영 공개 보류).</strong> 승인된 G18~G21 범위의 실행 계약을 구현했다. 구현 owner: Codex. 개발자 운영 이해 점검은 별도 상태로 유지한다.</p>
+          <dl>
+            <dt>Goal</dt><dd>단일 <code>config/pipeline-ai.yml</code>에서 단계별 모델·prompt instruction/version을 읽고 worker 시작 시 snapshot한다.</dd>
+            <dt>Files/boundaries</dt><dd>YAML loader/config types, OpenAI adapter·worker usage metadata, usage migration/types, focused adapter/config tests, README/.env example.</dd>
+            <dt>Invariants</dt><dd>현재 run은 하나의 config snapshot만 사용, secret·본문·원시 prompt/output은 YAML/DB/로그에 저장하지 않음, typed JSON 입력 조립·strict schema는 코드 경계에 유지.</dd>
+            <dt>Acceptance</dt><dd>YAML 변경 후 재시작 전 run에는 영향 없음, 단계별 model/prompt version/hash가 usage에 기록되고 provider 응답 실제 model을 보존, 잘못된 YAML은 worker 시작 시 명시적으로 실패. 이 조건을 focused config/adapter test로 확인했다.</dd>
+            <dt>Verification</dt><dd><code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, focused config/adapter tests, <code>npm test</code>, <code>npm run build</code>, <code>npm run test:smoke</code>, <code>npm run contracts:check</code> 통과.</dd>
+            <dt>Forbidden</dt><dd>hot reload, API 계약 변경, 원문 prompt 저장, 자동 공개/재시도 상태 변경, 인증 구현.</dd>
+          </dl>
+          <table><caption>구현 issue-register</caption><thead><tr><th>상태</th><th>항목</th><th>다음 조치</th></tr></thead><tbody><tr><td>해결됨</td><td>YAML parser와 runtime path를 추가해야 함</td><td><code>yaml</code> dependency, startup snapshot validation, config path 문서화 완료</td></tr><tr><td>해결됨</td><td>prompt hash와 실제 model usage schema 반영 필요</td><td>prompt_hash migration·usage metadata·adapter test 완료</td></tr><tr><td>해결됨</td><td>클라이언트가 실행량 limits를 지정·조회할 수 있었음</td><td>create DTO의 limits 제거, 서버 기본값만 저장·재사용, 계약 schema 회귀 테스트 추가</td></tr><tr><td>보류</td><td>실제 OpenAI/Naver 자격증명·PostgreSQL 표본 실행</td><td>별도 운영 수용 증거로 확인</td></tr></tbody></table>
+        </section>
+        <section id="server-owned-limits-implementation">
+          <h2>G22 실행량 제한 비공개 구현 제어</h2>
+          <p><strong>technical lifecycle: 구현 완료(운영 공개 보류).</strong> 사용자 승인 범위에 따라 limits를 외부 요청·응답에서 제거하고 서버 내부 기본 정책만 effective limits로 저장·재사용한다.</p>
+          <dl>
+            <dt>Changed boundaries</dt><dd><code>PipelineRunCreateRequest</code>에서 limits DTO 제거, controller/service 접수에서 기본 limits 정규화, OpenAPI·SDK·계약 테스트에서 limits schema 제거.</dd>
+            <dt>Invariants</dt><dd>워커는 저장된 <code>PipelineRunRequest.limits</code>만 사용한다. 클라이언트가 limits를 지정하거나 조회할 수 없다. 재시도는 같은 run의 저장된 limits를 사용한다.</dd>
+            <dt>Acceptance</dt><dd>생성 요청 schema에는 query만 존재하고 accepted/get 응답에는 limits 필드가 없다. <code>normalizePipelineLimits()</code>는 인자 없이 서버 기본값을 선택한다.</dd>
+            <dt>Verification</dt><dd><code>npm test</code>(unit 13 suites/62 tests, integration 2 suites/8 tests), <code>npm run contracts:check</code>, build, typecheck, lint, format check, smoke를 통과했다.</dd>
+            <dt>Residual risk</dt><dd>현재 서버 정책은 코드 기본값이다. 환경별 운영 정책·운영자 override·금액 예산 예약은 별도 설계가 필요하다.</dd>
+          </dl>
+        </section>
+        <section id="exception-boundary-implementation">
+          <h2>G23 외부 실패 도메인 예외 구현 제어</h2>
+          <p><strong>technical lifecycle: 구현 완료(운영 공개 보류).</strong> 승인된 G23-A에 따라 <code>PipelineAdapterError</code>를 제거하고 외부 adapter의 실패를 pipeline 도메인 <code>PipelineException</code>으로 번역했다.</p>
+          <dl>
+            <dt>Baseline delta</dt><dd>기존 adapter 전용 <code>Error</code>와 <code>failureKind</code> 전달을 pipeline 의미 코드와 내부 retryable 메타데이터로 통합한다. provider별 HTTP/SDK 타입은 worker·API 경계를 넘지 않는다.</dd>
+            <dt>Affected boundaries</dt><dd><code>libs/core/src/pipeline/domain/pipeline.exception.ts</code>, Naver/OpenAI adapter, worker의 retry/failure 분기, public core exports, 예외 단위 테스트.</dd>
+            <dt>Invariants</dt><dd>worker는 <code>PipelineException</code>의 안정적인 실패 코드와 내부 retryable만 사용한다. API 응답·job failure_kind에는 provider 세부가 들어가지 않는다. 기존 retry 상한과 usage UNKNOWN/FAILED 분류는 유지한다.</dd>
+            <dt>Acceptance</dt><dd><code>PipelineAdapterError</code> 참조가 없어지고, timeout/429/비정상 JSON/근거 부족이 해당 pipeline exception code로 분류되며 기존 상태 전이가 유지된다.</dd>
+            <dt>Verification</dt><dd>exception 생성·코드 변환·retry 판정 focused test, <code>npm test</code>(unit 13 suites/62 tests, integration 2 suites/8 tests), <code>npm run build</code>, <code>npm run typecheck</code>, <code>npm run lint</code>, <code>npm run format:check</code>.</dd>
+            <dt>Residual risk</dt><dd>실제 provider의 모든 오류 payload는 자격증명 없는 환경에서 확인할 수 없으므로 HTTP 표본 검증은 운영 수용 단계에 남긴다.</dd>
+          </dl>
+          <p><strong>implementation-control-state: 구현 완료(운영 공개 보류).</strong> G23 코드 수정과 검증 결과를 반영했다. 실제 provider 오류 payload와 PostgreSQL 표본 실행은 기존 운영 수용 보류를 유지한다.</p>
+        </section>
+        <section id="pr-integration-implementation-control">
+          <h2>PR #2 최신 main 통합·migration 단일 runner 구현 제어</h2>
+          <p><strong>implementation-control-state: 구현 완료(운영 공개 보류).</strong> 설계 기준 <a href="issue-content-pipeline-design.html#pr-conflict-integration">PR 통합 설계</a>의 승인된 범위를 구현했다. 이 섹션은 기존 pipeline 구현 기록을 대체하지 않고, 최신 main 통합에 대한 새 lifecycle과 issue-register를 기록한다.</p>
+          <dl>
+            <dt>Baseline reference</dt><dd>PR #2 head <code>c9c81a5</code>, latest base <code>origin/main=4634e1c</code>, approved G28-A/G30-B/G31-A/G32-A.</dd>
+            <dt>Approved scope</dt><dd>PR branch에 최신 main merge, 13개 공통 충돌 파일의 온보딩·pipeline 합집합 해소, pipeline SQL 2개의 TypeScript <code>Migration</code> 변환, onboarding → pipeline → embedding-task ordered <code>migrationsList</code> 등록, generated 계약 재생성, 양쪽 기능을 보호하는 회귀 assertion 추가.</dd>
+            <dt>Forbidden changes</dt><dd>pipeline 공개 API·retry/interrupt 계약·상태 머신·본문 미저장 정책·JWT 범위 변경, destructive <code>down()</code>, 현재 <code>main</code> worktree의 미커밋 변경 수정, GitHub push.</dd>
+            <dt>Invariants</dt><dd>온보딩과 pipeline controller·provider·entity·migration이 모두 등록된다. generated SDK/e2e/OpenAPI에 두 API 집합이 모두 존재한다. migration up은 한 runner에서 순서대로 적용되고 재실행 시 seed·idempotent 보정이 안전해야 한다. pipeline migration down은 데이터 삭제 없이 명시적으로 중단한다.</dd>
+            <dt>Verification plan</dt><dd><code>git diff --check</code>, conflict marker 검색, <code>npm install</code>(lockfile 기준), <code>npm test</code>(unit 15 suites/79 tests, integration 2 suites/8 tests), <code>npm run typecheck</code>, <code>npm run build</code>, <code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run contracts:check</code>를 통과했다. 격리 PostgreSQL에서 migration up·재실행·down 실패 경계를 확인하는 운영 수용은 아직 보류한다.</dd>
+            <dt>Design delta</dt><dd>기존 PR은 pipeline raw SQL을 별도 명시 적용했지만, 이번 승인으로 <code>db:migrate</code> 단일 runner가 pipeline schema까지 소유한다. migration 표현과 down semantics만 변경하며 API·pipeline runtime behavior는 변경하지 않는다.</dd>
+            <dt>Developer operational understanding</dt><dd>미실시. 구현 후 migration 실패 시 첫 증거, 재실행 조건, irreversible down의 안전한 복구 절차를 별도 점검한다.</dd>
+          </dl>
+          <table><caption>통합 issue-register</caption><thead><tr><th>ID</th><th>상태</th><th>증상·영향</th><th>조치·증거</th><th>잔여 위험/다음 조치</th></tr></thead><tbody>
+            <tr><td>PR2-INT-001</td><td>해결됨</td><td>최신 main과 PR의 공통 통합 파일이 충돌해 한쪽 기능을 잃을 수 있음.</td><td>G28-A에 따라 merge 후 온보딩·pipeline 모듈/예외/exports를 합집합으로 해결하고 generated SDK·e2e·OpenAPI를 재생성했다. 계약 테스트·typecheck·build로 양쪽 endpoint를 확인했다.</td><td>GitHub push 및 원격 PR 상태 갱신은 사용자 승인 범위 밖이라 수행하지 않았다.</td></tr>
+            <tr><td>PR2-MIG-001</td><td>구현 완료·운영 보류</td><td>pipeline raw SQL이 기존 MikroORM migration history 밖에 있음.</td><td>G31-A로 두 SQL을 TypeScript <code>Migration</code> 클래스로 변환하고, G30-B에 따라 onboarding → pipeline → embedding-task를 하나의 <code>migrationsList</code>와 <code>db:migrate</code> runner로 등록했다. G32-A에 따라 <code>down()</code>은 명시적으로 중단한다.</td><td>실제 PostgreSQL/pgvector에서 fresh up·재실행·down 실패 경계를 확인해야 운영 수용을 닫을 수 있다.</td></tr>
+          </tbody></table>
+        </section>
+        <section id="hardening-implementation-control">
+          <h2>G24~G27 hardening 구현 제어</h2>
+          <p><strong>implementation-control-state: 구현 완료(운영 공개 보류).</strong> 2026-09-13 사용자 승인에 따라 G24-A·G25-A·G27-A를 구현하고 fresh verification과 no-write critical review를 반영했다. G26-B는 후속 보완으로 보류한다.</p>
+          <dl>
+            <dt>Baseline reference</dt><dd><a href="issue-content-pipeline-design.html#hardening-frontier">설계 hardening frontier</a>와 <a href="issue-content-pipeline-design.html#hardening-decision-record">결정 반영</a>.</dd>
+            <dt>Current scope</dt><dd>앱 레벨 기사 URL 정규화(원본 컬럼 유지), 공개 transaction과 함께 생성하는 durable embedding pending task·수동 repair batch, task에 기록된 모델을 사용하는 provider 호출, processExecutionId/runExecutionId 로그 분리.</dd>
+            <dt>Invariants</dt><dd>공개 API·본문 미저장·JWT 제외·단일 워커/수동 재시도 정책을 유지한다. 임베딩 실패는 공개 성공을 되돌리지 않으며, repair는 GENERATE를 재실행하지 않는다. 공개 시 task의 runExecutionId를 고정하고, repair는 claim token·processExecutionId로 원자 선점한다. 오래된 hash·모델·차원 또는 다른 owner의 embedding 결과는 최신 콘텐츠를 덮지 않는다. 시간 기반 RUNNING takeover는 하지 않으며 종료 확인된 processExecutionId만 명시적으로 재큐잉한다.</dd>
+            <dt>Verification evidence</dt><dd>URL 변형 dedup·raw URL 보존, pending task 생성·crash 후 repair·stale hash/model·claim exclusivity·명시적 dead-process requeue 보호, task model pinning, process/run ID 전달 focused test를 추가했다. 전체 테스트·typecheck·format·lint·build·contracts·smoke·diff-check를 통과했고, 최종 no-write critical review에서도 blocker가 없음을 확인했다. 실제 PostgreSQL 런타임 검증은 운영 수용 공백으로 남긴다.</dd>
+            <dt>Developer operational understanding</dt><dd>미실시. 기술 검증과 별도로 실제 repair 실행 조건·운영 로그 해석 점검을 남긴다.</dd>
+          </dl>
+          <table><caption>구현 issue-register</caption><thead><tr><th>상태</th><th>증상·영향</th><th>조치·증거</th><th>잔여 위험/다음 조치</th></tr></thead><tbody>
+            <tr><td>해결됨</td><td>G24 DB unique는 raw URL만 비교해 scheme/host/fragment 변형을 중복으로 저장할 수 있음.</td><td>공통 normalizer를 worker와 InMemory/SQL article save 경계에 적용하고 raw URL은 보존했다. focused test 통과.</td><td>다중 writer는 DB에서 보장하지 않음. 확장 시 canonical key 재검토.</td></tr>
+            <tr><td>해결됨</td><td>공개 직후 embedding 프로세스가 죽으면 기존 counter만으로 재처리 대상을 안정적으로 복원하기 어려움.</td><td>공개 transaction에 issue_embedding_tasks를 기록하고 수동 pipelineEmbeddingRepair batch, 원자 claim token/process owner, hash·model·dimension fence를 추가했다. crash/repair/claim test 통과.</td><td>자동 scheduler·자동 retry는 범위 밖. RUNNING claim은 시간 경과가 아니라 종료 확인된 process ID를 지정해 재큐잉한다.</td></tr>
+            <tr><td>해결됨</td><td>batch executionId가 프로세스와 run 소유를 혼동하게 만들어 장애 추적이 어려움.</td><td>processExecutionId와 runExecutionId를 batch·worker 인자와 로그 필드로 분리했다. 전달 test 통과.</td><td>기존 API의 run executionId 의미는 유지.</td></tr>
+            <tr><td>보류</td><td>실패 provider request ID/token metadata 확장(G26).</td><td>이번 구현에서 변경하지 않음.</td><td>후속 설계·재승인 필요.</td></tr>
+          </tbody></table>
+          <p><strong>Technical status:</strong> 승인된 G24-A·G25-A·G27-A 구현과 로컬 검증 완료. <strong>Implementation issues:</strong> 위 해결됨/보류 항목과 운영 수용 잔여 위험을 유지한다. <strong>Developer operational understanding:</strong> 실제 운영자 실행 시연과 로그 해석 답변은 아직 관찰하지 못했다.</p>
+        </section>
+        <section id="pr-integration-review">
+          <h2>PR 통합 후 작업 리뷰</h2>
+          <p><strong>review-status: 변경 요청.</strong> 로컬 통합 커밋 <code>2a33d83</code>을 기준으로 읽기 전용 재점검했다. API 계약 유실은 확인되지 않았지만 batch 실행 경로에 blocker가 남아 있다.</p>
+          <table><caption>리뷰 issue-register</caption><thead><tr><th>ID</th><th>우선순위</th><th>증상·영향</th><th>증거</th><th>권고 조치</th></tr></thead><tbody>
+            <tr><td>PR2-REV-001</td><td>P1 · Blocker</td><td><code>BatchModule</code>이 <code>PipelineAiConfiguration</code>의 기본 인자 <code>filePath</code>를 Nest DI 의존성으로 해석해 모든 batch job이 bootstrap 전에 실패한다.</td><td><code>apps/batch/src/pipeline/pipeline.ai.config.ts:40-46</code>의 무주입 생성자 인자. <code>databaseCheck</code> 실행 재현 결과 <code>UnknownDependenciesException</code>, exit 1.</td><td>환경값을 생성자 내부에서 읽거나 명시적 factory/optional DI로 바꾸고, 실제 <code>BatchModule</code> bootstrap smoke test를 추가한다.</td></tr>
+            <tr><td>PR2-REV-002</td><td>P1 · Blocker</td><td>위 DI 문제를 해결해도 Docker runtime stage가 <code>config/pipeline-ai.yml</code>을 복사하지 않아 worker의 기본 경로가 깨진다.</td><td><code>Dockerfile:19-28</code>은 <code>dist</code>만 runtime에 복사한다. <code>/private/tmp</code>에서 기본 생성자 실행 시 <code>ENOENT .../config/pipeline-ai.yml</code> 재현.</td><td>runtime image에 안전한 config를 포함하거나 명시적 외부 config mount/path를 compose와 함께 계약하고, image artifact smoke test를 추가한다.</td></tr>
+            <tr><td>PR2-REV-003</td><td>P1 · Blocker</td><td>통합한 두 migration이 공유 schema를 서로 다르게 가정한다. onboarding은 <code>issue_categories(id,name,code)</code>와 <code>issues.category_id</code>를 사용하지만 pipeline은 <code>display_name</code>과 <code>issues.category_code</code>를 사용한다.</td><td><code>onboarding.persistence.entity.ts:43-51</code>, onboarding migration의 <code>118-124</code>, pipeline migration의 <code>11-21,44-52</code>. 기존 <code>issue_categories</code>가 있으면 pipeline seed의 <code>display_name</code> 컬럼이 없고, <code>create table if not exists</code>는 기존 <code>issues</code>를 보정하지 않는다.</td><td>공유 category/issue canonical schema와 code mapping을 먼저 결정하고 migration·repository·seed를 같은 계약으로 재작성한 뒤 실제 기존 schema에서 up을 검증한다.</td></tr>
+            <tr><td>PR2-REV-004</td><td>P1 · 운영 blocker</td><td>Compose DB는 <code>postgres:18</code>인데 pipeline migration은 <code>vector</code> extension과 <code>vector(1536)</code> 컬럼을 요구한다. 로컬 단일 migration 경로가 pgvector 준비 없이 적용되지 않는다.</td><td><code>compose.yaml:3</code>과 <code>Migration202609130001Pipeline.ts:9,163</code>의 불일치. 실제 pgvector runtime 검증은 환경 부재로 미실시.</td><td>pgvector image/extension provisioning을 compose에 포함하거나, 외부 DB 사전조건을 실행 문서와 검사 단계에 명시한다.</td></tr>
+            <tr><td>PR2-REV-005</td><td>P1 · 조건부</td><td>빈 Compose volume에서 실행하는 흐름이라면 첫 onboarding migration부터 <code>users</code> 등 외부 base schema를 요구해 중단한다.</td><td>migration 주석이 <code>users</code>, <code>entities</code>, 기존 preference/category table을 별도 schema history로 전제하지만 저장소에는 그 base migration이 없다. 실제 빈 DB runtime 검증은 미실시.</td><td>base schema owner/선행 migration을 실행 계약에 명시하거나, 이 저장소가 fresh DB를 소유한다면 base migration을 ordered list에 포함한다.</td></tr>
+          </tbody></table>
+          <h3>유실 점검과 검증 범위</h3>
+          <ul>
+            <li>병합 후 conflict marker 없음, 기준 PR head 대비 삭제 파일 없음. 기존 pipeline raw SQL은 TypeScript migration으로 rename되었고 SQL 내용은 유지된다.</li>
+            <li>OpenAPI에 onboarding 5개·pipeline 4개·health/search 경로가 함께 존재하며 <code>contracts:check</code>, unit/integration test, typecheck, build, format, lint는 통과했다.</li>
+            <li>다만 기존 테스트는 직접 생성/단위 경로 중심이라 실제 Nest batch bootstrap, Docker runtime 파일 구성, PostgreSQL/pgvector migration up을 검증하지 못했다.</li>
+          </ul>
+          <p><strong>판정:</strong> API 기능 유실은 없지만 위 P1 batch blocker와 migration/운영 blocker를 닫기 전에는 PR을 merge-ready로 볼 수 없다. 본 리뷰에서는 소스 코드를 수정하지 않았다.</p>
+        </section>
+        <section id="pr-integration-remediation-result">
+          <h2>PR #2 통합 blocker 보완 결과</h2>
+          <p>
+            <strong>implementation-control-state: 코드 보완 완료 · 운영 수용 일부 보류.</strong>
+            위 review register의 후속 조치를 현재 branch에 반영했다. 기존 review 섹션은 당시
+            판단의 기록으로 보존하고, 이 섹션을 최신 결과로 사용한다.
+          </p>
+          <table>
+            <caption>보완 결과와 증거</caption>
+            <thead><tr><th>항목</th><th>결과</th><th>증거</th></tr></thead>
+            <tbody>
+              <tr><td>Batch DI / runtime config</td><td>해결</td><td><code>BatchModule</code> factory provider, runtime <code>config/</code> copy, unknown-job bootstrap smoke 통과.</td></tr>
+              <tr><td>공유 category schema</td><td>해결</td><td><code>issue_categories.code</code> PK, canonical lowercase 10개, <code>issues.category_code</code>·preference <code>category_code</code> FK/UNIQUE로 통일.</td></tr>
+              <tr><td>레거시 변환 안전성</td><td>해결</td><td>승인된 legacy mapping만 backfill하고 <code>YOUTH_GENERATION</code>/<code>MEDIA</code>는 fail-closed. 미지원 row fixture에서 전체 transaction rollback 확인.</td></tr>
+              <tr><td>pgvector / migration</td><td>운영 검증 보류</td><td>host build와 정적 migration 등록은 확인했지만, 실제 PostgreSQL/pgvector Compose에서 fresh up·재실행·schema·vector extension 실행 증거는 없다.</td></tr>
+              <tr><td>base schema 경계</td><td>운영 검증 보류</td><td>코드의 preflight 경계는 존재하지만, 외부 base table fixture와 빈 DB에서 partial migration이 남지 않는지 실제 실행하지 않았다.</td></tr>
+              <tr><td>Docker cold build</td><td>환경 보류</td><td>host build는 통과했지만 2 GiB ARM Docker Desktop에서 cold <code>ttsc</code> Go compiler가 OOM kill되어 image artifact 검증은 재현하지 못했다.</td></tr>
+            </tbody>
+          </table>
+          <p>
+            이전 통합 변경의 최종 로컬 gate는 <code>npm test</code>(unit 15 suites/79 tests, integration 2 suites/8 tests),
+            <code>npm run typecheck</code>, <code>npm run build</code>, <code>npm run format:check</code>,
+            <code>npm run lint</code>, <code>npm run contracts:check</code>, <code>npm run test:smoke</code>,
+            conflict marker 검색과 <code>git diff --check</code>를 통과했다. 다만 PR body에 기록된 대로
+            실제 PostgreSQL/pgvector migration 실행은 수행하지 않았고, GitHub push와 PR 원격 상태 갱신도
+            수행하지 않았다.
+          </p>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>

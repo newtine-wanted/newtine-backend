@@ -1,4 +1,5 @@
 import type { UuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
+import type { CategoryCode } from '@newtine/core/common/category/category.catalog.js';
 
 export const OnboardingStatus = {
   Pending: 'PENDING',
@@ -18,7 +19,7 @@ export const AgeGroup = {
 export type AgeGroupValue = (typeof AgeGroup)[keyof typeof AgeGroup];
 
 export interface OnboardingTopicOption {
-  readonly code: string;
+  readonly code: CategoryCode;
   readonly name: string;
   readonly displayOrder: number;
 }
@@ -77,7 +78,7 @@ export interface OnboardingStateWithPreferences extends OnboardingState {
 }
 
 export interface CompleteOnboardingCommand {
-  readonly topicCodes: readonly string[];
+  readonly topicCodes: readonly CategoryCode[];
   readonly entityIds: readonly string[];
   readonly ageGroup: AgeGroupValue | null;
   readonly regionCodes: readonly string[];

@@ -1,6 +1,6 @@
 import { tags } from 'typia';
 
-import type { AgeGroupValue, EntityTypeValue } from '@newtine/core';
+import type { AgeGroupValue, CategoryCode, EntityTypeValue } from '@newtine/core';
 
 export interface OnboardingEntityQuery {
   q?: string & tags.MaxLength<100>;
@@ -10,7 +10,7 @@ export interface OnboardingEntityQuery {
 }
 
 export interface CompleteOnboardingRequest {
-  topicCodes: string[] & tags.MinItems<1> & tags.MaxItems<12>;
+  topicCodes: CategoryCode[] & tags.MinItems<1> & tags.MaxItems<10>;
   entityIds: (string & tags.Format<'uuid'>)[] & tags.MaxItems<100>;
   ageGroup: AgeGroupValue | null;
   regionCodes: string[] & tags.MaxItems<17>;

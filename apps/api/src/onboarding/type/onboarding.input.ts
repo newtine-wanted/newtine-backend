@@ -1,7 +1,12 @@
-import type { AgeGroupValue, EntitySearchCommand, EntityTypeValue } from '@newtine/core';
+import type {
+  AgeGroupValue,
+  CategoryCode,
+  EntitySearchCommand,
+  EntityTypeValue,
+} from '@newtine/core';
 
 export interface CompleteOnboardingInput {
-  readonly topicCodes: readonly string[];
+  readonly topicCodes: readonly CategoryCode[];
   readonly entityIds: readonly string[];
   readonly ageGroup: AgeGroupValue | null;
   readonly regionCodes: readonly string[];

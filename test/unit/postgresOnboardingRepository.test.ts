@@ -20,7 +20,6 @@ type FakeState = {
 function createRepository(state: FakeState) {
   const userId = generateUuidV7();
   const entityId = generateUuidV7();
-  const categoryId = generateUuidV7();
   const connection = {
     execute: async (sql: string): Promise<unknown> => {
       const normalized = sql.replace(/\s+/g, ' ').trim();
@@ -40,14 +39,14 @@ function createRepository(state: FakeState) {
           onboarding_status: state.status,
           onboarding_completed_at: state.completedAt,
           age_group: state.ageGroup,
-          topic_weights: state.hasPrefs ? { HOUSING: 2 } : {},
+          topic_weights: state.hasPrefs ? { housing: 2 } : {},
           entity_weights: state.hasPrefs ? { [entityId]: 2 } : {},
           region_weights: state.hasPrefs ? { SEOUL: 1 } : {},
           region_codes: state.hasPrefs ? ['SEOUL'] : [],
         };
       }
       if (normalized.includes('FROM issue_categories WHERE code IN')) {
-        return [{ id: categoryId, code: 'HOUSING' }];
+        return [{ code: 'housing' }];
       }
       if (normalized.includes('FROM entities WHERE id IN')) {
         return [{ id: entityId }];
@@ -67,8 +66,8 @@ function createRepository(state: FakeState) {
         state.completedAt = state.status === OnboardingStatus.Completed ? new Date() : null;
         return { affectedRows: 1 };
       }
-      if (normalized.includes('SELECT c.code, p.weight')) {
-        return state.hasPrefs ? [{ code: 'HOUSING', weight: 2 }] : [];
+      if (normalized.includes('SELECT p.category_code, p.weight')) {
+        return state.hasPrefs ? [{ code: 'housing', weight: 2 }] : [];
       }
       if (normalized.includes('SELECT entity_id::text AS entity_id')) {
         return state.hasPrefs ? [{ entity_id: entityId, weight: 2 }] : [];
@@ -118,14 +117,14 @@ test('Postgres adapter locks pending users and applies all onboarding preference
   const { userId, entityId, repository } = createRepository(state);
 
   const result = await repository.completeOnboarding(userId, {
-    topicCodes: ['HOUSING'],
+    topicCodes: ['housing'],
     entityIds: [entityId],
     ageGroup: AgeGroup.Age19To34,
     regionCodes: ['SEOUL'],
   });
 
   assert.equal(result.status, OnboardingStatus.Completed);
-  assert.equal(result.preferences.topicWeights.HOUSING, 2);
+  assert.equal(result.preferences.topicWeights.housing, 2);
   assert.equal(result.preferences.entityWeights[entityId], 2);
   assert.equal(result.preferences.regionWeights.SEOUL, 1);
   assert.match(state.calls[0] ?? '', /FOR UPDATE/);
@@ -174,7 +173,7 @@ test('Postgres adapter returns terminal snapshots without validating or incremen
   const { userId, entityId, repository } = createRepository(state);
 
   const result = await repository.completeOnboarding(userId, {
-    topicCodes: ['MEDIA'],
+    topicCodes: ['politics'],
     entityIds: [entityId],
     ageGroup: AgeGroup.Age65Plus,
     regionCodes: ['BUSAN'],

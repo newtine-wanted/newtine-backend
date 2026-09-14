@@ -4,6 +4,8 @@
 
 이슈 발견은 뉴스 제목·description으로 시작한다. **후보 이슈를 먼저 판정하고 신규 초안을 만든 뒤, 해당 이슈의 근거 기사를 검색·확보·가공한다.** 기사를 수집했다는 이유만으로 새 이슈가 되는 것은 아니다.
 
+> 이 문서는 후보 판정과 상태 전이의 설계 기록이다. 현재 구현의 수치·API·영속 스키마·외부 공급자 경계는 [승인된 설계](issue-content-pipeline-design.html)와 [구현 제어 문서](issue-content-pipeline-implementation.html)를 기준으로 한다. 특히 본문/GENERATE 입력 미저장, 네이버 검색·본문 fetch, 단일 워커·수동 재시도, 독립 근거 2개 이상 검증 후 자동 공개가 구현 계약이다.
+
 본문 공급자는 미확정이다. 테스트용 본문으로 입력/출력 계약을 먼저 검증한다. Google/Naver의 구체 API·검색어·수집 개수·페이지네이션·호출 주기는 공급자 조사와 별도 계약이 필요하며, 현재 확정된 값으로 취급하지 않는다.
 
 ## 전체 흐름
@@ -39,9 +41,9 @@ flowchart TD
 | GENERATE | 본문·근거 ID·출력 JSON 규격·프롬프트 | LLM: 1줄/3줄 요약·관점·용어 구성 | 검증 전 상세 JSON | 검증 전 결과는 메모리 |
 | VALIDATE | 생성 결과와 동일한 입력 근거 | 서버 구조/ID 검사 + 필요한 사실 검증. LLM 검사도 무오류 판정으로 간주하지 않음 | 통과/실패, 오류 이유 | 실패는 last_error; 통과 결과만 상세 저장 |
 | 공개 | 검증된 상세·근거 및 job | 서비스 트랜잭션 | 공개 이슈 | issue_details, issue_articles, PUBLISHED, SUCCEEDED 함께 반영 |
-| 임베딩 | 최종 제목 + 1줄 요약 | 임베딩 모델 | vector(D), 입력 hash/version | issue_embeddings upsert |
+| 임베딩 | 최종 제목 + 1줄 요약 | 임베딩 모델 | vector(D), 입력 hash/version | issue_embeddings upsert. 공개 transaction에 pending task를 함께 기록하고 수동 repair로 보완 |
 
-공개 후 임베딩 생성에 실패해도 텍스트·미공개 초안 검색 경로를 생략해서는 안 된다. 임베딩 재생성의 실행 주체와 재시도 스케줄은 구현 계약에서 정한다. 현재 job의 stage enum에 EMBED가 있다고 가정하지 않는다.
+공개 후 임베딩 생성에 실패해도 텍스트·미공개 초안 검색 경로를 생략해서는 안 된다. 공개 transaction에 `issue_embedding_tasks`의 `PENDING` 작업을 남기고, repair batch가 이를 원자적으로 `RUNNING` claim한다. 워커 종료를 확인한 경우에만 운영자가 해당 processExecutionId의 claim을 명시적으로 `PENDING`으로 되돌린 뒤 `pipelineEmbeddingRepair` batch를 수동 실행한다. 시간 경과만으로 RUNNING 작업을 탈취하지 않는다. 현재 job의 stage enum에 EMBED가 있다고 가정하지 않는다.
 
 ## 기존 이슈 비교
 
@@ -64,15 +66,15 @@ stateDiagram-v2
  QUEUED --> RUNNING: 원자적 선점
  RUNNING --> SUCCEEDED: 검증 결과 채택
  RUNNING --> FAILED: 최종 실패
- QUEUED --> CANCELLED: 운영 취소
- RUNNING --> CANCELLED: 중단 확인 후 취소
+ QUEUED --> FAILED: 운영 중단 확인
+ RUNNING --> FAILED: 중단 확인 후 INTERRUPTED 기록
  FAILED --> QUEUED: 명시적 재시도
  RUNNING --> FAILED: 소유 프로세스 종료 확인 후 복구
  SUCCEEDED --> [*]
- CANCELLED --> [*]
+ FAILED --> [*]
 ```
 
-RUNNING 중 stage는 SEARCH → FETCH → GENERATE → VALIDATE로 진행한다. stage는 현재 진행 위치이며 중간 결과의 존재를 보장하지 않는다. 재시도에는 필요한 시작 stage를 다시 지정한다.
+현재 구현의 interrupt는 `CANCELLED`를 emit하지 않는다. 확인된 프로세스 종료 후 미완료 job을 `FAILED`와 `failure_kind=INTERRUPTED`로 기록하고, 실행은 성공 job 유무에 따라 `FAILED` 또는 `PARTIALLY_SUCCEEDED`가 된다. `CANCELLED`는 DB/public type에 남아 있는 예약 상태이며 별도 취소 유즈케이스가 확정되기 전에는 상태 전이로 문서화하지 않는다. RUNNING 중 stage는 SEARCH → FETCH → GENERATE → VALIDATE로 진행한다. stage는 현재 진행 위치이며 중간 결과의 존재를 보장하지 않는다. 재시도에는 필요한 시작 stage를 다시 지정한다.
 
 ```mermaid
 stateDiagram-v2
