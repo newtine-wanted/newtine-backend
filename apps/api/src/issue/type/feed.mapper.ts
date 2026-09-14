@@ -4,7 +4,6 @@ import type { FeedBatchResponse, FeedCardResponse, FeedSessionResponse } from '.
 export function toFeedSessionResponse(result: FeedSessionResult): FeedSessionResponse {
   return {
     sessionId: result.sessionId as FeedSessionResponse['sessionId'],
-    guestKey: result.guestKey,
     expiresAt: result.expiresAt.toISOString() as FeedSessionResponse['expiresAt'],
     nextBatchNo: result.nextBatchNo,
   };

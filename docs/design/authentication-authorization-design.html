@@ -1,0 +1,1043 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="purpose"
+      content="회원 로그인·가입과 JWT 세션, API 사용자·관리자 권한 경계 확정"
+    />
+    <meta name="audience" content="NEWTINE 백엔드 개발자·기획 결정자·운영 담당자" />
+    <meta
+      name="problem"
+      content="현재 API의 실제 인증 guard와 사용자·관리자 권한 판정이 없고 users 스키마의 인증 경계가 미구현"
+    />
+    <meta
+      name="core-flow"
+      content="email/password 가입·로그인 → 사용자 조회·생성 → access JWT·refresh cookie 회전 → principal·현재 role 판정 → API 접근"
+    />
+    <title>회원 인증·JWT·사용자/관리자 권한 설계 · 설계 승인됨</title>
+    <style>
+      :root {
+        font-family: system-ui, sans-serif;
+        color: #172b36;
+        background: #f2f5f7;
+        line-height: 1.7;
+      }
+      body {
+        max-width: 1120px;
+        margin: auto;
+        padding: 28px;
+      }
+      header,
+      section {
+        background: white;
+        border: 1px solid #d9e3e8;
+        border-radius: 12px;
+        padding: 24px;
+        margin: 18px 0;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      h1 {
+        font-size: 30px;
+      }
+      h2 {
+        font-size: 22px;
+      }
+      h3 {
+        font-size: 18px;
+      }
+      a {
+        color: #075d9b;
+      }
+      nav {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid #cbd8df;
+        text-align: left;
+        padding: 10px;
+        vertical-align: top;
+      }
+      caption {
+        text-align: left;
+        font-weight: 700;
+        margin: 10px 0;
+      }
+      dt {
+        font-weight: 700;
+      }
+      dd {
+        margin: 0 0 10px;
+      }
+      aside {
+        padding: 16px;
+        background: #fff4db;
+        border-left: 4px solid #cc8700;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      li {
+        margin: 8px 0;
+      }
+      figure {
+        margin: 20px 0;
+      }
+      svg {
+        width: 100%;
+        height: auto;
+      }
+      figcaption {
+        color: #435865;
+      }
+      .state {
+        font-weight: 700;
+        color: #885900;
+      }
+      .open {
+        color: #9b3b00;
+        font-weight: 700;
+      }
+      .control-slide {
+        display: none;
+        border: 1px solid #cbd8df;
+        border-radius: 10px;
+        padding: 18px;
+        margin-top: 16px;
+      }
+      .control-slide.is-active {
+        display: block;
+      }
+      .control-slide fieldset {
+        border: 0;
+        padding: 0;
+        margin: 0;
+      }
+      .control-slide legend {
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+      .control-slide label {
+        display: block;
+        padding: 8px 0;
+      }
+      .control-nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+      }
+      .control-nav button {
+        border: 1px solid #17627c;
+        border-radius: 6px;
+        background: #f2f8fa;
+        color: #172b36;
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+      .control-nav button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .control-progress {
+        margin-left: auto;
+        font-weight: 700;
+      }
+      .control-result {
+        margin-top: 16px;
+        padding: 12px 14px;
+        border-radius: 8px;
+        background: #eef7ee;
+        border-left: 4px solid #3b7d3b;
+      }
+      .control-result.is-pending {
+        background: #fff4db;
+        border-left-color: #cc8700;
+      }
+      .control-result p {
+        margin: 4px 0;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      small {
+        color: #435865;
+      }
+      @media (max-width: 700px) {
+        body {
+          padding: 10px;
+        }
+        section,
+        header {
+          padding: 16px;
+        }
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>
+        설계 기준선 · 2026-09-14 · 브랜치 <code>codex/authentication-jwt</code> ·
+        <strong class="state">설계 승인됨</strong>
+      </p>
+      <h1>회원 인증·JWT·사용자/관리자 권한</h1>
+      <p>
+        로그인·회원가입을 시작점으로 서비스 세션을 발급하고, 현재 API와 이후 개인·관리자 API의
+        접근 경계를 고정하기 위한 고위험 설계 문서다. G1~G13 의사결정을 반영했고, 사용자의
+        명시적 “구현 ㄱ” 지시와 G14-A 선택으로 설계를 승인받았다. 이후 fresh Docker Compose DB에서 migration과
+        signup을 실제 실행하는 과정에서 base schema 부트스트랩 경계가 미해결임을 확인했고, G14-A를
+        선택했다. 운영 base schema 소유권은 G12-A대로 유지하면서 Compose에만 disposable fixture와
+        migration runner를 추가한다. 사용자의 후속 진행 지시 <code>r</code>(영문 자판의 ㄱ)을 이
+        변경 범위에 대한 구현 승인으로 기록하며, 구현·migration·생성 계약은 연결된 구현 제어 문서에
+        기록한다.
+      </p>
+      <dl>
+        <dt>목적</dt>
+        <dd>회원 로그인·가입과 JWT 세션, API 사용자·관리자 권한 경계 확정</dd>
+        <dt>사용자</dt>
+        <dd>NEWTINE 백엔드 개발자·기획 결정자·운영 담당자</dd>
+        <dt>문제</dt>
+        <dd>현재 API의 실제 인증 guard와 사용자·관리자 권한 판정이 없고 users 스키마의 인증 경계가 미구현</dd>
+        <dt>핵심 흐름</dt>
+        <dd>email/password 가입·로그인 → 사용자 조회·생성 → access JWT·refresh cookie 회전 → principal·현재 role 판정 → API 접근</dd>
+        <dt>강도</dt>
+        <dd>High-risk: 인증·인가, 개인 데이터 소유권, refresh token 재사용, 관리자 권한 상승·회수를 검토한다.</dd>
+        <dt>산출물 라우팅</dt>
+        <dd>
+          동일 목적의 기존 설계 산출물은 확인되지 않았다. <code>docs/reviews/security.review.html</code>은
+          초기 보안 점검 문서로 목적과 수명주기가 달라 새 설계 문서를 생성했다. 승인 후 연결된
+          <code>authentication-authorization-implementation.html</code>을 만든다.
+        </dd>
+        <dt>추적 참조</dt>
+        <dd>Codex 작업의 인증/JWT 전용 worktree <code>.worktrees/auth-jwt</code></dd>
+      </dl>
+    </header>
+
+    <nav aria-label="설계 탐색">
+      <a href="#goal">목표</a>
+      <a href="#evidence">근거</a>
+      <a href="#system-model">구조</a>
+      <a href="#api-boundary">API 경계</a>
+      <a href="#auth-contract">Auth 계약</a>
+      <a href="#data-model">데이터</a>
+      <a href="#grilling-state">의사결정</a>
+      <a href="#verification-plan">검증</a>
+      <a href="#approval-state">승인 상태</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="goal">
+          <h2>목표와 성공 기준</h2>
+          <p>
+            회원이 정의된 로그인·가입 흐름으로 자신을 인증하고, API는 요청 본문·query·path의 사용자
+            식별자를 신뢰하지 않고 검증된 principal만 사용한다. 일반 사용자는 자신의 개인 API만,
+            관리자는 명시된 관리자 API만 접근하며, 인증 실패와 권한 부족을 구분한다.
+          </p>
+          <table>
+            <caption>이번 설계의 성공 신호</caption>
+            <thead>
+              <tr>
+                <th scope="col">영역</th>
+                <th scope="col">성공 기준</th>
+                <th scope="col">아직 열려 있는 결정</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">회원 생명주기</th>
+                <td>canonical email과 password 자격으로 users 행을 중복 없이 조회·생성하고 가입 직후 session을 발급한다.</td>
+                <td>Argon2id 파라미터와 users schema 경계</td>
+              </tr>
+              <tr>
+                <th scope="row">세션</th>
+                <td>짧은 access JWT와 HttpOnly cookie 기반 refresh 회전으로 만료·폐기·재사용을 처리한다.</td>
+                <td>cookie CSRF의 구체 설정과 logout 범위</td>
+              </tr>
+              <tr>
+                <th scope="row">인가</th>
+                <td>현재 API의 공개·회원·관리자 경계를 route별로 선언하고, DB의 현재 role을 공통 guard로 판정한다.</td>
+                <td>ADMIN 초기 부여·승격 경로</td>
+              </tr>
+              <tr>
+                <th scope="row">운영·검증</th>
+                <td>401/403, 토큰 회전, 사용자 소유 조건, 일반 사용자→관리자 우회 실패를 계약·통합·smoke로 재현한다.</td>
+                <td>cookie same-site와 Argon2id 운영 파라미터</td>
+              </tr>
+            </tbody>
+          </table>
+          <aside>
+            <strong>범위 원칙:</strong> 로그인·가입·JWT·현재 API 인증/인가까지를 이번 기준선으로 다룬다.
+            비밀번호 재설정, 다중 provider 계정 병합, 관리자 계정 발급 화면, 세밀한 permission
+            (RBAC의 role보다 작은 권한), rate limit/WAF는 별도 설계 없이는 자동 포함하지 않는다.
+          </aside>
+        </section>
+
+        <section id="evidence">
+          <h2>직접 확인한 근거와 해석</h2>
+          <table>
+            <caption>코드·정책에서 확인된 사실</caption>
+            <thead>
+              <tr>
+                <th scope="col">출처</th>
+                <th scope="col">확인된 사실</th>
+                <th scope="col">설계 영향</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row"><code>docs/policies/requirements.md</code> AUTH-01·AUTH-02</th>
+                <td>기존 정책은 카카오 식별자 로그인과 email 단독 병합 금지를 정의하지만, 현재 요청은 email/password를 우선한다. refresh는 원문을 저장하지 않고 기존 토큰 소비와 신규 발급을 원자 처리한다.</td>
+                <td>이번 기준선에서는 카카오 연동을 보류하고 로컬 인증을 구현한다. 향후 provider를 추가할 때 기존 email 계정과 자동 병합하지 않는 원칙은 유지한다.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>docs/design/erd.md</code> users·refresh_sessions</th>
+                <td><code>users</code>에는 <code>id</code>, 기존 <code>kakao_id</code>, <code>email</code>, 온보딩 필드가 있고, <code>refresh_sessions</code>는 <code>token_hash</code>, 만료·사용·폐기 시각을 갖는 초안이다. role은 없다.</td>
+                <td>이번 구현은 소셜 인증을 사용하지 않으며 <code>kakao_id</code> 컬럼을 제거한다. 실제 컬럼 drop은 base schema ownership과 기존 데이터 확인을 거쳐 migration으로 기록한다.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>apps/api/src/onboarding/onboarding.auth.ts</code> (설계 시점 snapshot)</th>
+                <td>설계 시점에는 <code>authenticatedUserId</code>를 “future authentication guard”가 넣는 seam으로 정의했지만 실제 guard는 없었다. 값은 body/query에서 읽지 않도록 의도되어 있었다.</td>
+                <td>구현에서는 해당 수동 seam을 제거하고 JWT 검증 결과를 공통 <code>AuthPrincipal</code>로 주입한 뒤 <code>@CurrentUser()</code> decorator로 전달한다.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>apps/api/src/api.module.ts</code> 및 controllers</th>
+                <td>전역 filter만 등록되어 있고 <code>APP_GUARD</code>, <code>UseGuards</code>, JWT·role guard는 없다. 현재 route는 health, issues/search, onboarding catalog, me/onboarding이다.</td>
+                <td>공개·회원·관리자 정책을 명시적으로 route에 매핑해야 한다. health와 auth를 무조건 보호하면 운영·로그인 진입이 막힌다.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>libs/core/src/common/logging</code></th>
+                <td>authorization, cookie, token, accessToken, refreshToken 및 Bearer 값을 로그에서 보정하도록 이미 구성되어 있다.</td>
+                <td>새 auth 예외·request log도 원문 credential을 남기지 않는 불변식을 유지한다. secret 자체는 환경 주입으로만 다룬다.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>docs/policies/requirements.md</code> 비회원 흐름</th>
+                <td>초기 제품 논의에는 비회원 기본 피드와 로컬 행동을 허용하고 서버 병합은 하지 않는 흐름이 있다.</td>
+                <td>일반 read-only API를 전부 보호할지, 공개 데이터는 유지할지 사용자 결정이 필요하다.</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>docker compose up -d --build</code> + fresh PostgreSQL</th>
+                <td><code>db</code>와 <code>api</code>는 healthy로 기동했지만, 빈 DB에서 <code>npm run db:migrate</code>가 <code>relation "users" does not exist</code>로 실패했고 <code>POST /auth/signup</code>은 500을 반환했다. <code>/health</code>는 200, 인증 없는 <code>/me/**</code>는 401이었다.</td>
+                <td>G12-A의 기존 base schema 전제와 Compose fresh 환경의 재현성 사이에 경계 결정이 필요하다. 이 결정 전에는 “Compose 전체 인증 흐름 동작”을 성공으로 판정하지 않는다.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            <strong>확인하지 못한 사실:</strong> 프론트 종류(browser/mobile), 실제 base schema DDL과 배포
+            secret manager, Argon2id native package의 운영 build 조건, 관리자 계정 발급 절차는 현재 worktree에서
+            확인되지 않았다. 이 항목들은 구현 중 읽기 전용 확인과 운영 문서로 보완하며, 설계 범위를 바꾸면
+            재승인한다.
+          </p>
+          <p>
+            <strong>새로 확인된 경계:</strong> 현재 Compose는 빈 PostgreSQL과 API만 제공하고 application
+            table이나 migration을 자동 생성하지 않는다. 기존 migration은 <code>users</code>,
+            <code>entities</code>, <code>issue_categories</code>, preference table을 외부 base schema로
+            가정한다. fresh Compose까지 성공 기준에 포함하려면 local-only bootstrap fixture를 둘지,
+            애플리케이션 migration history가 운영 base schema를 소유하지 않도록 유지하고, Compose에만
+            disposable fixture와 migration runner를 둘지 G14-A로 선택했다.
+          </p>
+        </section>
+
+        <section id="system-model">
+          <h2>제안 구조와 경계</h2>
+          <figure>
+            <svg viewBox="0 0 1100 270" role="img" aria-labelledby="auth-flow-title auth-flow-desc">
+              <title id="auth-flow-title">인증·인가 요청 경계</title>
+              <desc id="auth-flow-desc">
+                클라이언트가 auth endpoint에서 email/password를 검증받고 access JWT와 refresh를 얻는다.
+                이후 JWT guard가 서명·만료를 검증하고 사용자 저장소에서 현재 계정과 역할을 확인한 뒤
+                role guard와 controller가 개인·관리자 API 접근을 결정한다.
+              </desc>
+              <defs>
+                <marker id="auth-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0 0 L8 4 L0 8" fill="#17627c" />
+                </marker>
+              </defs>
+              <g fill="#e8f3f8" stroke="#17627c">
+                <rect x="10" y="70" width="135" height="85" rx="8" />
+                <rect x="185" y="70" width="155" height="85" rx="8" />
+                <rect x="380" y="70" width="145" height="85" rx="8" />
+                <rect x="565" y="70" width="165" height="85" rx="8" />
+                <rect x="770" y="70" width="145" height="85" rx="8" />
+                <rect x="955" y="70" width="135" height="85" rx="8" />
+              </g>
+              <g text-anchor="middle" font-size="16" fill="#172b36">
+                <text x="77" y="107">클라이언트</text>
+                <text x="77" y="132">Bearer / refresh</text>
+                <text x="262" y="101">Auth API</text>
+                <text x="262" y="126">credential 경계</text>
+                <text x="452" y="107">users</text>
+                <text x="452" y="132">계정 upsert</text>
+                <text x="647" y="101">세션 저장소</text>
+                <text x="647" y="126">refresh 회전</text>
+                <text x="842" y="107">JWT guard</text>
+                <text x="842" y="132">principal</text>
+                <text x="1022" y="101">role guard</text>
+                <text x="1022" y="126">API 실행</text>
+              </g>
+              <g stroke="#17627c" stroke-width="2" marker-end="url(#auth-arrow)">
+                <path d="M145 112H180" />
+                <path d="M340 112H375" />
+                <path d="M525 112H560" />
+                <path d="M730 112H765" />
+                <path d="M915 112H950" />
+              </g>
+              <g font-size="14" fill="#435865">
+                <text x="186" y="42">login/signup</text>
+                <text x="575" y="205">refresh 요청은 기존 row 소비 + 신규 row 발급을 한 transaction으로 처리</text>
+                <text x="773" y="230">role은 token 문자열만으로 최종 권한을 결정하지 않는 안을 우선 검토</text>
+              </g>
+            </svg>
+            <figcaption>
+              제안 흐름의 텍스트 등가: 클라이언트 → Auth API/credential 확인 → users 조회·생성 →
+              refresh session 저장·회전 → access JWT 검증과 현재 계정 조회 → role guard →
+              공개/회원/관리자 controller. 데이터 변경은 각 서비스의 transaction 경계를 따른다.
+            </figcaption>
+          </figure>
+          <ol>
+            <li>로컬 email/password 가입·로그인 endpoint가 입력을 검증하고 내부 user id를 결정한다.</li>
+            <li>가입 시 canonical email unique 기준으로 users를 생성하고, 로그인 시 기존 row를 재사용한다. 비밀번호는 원문이 아니라 선택한 password KDF 결과만 저장한다.</li>
+            <li>access JWT는 서명·issuer·audience·subject·issued-at·expiration을 검증 가능한 형태로 발급한다. refresh 원문은 HttpOnly cookie로만 전달하고 저장소에는 hash만 둔다.</li>
+            <li>보호된 요청은 Authorization Bearer를 검증한 뒤 principal을 request context에 두고, 현재 role은 DB에서 확인한다. 개인 데이터는 principal의 user id로만 조회한다.</li>
+            <li>관리자 route는 별도 role guard에서 현재 principal의 role을 확인한다. 인증 실패는 401, 인증됐지만 role 부족은 403으로 기존 ProblemDetails 계약에 맞춘다.</li>
+          </ol>
+        </section>
+
+        <section id="api-boundary">
+          <h2>현재 API와 예정 auth endpoint 경계 초안</h2>
+          <p>
+            아래 표는 구현 계약이 아니라 이번 grilling에서 확정할 route 정책의 기준선이다. 공개 데이터의
+            비회원 사용을 유지할지 여부에 따라 첫 세 행의 auth 정책이 달라진다.
+          </p>
+          <table>
+            <caption>접근 정책 후보</caption>
+            <thead>
+              <tr>
+                <th scope="col">경로</th>
+                <th scope="col">현재 동작</th>
+                <th scope="col">권고 초안</th>
+                <th scope="col">실패 계약</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row"><code>GET /health</code></th>
+                <td>process liveness 응답, DB query 없음</td>
+                <td><strong>PUBLIC</strong></td>
+                <td>기존 500 계약 유지</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>POST /auth/*</code></th>
+                <td>미구현</td>
+                <td><strong>PUBLIC</strong>; login/signup은 email/password 자격만 검증</td>
+                <td>잘못된 자격 401, 잘못된 입력 400</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>GET /onboarding/options</code><br /><code>GET /onboarding/entities</code></th>
+                <td>카탈로그 조회, 개인 데이터 없음</td>
+                <td><strong>PUBLIC</strong> 권고; 비회원 진입과 catalog cache 가능</td>
+                <td>형식 오류 400, 내부 오류 500</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>POST /issues/search</code></th>
+                <td>검색 결과 pilot, 사용자 조건 없음</td>
+                <td><strong>PUBLIC</strong> 권고; 실제 개인화 feed가 생기면 별도 보호 route로 분리</td>
+                <td>형식 오류 400/413, 내부 오류 500</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>/me/onboarding*</code></th>
+                <td>future guard가 넣을 user id seam만 있음</td>
+                <td><strong>AUTHENTICATED USER</strong>; principal user id로 소유 조건 적용</td>
+                <td>토큰 없음/무효 401, 내부 오류 500</td>
+              </tr>
+              <tr>
+                <th scope="row">향후 <code>/admin/*</code></th>
+                <td>미구현</td>
+                <td><strong>ADMIN</strong>; JWT guard 후 role guard</td>
+                <td>토큰 없음/무효 401, 일반 user 403</td>
+              </tr>
+            </tbody>
+          </table>
+          <aside>
+            <strong>결정 반영:</strong> G2-A로 공개 health·auth·catalog·search를 유지하고, 현재 개인
+            API인 <code>/me/**</code>와 향후 개인화·관리자 API에만 인증/인가를 적용한다. 실제
+            개인화 데이터가 <code>/issues/search</code>에 추가되면 공개 pilot과 보호된 feed endpoint를
+            분리한다.
+          </aside>
+        </section>
+
+        <section id="auth-contract">
+          <h2>Auth HTTP 계약 제안 · G13-A</h2>
+          <p>
+            로그인·가입 성공 시 access token은 JSON으로 반환하고 refresh token은 JSON에 포함하지 않는다.
+            서버는 refresh cookie를 회전하며, 현재 프론트엔드의 별도 계약이 확인되지 않아 아래 표를
+            기본 외부 계약으로 제안한다.
+          </p>
+          <table>
+            <caption>인증 endpoint 성공·입력 계약</caption>
+            <thead>
+              <tr>
+                <th scope="col">경로</th>
+                <th scope="col">입력</th>
+                <th scope="col">성공</th>
+                <th scope="col">부작용</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row"><code>POST /auth/signup</code></th>
+                <td><code>{ email, password }</code></td>
+                <td><code>201</code> + access response</td>
+                <td>USER 생성, refresh cookie 설정</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>POST /auth/login</code></th>
+                <td><code>{ email, password }</code></td>
+                <td><code>200</code> + access response</td>
+                <td>새 refresh session 생성, cookie 설정</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>POST /auth/refresh</code></th>
+                <td>body 없음, refresh cookie만 사용</td>
+                <td><code>200</code> + 새 access response</td>
+                <td>기존 refresh 소비, 새 refresh session 생성·cookie 교체</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>POST /auth/logout</code></th>
+                <td>현재 refresh cookie</td>
+                <td><code>204</code>, cookie 없음도 idempotent 성공</td>
+                <td>현재 refresh session revoke, cookie 삭제</td>
+              </tr>
+            </tbody>
+          </table>
+          <pre><code>{
+  "accessToken": "JWT",
+  "tokenType": "Bearer",
+  "expiresIn": 900,
+  "user": {
+    "id": "uuidv7",
+    "email": "user@example.com",
+    "role": "USER"
+  }
+}</code></pre>
+          <p>
+            refresh cookie는 <code>newtine_refresh</code>, <code>HttpOnly</code>, 운영 환경
+            <code>Secure</code>, <code>SameSite=Lax</code>, <code>Path=/auth</code>, 30일 수명,
+            Domain 미지정으로 제안한다. refresh token은 opaque random value이며 저장소에는 hash만 둔다.
+            입력 오류는 400, 잘못된 자격·refresh는 401, CSRF/role 부족은 403, 중복 email은 409의
+            기존 ProblemDetails 형식을 사용한다.
+          </p>
+          <aside>
+            이 계약은 G13-A의 승인된 설계 기록이다. 구현 시 Nestia route 선언과 실제 cookie·ProblemDetails
+            동작을 일치시키고, 다른 외부 계약이 발견되면 재승인한다.
+          </aside>
+        </section>
+
+        <section id="data-model">
+          <h2>데이터 모델과 토큰 상태 초안</h2>
+          <table>
+            <caption>기존·추가 데이터의 책임</caption>
+            <thead>
+              <tr>
+                <th scope="col">대상</th>
+                <th scope="col">제안 필드/규칙</th>
+                <th scope="col">불변식</th>
+                <th scope="col">상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row"><code>users</code></th>
+                <td>기존 <code>users</code>를 확장한다(G12-A): canonical <code>email</code>, Argon2id 결과 <code>password_hash</code>, <code>role</code>을 추가하고 기존 <code>kakao_id</code>는 제거한다. 이번 구현에는 social provider/auth endpoint가 없다.</td>
+                <td>email 정규화 결과는 unique. password·role은 client 입력으로 변경 불가. 모든 신규 가입은 USER이며, 기존 row의 기본 role은 USER로 backfill하되 실제 데이터 확인 후 migration한다.</td>
+                <td>G12 해결, column drop 전 base DDL 확인 필요</td>
+              </tr>
+              <tr>
+                <th scope="row"><code>refresh_sessions</code></th>
+                <td>기존 초안의 <code>id</code>, <code>user_id</code>, <code>token_hash</code>, <code>expires_at</code>, <code>used_at</code>, <code>revoked_at</code>, <code>created_at</code>를 사용한다. refresh는 opaque random value로 발급하고 HttpOnly cookie에 넣는다.</td>
+                <td>원문 refresh 저장 금지. cookie의 token hash 조회·기존 row 소비·신규 row 발급은 같은 transaction. 만료·used·revoked row는 재사용 불가; 재사용 시 사용자의 활성 session 전체 취소.</td>
+                <td>G9·G11 해결, G13 의존</td>
+              </tr>
+              <tr>
+                <th scope="row">access JWT</th>
+                <td><code>sub</code>, <code>iss</code>, <code>aud</code>, <code>iat</code>, <code>exp</code>, <code>jti</code> 중심. <code>jose</code> + HS256, access 15분. role claim은 넣지 않거나 참고값으로만 둔다.</td>
+                <td>algorithm/issuer/audience/expiration을 고정 검증. <code>JWT_SECRET</code>·개인정보·refresh 원문을 payload에 넣지 않음. refresh 수명은 30일 안.</td>
+                <td>G4·G6 해결, G9 운영 의존</td>
+              </tr>
+              <tr>
+                <th scope="row">principal</th>
+                <td>request에 JWT의 <code>userId</code>와 DB에서 읽은 현재 <code>role</code>, 인증 scheme에서 검증된 token metadata만 저장. controller는 이 값을 service에 전달.</td>
+                <td>body/query/path의 user id로 principal을 덮어쓰지 않음. 사용자가 없는 row는 401로 처리.</td>
+                <td>구조 제안</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            기존 migration이 “users와 기존 선호 테이블은 base schema가 소유한다”고 명시하므로, 인증 구현은
+            base schema 변경 소유권을 먼저 확인한 뒤 role·session DDL을 추가해야 한다. 실제 DB에 이미 존재하는
+            users row를 모두 <code>USER</code>로 안전하게 backfill할 수 있는지 확인하지 않고 migration을 작성하지 않는다.
+          </p>
+        </section>
+
+        <section id="invariants">
+          <h2>반드시 유지할 불변식</h2>
+          <ul>
+            <li>인증된 user id는 검증된 access JWT 결과에서만 오며, 요청 입력의 user id는 소유권 증거가 아니다.</li>
+            <li>로컬 계정의 canonical email은 unique이며, password hash는 원문·로그·응답에 나타나지 않는다. 이번 범위에는 provider 계정이나 email 병합이 없다.</li>
+            <li>access JWT는 짧은 수명·고정된 issuer/audience/algorithm을 사용하고, 만료·위조·잘못된 scheme을 거부한다.</li>
+            <li>refresh token 원문은 HttpOnly cookie 외의 저장·로그·예외 응답에 나타나지 않는다. 저장소에는 검증용 hash만 남긴다.</li>
+            <li>refresh rotation은 기존 token 소비와 새 token 발급이 원자적이어야 하며, 동시에 같은 refresh를 성공시키지 않는다.</li>
+            <li>role은 사용자가 입력·변경할 수 없고, ADMIN route는 인증 guard와 별도 authorization guard를 모두 통과해야 한다.</li>
+            <li>401(인증 증거 없음/무효/만료/계정 없음)과 403(인증됐지만 role 부족)을 구분한다. 내부 token parsing·DB 오류는 안전한 detail로 숨긴다.</li>
+            <li>새 인증 관련 값과 예외는 기존 logging redaction을 우회하지 않으며 access/refresh 원문을 구조화 log에 넣지 않는다.</li>
+          </ul>
+        </section>
+
+        <section id="failure-recovery">
+          <h2>실패·복구 모델 초안</h2>
+          <table>
+            <caption>인증·인가 실패와 운영 판단</caption>
+            <thead>
+              <tr>
+                <th scope="col">상황</th>
+                <th scope="col">응답</th>
+                <th scope="col">저장 상태</th>
+                <th scope="col">운영·복구</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Authorization 없음/형식 오류/서명 불일치</th>
+                <td>401 + 고정된 ProblemDetails</td>
+                <td>업무 상태 변경 없음</td>
+                <td>credential 원문 없이 request id와 분류만 기록</td>
+              </tr>
+              <tr>
+                <th scope="row">access 만료</th>
+                <td>401; 클라이언트는 refresh 흐름 시도</td>
+                <td>access 자체는 저장하지 않음</td>
+                <td>refresh 성공 시 새 access 발급, 실패 시 재로그인</td>
+              </tr>
+              <tr>
+                <th scope="row">refresh 만료·used·revoked</th>
+                <td>401</td>
+                <td>기존 session 재활성화 금지</td>
+                <td>재사용 탐지 정책에 따라 해당 session 또는 사용자 session을 revoke</td>
+              </tr>
+              <tr>
+                <th scope="row">일반 user의 admin route 접근</th>
+                <td>403</td>
+                <td>업무 상태 변경 없음</td>
+                <td>감사 가능한 최소 이벤트만 기록. 권한 우회로 해석하지 않도록 모니터링</td>
+              </tr>
+              <tr>
+                <th scope="row">refresh rotation 중 DB 충돌/연결 끊김</th>
+                <td>500 또는 안전한 503 정책을 별도 결정</td>
+                <td>transaction rollback; old token은 성공적으로 소비된 것으로 오인하지 않음</td>
+                <td>재시도 전에 old row 상태를 조회. 같은 요청을 무조건 재실행하지 않음</td>
+              </tr>
+              <tr>
+                <th scope="row">email 중복·비밀번호 불일치</th>
+                <td>가입은 409, 로그인은 401 + 계정 존재 여부를 과도하게 노출하지 않는 detail</td>
+                <td>users 생성·password 변경 없음</td>
+                <td>credential 원문과 password hash는 로그 금지. 반복 시 rate limit은 별도 운영 경계</td>
+              </tr>
+              <tr>
+                <th scope="row">cross-site refresh cookie 요청</th>
+                <td>CSRF 검증 실패 시 403 또는 401 정책</td>
+                <td>refresh rotation 없음</td>
+                <td>same-site 배포를 기본으로 하고, cross-site SPA를 지원하면 Origin/CSRF token 정책을 추가 확정</td>
+              </tr>
+            </tbody>
+          </table>
+          <aside>
+            refresh 재사용은 탈취 가능성을 의미하지만 정상적인 동시 요청과 구별해야 한다. 단순히
+            “다시 시도”로 처리하면 이미 소비된 token을 여러 번 살리는 위험이 있으므로 G5에서 취소 범위와
+            동시성 결과를 함께 확정한다.
+          </aside>
+        </section>
+
+        <section id="grilling-state">
+          <h2>설계 의사결정 질문 (grilling)</h2>
+          <p>
+            <strong class="open">진행 상태: 리팩터링 설계 결정 완료</strong>. 아래 질문은 settled design의
+            이해도 시험이 아니라 구현 전에 사용자와 선택하는 인증·인가 계약이다. G1~G14의 material
+            frontier가 해결되었고, G12-A로 기존 users를 확장하며 G14-A로 운영 base schema 소유권은
+            유지하고 Compose에만 disposable bootstrap을 두기로 했다. 이번 구현에서는 소셜 provider·카카오
+            식별자를 사용하지 않는다는 범위를 고정했다.
+          </p>
+          <dl>
+            <dt>범위</dt>
+            <dd>로컬 계정 생명주기·비밀번호 KDF, 현재 route 접근 정책, cookie CSRF 경계, role source/freshness, refresh 재사용·취소, JWT key/TTL, 관리자 발급·로그아웃, 계정 schema·HTTP contract</dd>
+            <dt>결정 트리</dt>
+            <dd>G1 local identity → G7 가입 활성화·endpoint → G8 Argon2id/password schema → G12 users 확장 경계; G3 cookie → G9 same-site/CSRF; G4 role source → role guard·demotion; G5 reuse policy → user-wide revoke; G6 key/TTL → config·검증; G10 admin provisioning → role backfill; G11 logout → session revoke API; G12 → G13 auth response·cookie/error contract; G14 bootstrap boundary → Compose migration/E2E</dd>
+            <dt>현재 가정</dt>
+            <dd>단일 NestJS API가 access JWT를 발급·검증하고 PostgreSQL이 users와 refresh session을 소유한다. 이번 구현은 email/password만 사용하며 소셜 provider와 카카오 식별자는 사용하지 않는다. browser same-site 배포를 기본으로 하고, 가입 즉시 session을 발급하며 password/email verification은 범위 밖이다. 운영 base schema 소유권은 G12-A대로 기존 schema를 전제로 유지하고, G14-A에 따라 fresh Compose에만 disposable bootstrap을 둔다.</dd>
+            <dt>보류된 가지</dt>
+            <dd>소셜 로그인·provider 계정 병합·password reset·email verification·cross-site SPA·rate limit은 이번 범위 밖이다. Argon2id 파라미터 benchmark와 실제 base schema DDL 확인은 구현 전 검증 항목이다. Compose bootstrap은 운영 schema를 대체하지 않는 disposable fixture로만 다룬다.</dd>
+          </dl>
+          <table>
+            <caption>의사결정 frontier</caption>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">결정</th>
+                <th scope="col">선행/후속</th>
+                <th scope="col">권고 상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">G1</th><td>email/password 로컬 인증 우선</td><td>users/auth API</td><td>해결됨 — B</td></tr>
+              <tr><th scope="row">G2</th><td>공개 read-only API 유지, 개인 API 보호</td><td>controller guard matrix</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G3</th><td>access JSON + HttpOnly refresh cookie</td><td>refresh contract</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G4</th><td>DB authoritative role lookup</td><td>role guard/schema</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G5</th><td>refresh 재사용 시 사용자 전체 session revoke</td><td>refresh transaction</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G6</th><td>jose + HS256, access 15분 / refresh 30일</td><td>config/verification</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G7</th><td>가입 즉시 활성화·중복 email은 409·signup 직후 session 발급</td><td>G1 → users/auth contract</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G8</th><td>Argon2id·12~128자·canonical email, password trim 금지</td><td>G1 → password_hash/migration</td><td>해결됨 — C</td></tr>
+              <tr><th scope="row">G9</th><td>same-site cookie·Origin 검증, cross-origin SPA 미지원</td><td>G3 → refresh controller/config</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G10</th><td>모든 가입자는 USER, ADMIN은 운영자만 부여</td><td>G4 → migration/operations</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G11</th><td>logout 시 현재 refresh session만 revoke</td><td>G3·G5 → logout API</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G12</th><td>기존 users 확장, <code>kakao_id</code> 제거, social provider/auth endpoint 미사용</td><td>G1·G8·G10 → migration</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G13</th><td>auth 성공 응답·cookie 이름/속성·HTTP status contract</td><td>G7·G9·G11·G12 → generated contract</td><td>해결됨 — A</td></tr>
+              <tr><th scope="row">G14</th><td>fresh Compose에서 base schema를 준비하는 경계</td><td>G12-A → migration runner·Compose acceptance</td><td>해결됨 — A</td></tr>
+            </tbody>
+          </table>
+          <aside>
+            <h3>G14 · fresh Compose bootstrap 경계</h3>
+            <p>
+              <strong>결정:</strong> 제공된 Compose에서 빈 DB를 올린 뒤에도 인증 E2E를 재현 가능하게 만들
+              것인지, 그리고 그때 base schema를 누가 소유할지를 정한다. 확인된 사실은 현재 migration이
+              외부 base schema를 요구하고 fresh DB에서 signup이 500이 된다는 것이다.
+            </p>
+            <p>
+              <strong>결정 반영 · G14-A:</strong> 운영 migration은 G12-A대로 기존 base schema 확장을 유지하고,
+              Compose에만 명시적인 disposable base-schema fixture와 migration runner를 추가한다. 장점은
+              운영 schema 소유권을 바꾸지 않으면서 fresh Compose E2E를 재현하는 점이고, 단점은 local
+              fixture가 운영 전체 schema의 대체물이 아니라는 점이다.
+            </p>
+            <p>
+              <strong>B 대안:</strong> base users·catalog·preference schema까지 애플리케이션 migration
+              history에 포함한다. fresh DB의 일관성은 가장 높지만 기존 owner·데이터·전체 domain schema의
+              소유권을 바꾸는 큰 범위이며 G12-A의 의미를 변경한다.
+            </p>
+            <p>
+              <strong>C 대안:</strong> Compose는 infra-only로 유지하고 base schema 선행 조건·preflight만
+              문서화한다. 운영 경계는 보존하지만 현재 Compose에서 signup이 동작한다는 성공 기준은
+              충족하지 못한다.
+            </p>
+            <p><strong>결정 상태:</strong> 사용자 선택 <code>G14-A</code> 및 구현 진행 승인 기록 완료. 운영 base schema 소유권은 유지하고 Compose local bootstrap만 구현한다.</p>
+          </aside>
+          <aside id="refactor-frontier">
+            <h3>후속 구조 리팩터링 frontier</h3>
+            <p>
+              현재 구현은 기능적으로 검증되었지만, auth application·domain·infrastructure 경계와 ORM 사용 방식이
+              섞여 있다. 아래 결정은 기존 HTTP·JWT·cookie·refresh 상태 전이를 유지하면서 가독성과 책임 경계를
+              개선할지 결정한다. 이 결정 전에는 구현 파일을 수정하지 않는다.
+            </p>
+            <table>
+              <caption>리팩터링 설계 선택지</caption>
+              <thead>
+                <tr><th scope="col">ID</th><th scope="col">결정</th><th scope="col">선택지</th><th scope="col">권고</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">R1</th>
+                  <td>인증 persistence 접근 전략</td>
+                  <td>A: 일반 CRUD는 MikroORM entity를 사용하고 refresh rotation만 명시적 SQL/QueryBuilder로 유지 · B: SQL-first를 공식화하고 entity metadata를 제거</td>
+                  <td>A — ORM의 이점과 동시성 제어를 함께 유지한다.</td>
+                </tr>
+                <tr>
+                  <th scope="row">R2</th>
+                  <td>구조 리팩터링 범위</td>
+                  <td>A: HTTP 계약·상태 전이를 유지하고 use case·domain policy·adapter 책임만 분리 · B: aggregate·provider·권한 모델까지 확장</td>
+                  <td>A — 현재 요구사항에 필요한 가독성만 개선하고 과설계를 피한다.</td>
+                </tr>
+                <tr>
+                  <th scope="row">R3</th>
+                  <td>인증 principal 전달 방식</td>
+                  <td>A: <code>Principal</code> 객체와 <code>@CurrentUser()</code> decorator 도입 · B: 현재처럼 request optional field와 helper 유지</td>
+                  <td>A — controller가 Express request 내부 필드와 인증 구현을 직접 알지 않게 한다.</td>
+                </tr>
+              </tbody>
+            </table>
+            <p><strong>결정 반영:</strong> 사용자가 권고안 <code>R1-A / R2-A / R3-A</code>를 승인했다. 기존 HTTP·JWT·cookie·refresh 상태 전이는 유지하고, 일반 persistence CRUD는 MikroORM으로 전환하며, refresh rotation의 동시성 SQL은 유지한다. 구현은 use case·domain policy·adapter 책임 분리와 <code>Principal</code>/<code>@CurrentUser()</code> 전달 방식에 한정한다.</p>
+          </aside>
+        </section>
+
+        <section id="verification-plan">
+          <h2>승인 후 검증 계획</h2>
+          <p>아래 명령과 시나리오는 설계 승인 뒤 실제 파일·route·DB 계약에 맞게 고정한다.</p>
+          <ol>
+            <li>auth domain unit: email canonicalization, password KDF·비교, users unique create, JWT claim·algorithm·issuer·audience·TTL 검증.</li>
+            <li>session unit/integration: 원문 미저장, hash 비교, cookie 정책, 만료·used·revoked 거절, 동시 refresh 중 하나만 소비, 재사용 시 전체 revoke.</li>
+            <li>guard/controller integration: public/auth/user/admin route matrix, 401과 403, body/query의 user id 위조 실패, role demotion 결과, CSRF 실패.</li>
+            <li>database migration: 기존 users row backfill, unique/index/FK/check, migration up과 되돌릴 수 없는 데이터 영향 확인.</li>
+            <li>fresh Compose: G14-A bootstrap 경계를 적용하고 빈 volume에서 migration → signup → protected API → refresh → logout을 실제 HTTP로 재현.</li>
+            <li>contracts: <code>npm run contracts:all</code>, <code>npm run test:contracts</code>, <code>npm run typecheck:generated</code>로 auth 실패·보안 scheme·응답 타입을 확인.</li>
+            <li>기존 게이트: <code>npm run test:unit</code>, <code>npm run test:integration</code>, <code>npm run build</code>, 필요 시 <code>npm run test:smoke</code>.</li>
+          </ol>
+          <p>
+            성공 기준은 단순히 “JWT 문자열이 발급됨”이 아니다. 보호된 실제 route가 올바른 principal과
+            role을 사용하고, 실패·재전송·동시성·로그 redaction까지 재현되어야 한다.
+          </p>
+        </section>
+
+        <section id="design-control-state">
+          <h2>설계 이해·통제 점검 (design-control)</h2>
+          <p>
+            상태: <strong>미실시</strong>. G14와 R1~R3 설계 delta가 반영되었다. 아래 질문은
+            implementation 전 prediction·invariant·boundary·failure
+            recovery·verification coverage를 다시 점검한다. 답변 결과는 브라우저 안에만 남으며 Codex에
+            자동 전달된다고 가정하지 않는다.
+          </p>
+          <p id="design-control-progress" class="control-progress" aria-live="polite">질문 1 / 14 · 답변 0 / 14</p>
+          <div id="design-control-questions">
+            <section class="control-slide is-active" data-question-id="DC1" data-answer="b" data-explanation="개인 데이터의 소유권은 요청 body/query/path가 아니라 검증된 access JWT의 subject에서 시작해야 한다. controller와 service는 guard가 주입한 principal user id를 사용한다." data-next="principal 주입과 /me route guard의 테스트를 구현한다.">
+              <fieldset>
+                <legend>DC1. /me/onboarding 요청 body에 다른 userId가 들어오면 어떤 값을 사용해야 하는가?</legend>
+                <label><input type="radio" name="dc1" value="a" /> body의 userId를 사용한다.</label>
+                <label><input type="radio" name="dc1" value="b" /> 검증된 JWT principal의 user id만 사용하고 body 값은 무시한다.</label>
+                <label><input type="radio" name="dc1" value="c" /> query와 body 중 먼저 온 값을 사용한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC2" data-answer="a" data-explanation="health, auth, onboarding catalog, 현재 공개 pilot search는 공개 경계로 남기고 /me/** 및 향후 개인·관리자 API만 보호한다. 실제 개인화가 필요해지면 route를 분리한다." data-next="controller별 guard matrix와 공개 route 회귀 테스트를 고정한다.">
+              <fieldset>
+                <legend>DC2. 현재 공개 route와 보호 route의 기준선은 무엇인가?</legend>
+                <label><input type="radio" name="dc2" value="a" /> health/auth/catalog/search는 공개, /me/**와 향후 개인·관리자 API는 보호한다.</label>
+                <label><input type="radio" name="dc2" value="b" /> 모든 API에 전역 인증을 걸어 health도 보호한다.</label>
+                <label><input type="radio" name="dc2" value="c" /> 현재는 어떤 route에도 인증을 적용하지 않는다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC3" data-answer="c" data-explanation="password 원문은 저장·로그·응답에 나타나면 안 된다. Argon2id 결과만 password_hash에 저장하고 로그인 때 verify한다." data-next="Argon2id wrapper와 원문 redaction·저장 금지 테스트를 구현한다.">
+              <fieldset>
+                <legend>DC3. 비밀번호를 users에 저장하는 올바른 방식은 무엇인가?</legend>
+                <label><input type="radio" name="dc3" value="a" /> 복호화 가능한 암호화 문자열로 저장한다.</label>
+                <label><input type="radio" name="dc3" value="b" /> SHA-256 한 번만 적용한 값을 저장한다.</label>
+                <label><input type="radio" name="dc3" value="c" /> Argon2id hash만 저장하고 원문은 어떤 경로에도 남기지 않는다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC4" data-answer="a" data-explanation="access token은 JSON의 Bearer 응답으로 짧게 전달하고 refresh 원문은 HttpOnly cookie로만 전달한다. 저장소에는 refresh hash만 둔다." data-next="access response와 cookie·session persistence 계약을 함께 테스트한다.">
+              <fieldset>
+                <legend>DC4. access token과 refresh token의 외부 전달·저장은 어떻게 나뉘는가?</legend>
+                <label><input type="radio" name="dc4" value="a" /> access는 JSON, refresh는 HttpOnly cookie이며 DB에는 refresh hash만 저장한다.</label>
+                <label><input type="radio" name="dc4" value="b" /> 둘 다 JSON으로 반환하고 DB에는 원문을 저장한다.</label>
+                <label><input type="radio" name="dc4" value="c" /> 둘 다 cookie로만 전달하고 access도 DB session row에 저장한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC5" data-answer="b" data-explanation="같은 refresh token은 한 transaction에서 한 번만 소비된다. 이미 used/revoked/expired token이 다시 오면 401을 반환하고 G5 정책에 따라 해당 사용자의 활성 refresh session을 모두 revoke한다." data-next="FOR UPDATE/원자 소비와 동시 요청·재사용 전체 revoke 테스트를 구현한다.">
+              <fieldset>
+                <legend>DC5. 같은 refresh token이 동시에 두 번 들어오면 어떻게 되는가?</legend>
+                <label><input type="radio" name="dc5" value="a" /> 두 요청 모두 새 access와 refresh를 발급한다.</label>
+                <label><input type="radio" name="dc5" value="b" /> 하나만 소비·회전되고, 재사용 요청은 401이며 사용자 활성 session을 revoke한다.</label>
+                <label><input type="radio" name="dc5" value="c" /> 두 요청 모두 조용히 성공하지만 같은 refresh를 계속 재사용한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC6" data-answer="c" data-explanation="JWT의 role claim은 최종 권한 근거가 아니다. 보호 요청마다 DB에서 현재 users.role을 조회하므로 운영자가 role을 내리면 다음 요청부터 반영된다." data-next="JWT guard의 user lookup과 role guard의 demotion 테스트를 구현한다.">
+              <fieldset>
+                <legend>DC6. role 변경의 최신성을 보장하는 최종 권한 근거는 무엇인가?</legend>
+                <label><input type="radio" name="dc6" value="a" /> 로그인 시 발급한 JWT의 role claim만 사용한다.</label>
+                <label><input type="radio" name="dc6" value="b" /> request body의 role을 사용한다.</label>
+                <label><input type="radio" name="dc6" value="c" /> 보호 요청마다 DB의 현재 users.role을 조회한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC7" data-answer="a" data-explanation="공개 signup 입력으로 role을 받지 않고 모든 신규 계정을 USER로 만든다. ADMIN은 운영자 승인·DB bootstrap 또는 별도 운영 절차로만 부여한다." data-next="signup DTO에서 role을 제거하고 migration/bootstrap 운영 경계를 문서화한다.">
+              <fieldset>
+                <legend>DC7. 일반 회원가입으로 ADMIN을 만들 수 있어야 하는가?</legend>
+                <label><input type="radio" name="dc7" value="a" /> 아니다. signup은 항상 USER이며 ADMIN은 운영자만 부여한다.</label>
+                <label><input type="radio" name="dc7" value="b" /> 그렇다. signup body의 role을 그대로 저장한다.</label>
+                <label><input type="radio" name="dc7" value="c" /> 첫 가입자만 자동으로 ADMIN으로 만든다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC8" data-answer="b" data-explanation="인증 증거가 없거나 무효이면 401, 인증됐지만 role이 부족하면 403, canonical email 중복 signup은 409, 입력 형식 오류는 400이다." data-next="ProblemDetails mapping과 route contract expected failure status를 갱신한다.">
+              <fieldset>
+                <legend>DC8. 토큰 없음·role 부족·중복 email의 상태 코드는 각각 무엇인가?</legend>
+                <label><input type="radio" name="dc8" value="a" /> 모두 401로 통일한다.</label>
+                <label><input type="radio" name="dc8" value="b" /> 토큰 없음은 401, role 부족은 403, 중복 email은 409다.</label>
+                <label><input type="radio" name="dc8" value="c" /> 토큰 없음은 403, role 부족은 401, 중복 email은 400이다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC9" data-answer="c" data-explanation="refresh cookie는 HttpOnly, 운영 Secure, SameSite=Lax, Path=/auth로 제한하고 Origin을 검증한다. cross-origin SPA는 이번 범위에서 지원하지 않는다." data-next="cookie 옵션·Origin 정책과 CSRF 실패 403 테스트를 구현한다.">
+              <fieldset>
+                <legend>DC9. refresh cookie 기반 CSRF 경계의 기본 정책은 무엇인가?</legend>
+                <label><input type="radio" name="dc9" value="a" /> Domain을 넓게 열고 Origin 검증 없이 모든 cross-site 요청을 허용한다.</label>
+                <label><input type="radio" name="dc9" value="b" /> refresh token을 JSON body로 옮기고 cookie 보호를 제거한다.</label>
+                <label><input type="radio" name="dc9" value="c" /> same-site + HttpOnly + 운영 Secure + SameSite=Lax + /auth Path + Origin 검증을 사용한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC10" data-answer="a" data-explanation="이번 구현은 email/password만 제공하고 social provider·카카오 endpoint·kakao_id를 사용하지 않는다. users의 kakao_id 제거는 base schema와 기존 데이터 확인 후 migration으로 반영한다." data-next="UserSchema·ERD·migration에서 kakao_id를 제거하고 실제 base DDL/data 영향과 down 불가를 검증한다.">
+              <fieldset>
+                <legend>DC10. 이번 인증 모델에서 kakao_id의 처리 원칙은 무엇인가?</legend>
+                <label><input type="radio" name="dc10" value="a" /> social auth에서 사용하지 않고 users schema에서도 제거한다.</label>
+                <label><input type="radio" name="dc10" value="b" /> 당장은 endpoint만 숨기고 kakao_id를 계속 필수 인증 식별자로 둔다.</label>
+                <label><input type="radio" name="dc10" value="c" /> kakao_id와 email/password를 자동 병합한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC11" data-answer="a" data-explanation="운영 migration은 기존 base schema를 확장하는 G12-A를 유지하고, Compose에서만 disposable fixture가 base table을 준비한 뒤 onboarding·authentication migration을 적용한다. 이 fixture는 운영 schema나 운영 데이터의 대체물이 아니다." data-next="Compose fresh volume에서 fixture → migration → signup → protected API → refresh → logout을 실행하고, 운영 DB에는 fixture를 적용하지 않는다.">
+              <fieldset>
+                <legend>DC11. G14-A를 적용할 때 운영 DB와 Compose local DB의 schema 준비는 어떻게 나뉘는가?</legend>
+                <label><input type="radio" name="dc11" value="a" /> 운영은 기존 base schema 확장을 유지하고, Compose에만 disposable fixture와 migration runner를 둔다.</label>
+                <label><input type="radio" name="dc11" value="b" /> Compose fixture를 운영 DB에도 그대로 적용해 base schema 소유권을 바꾼다.</label>
+                <label><input type="radio" name="dc11" value="c" /> base table을 만들지 않고 migration과 signup을 계속 실행한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC12" data-answer="a" data-explanation="일반적인 user·refresh session CRUD는 등록된 MikroORM entity를 통해 다루고, refresh rotation의 row lock·조건부 상태 전이처럼 동시성 제어가 핵심인 부분만 명시적 SQL 또는 QueryBuilder로 유지한다. raw SQL을 무조건 제거하지 않는다." data-next="ORM entity CRUD와 rotation 동시성 테스트를 분리해 검증한다.">
+              <fieldset>
+                <legend>DC12. R1-A의 ORM과 raw SQL 책임 분리는 어떻게 되는가?</legend>
+                <label><input type="radio" name="dc12" value="a" /> 일반 CRUD는 MikroORM, refresh rotation의 동시성 제어는 명시적 SQL/QueryBuilder를 사용한다.</label>
+                <label><input type="radio" name="dc12" value="b" /> 모든 persistence를 raw SQL로 두고 ORM entity는 장식으로만 유지한다.</label>
+                <label><input type="radio" name="dc12" value="c" /> 동시성 상태 전이도 ORM을 쓰지 않고 애플리케이션 메모리에서 처리한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC13" data-answer="b" data-explanation="이번 리팩터링은 HTTP 계약, JWT/cookie 정책, refresh 상태 전이를 바꾸지 않는다. AuthService를 유즈케이스·domain policy·adapter 경계로 나누되 User aggregate나 provider 계정 병합까지 확장하지 않는다." data-next="기존 auth contract·Compose smoke·refresh reuse 테스트를 그대로 회귀 검증한다.">
+              <fieldset>
+                <legend>DC13. R2-A 리팩터링에서 유지해야 하는 것은 무엇인가?</legend>
+                <label><input type="radio" name="dc13" value="a" /> User aggregate와 social provider까지 새로 설계해 HTTP 계약도 함께 바꾼다.</label>
+                <label><input type="radio" name="dc13" value="b" /> 기존 HTTP·JWT·cookie·refresh 상태 전이는 유지하고 책임 경계만 분리한다.</label>
+                <label><input type="radio" name="dc13" value="c" /> 구조 변경이므로 기존 인증 테스트와 Compose 검증은 제거한다.</label>
+              </fieldset>
+            </section>
+            <section class="control-slide" data-question-id="DC14" data-answer="c" data-explanation="guard는 인증 결과인 Principal을 request에 한 번 주입하고, controller는 @CurrentUser()로 이를 받는다. controller가 Express request optional field를 직접 읽거나 body의 user id를 인증 주체로 사용하지 않는다." data-next="Principal decorator와 /me route 회귀 테스트를 구현한다.">
+              <fieldset>
+                <legend>DC14. R3-A에서 보호 controller가 인증된 사용자를 받는 방식은 무엇인가?</legend>
+                <label><input type="radio" name="dc14" value="a" /> controller가 request.authenticatedUserId를 직접 읽고 helper로 검증한다.</label>
+                <label><input type="radio" name="dc14" value="b" /> request body의 userId와 JWT subject 중 더 구체적인 값을 선택한다.</label>
+                <label><input type="radio" name="dc14" value="c" /> guard가 Principal을 주입하고 controller는 @CurrentUser()로 받는다.</label>
+              </fieldset>
+            </section>
+          </div>
+          <div class="control-nav" aria-label="설계 통제 질문 탐색">
+            <button type="button" data-prev-question>이전</button>
+            <button type="button" data-next-question>다음</button>
+            <button type="button" data-submit-question>현재 답변 제출</button>
+            <span class="control-progress" data-control-progress>질문 1 / 14 · 답변 0 / 14</span>
+          </div>
+          <p><small>각 질문의 결과는 제출한 뒤 해당 카드에만 표시된다. 이 HTML self-check는 설계 이해를 돕는 기록이며 구현 승인이나 브라우저 결과 전송의 대체가 아니다.</small></p>
+          <table>
+            <caption>통제 점검 coverage ledger</caption>
+            <thead>
+              <tr><th scope="col">축</th><th scope="col">현재 상태</th><th scope="col">질문 시점</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">목표·범위</th><td>G1·G2·G7·G12·G13·G14 및 R2-A 해결</td><td>DC1·DC2·DC10·DC11·DC13</td></tr>
+              <tr><th scope="row">결정·불변식</th><td>G3~G11 및 R1-A 해결, Argon2id 파라미터는 benchmark</td><td>DC3·DC4·DC6·DC7·DC12</td></tr>
+              <tr><th scope="row">경계·상태 전이</th><td>refresh row·principal 전이와 R1/R3 adapter 경계</td><td>DC1·DC4·DC5·DC6·DC12·DC14</td></tr>
+              <tr><th scope="row">실패·복구</th><td>G5·G9·G11 해결</td><td>DC5·DC8·DC9</td></tr>
+              <tr><th scope="row">권한·외부 효과</th><td>G4·G10 해결</td><td>DC6·DC7</td></tr>
+              <tr><th scope="row">관찰성·운영</th><td>redaction 근거와 G6 해결, rate limit·secret rotation 미확정</td><td>DC3·DC5·DC7·잔여 위험</td></tr>
+              <tr><th scope="row">검증·잔여 위험</th><td>Argon2id benchmark·base schema DDL·fresh Compose E2E·ORM/rotation 회귀 검증 필요</td><td>DC3·DC5·DC10·DC11·DC12·DC13·DC14·구현 제어 문서</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="approval-state">
+          <h2>승인 상태</h2>
+          <dl>
+            <dt>현재 상태</dt>
+            <dd><strong class="done">설계 승인됨</strong> — R1-A / R2-A / R3-A</dd>
+            <dt>설계 control 상태</dt>
+            <dd>미실시 — G14-A와 R1~R3 설계 delta 및 DC1~DC14를 기록함. self-check 결과는 비차단</dd>
+            <dt>구현 승인</dt>
+            <dd>승인됨 — G1~G14-A 및 R1-A / R2-A / R3-A. 기존 API·상태 전이·보안 정책 유지</dd>
+            <dt>다음 단계</dt>
+            <dd>구조 리팩터링 구현 → auth 회귀·ORM/rotation 동시성·fresh Compose gate 검증</dd>
+          </dl>
+        </section>
+      </article>
+    </main>
+    <script>
+      (() => {
+        const slides = Array.from(document.querySelectorAll('.control-slide'));
+        const previous = document.querySelector('[data-prev-question]');
+        const next = document.querySelector('[data-next-question]');
+        const submit = document.querySelector('[data-submit-question]');
+        const progress = Array.from(document.querySelectorAll('[data-control-progress], #design-control-progress'));
+        const answers = new Map();
+        let current = 0;
+
+        const updateProgress = () => {
+          const text = `질문 ${current + 1} / ${slides.length} · 답변 ${answers.size} / ${slides.length}`;
+          progress.forEach((element) => {
+            element.textContent = text;
+          });
+        };
+
+        const render = () => {
+          slides.forEach((slide, index) => {
+            slide.classList.toggle('is-active', index === current);
+          });
+          previous.disabled = current === 0;
+          next.disabled = current === slides.length - 1;
+          updateProgress();
+        };
+
+        slides.forEach((slide, index) => {
+          slide.querySelectorAll('input[type="radio"]').forEach((input) => {
+            input.addEventListener('change', () => answers.set(slide.dataset.questionId, input.value));
+          });
+          const result = document.createElement('div');
+          result.className = 'control-result';
+          result.hidden = true;
+          result.innerHTML = '<p><strong>상태:</strong> <span data-status></span></p><p><strong>설명:</strong> <span data-explanation></span></p><p><strong>다음 행동:</strong> <span data-next></span></p>';
+          slide.append(result);
+          slide.dataset.index = String(index);
+        });
+
+        previous.addEventListener('click', () => {
+          if (current > 0) current -= 1;
+          render();
+        });
+        next.addEventListener('click', () => {
+          if (current < slides.length - 1) current += 1;
+          render();
+        });
+        submit.addEventListener('click', () => {
+          const slide = slides[current];
+          const selected = slide.querySelector('input[type="radio"]:checked');
+          const result = slide.querySelector('.control-result');
+          const status = result.querySelector('[data-status]');
+          const explanation = result.querySelector('[data-explanation]');
+          const nextAction = result.querySelector('[data-next]');
+          if (!selected) {
+            status.textContent = '답변 필요';
+            explanation.textContent = '현재 질문에서 하나의 답을 선택한 뒤 제출해야 한다.';
+            nextAction.textContent = '선택지를 고르고 다시 제출한다.';
+            result.classList.add('is-pending');
+          } else if (selected.value === slide.dataset.answer) {
+            status.textContent = '확립';
+            explanation.textContent = slide.dataset.explanation;
+            nextAction.textContent = slide.dataset.next;
+            result.classList.remove('is-pending');
+          } else {
+            status.textContent = '보류';
+            explanation.textContent = '선택한 답은 현재 승인된 기준선과 다르다. 정답을 노출하지 않고 해당 설계 문단과 불변식을 다시 확인한다.';
+            nextAction.textContent = '설계 기준선을 재확인한 뒤 답을 바꾸어 다시 제출한다.';
+            result.classList.add('is-pending');
+          }
+          result.hidden = false;
+          updateProgress();
+        });
+
+        render();
+      })();
+    </script>
+  </body>
+</html>

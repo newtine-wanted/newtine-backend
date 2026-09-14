@@ -19,7 +19,10 @@ import type {
 } from "../../../../../apps/api/src/pipeline/type/pipelineRun.response";
 
 /**
+ * @security bearerAuth
  * @throws 400 The request is invalid.
+ * @throws 401 Authentication is required.
+ * @throws 403 The authenticated principal is not allowed to perform this action.
  * @throws 409 The request conflicts with the current resource state.
  * @throws 500 The server could not complete the request.
  * @controller PipelineController.create
@@ -70,7 +73,10 @@ export namespace create {
 }
 
 /**
+ * @security bearerAuth
  * @throws 400 The request is invalid.
+ * @throws 401 Authentication is required.
+ * @throws 403 The authenticated principal is not allowed to perform this action.
  * @throws 404 The requested resource was not found.
  * @throws 500 The server could not complete the request.
  * @controller PipelineController.get
@@ -107,7 +113,10 @@ export namespace get {
 }
 
 /**
+ * @security bearerAuth
  * @throws 400 The request is invalid.
+ * @throws 401 Authentication is required.
+ * @throws 403 The authenticated principal is not allowed to perform this action.
  * @throws 404 The requested resource was not found.
  * @throws 409 The request conflicts with the current resource state.
  * @throws 500 The server could not complete the request.
@@ -160,7 +169,10 @@ export namespace retry {
 }
 
 /**
+ * @security bearerAuth
  * @throws 400 The request is invalid.
+ * @throws 401 Authentication is required.
+ * @throws 403 The authenticated principal is not allowed to perform this action.
  * @throws 404 The requested resource was not found.
  * @throws 409 The request conflicts with the current resource state.
  * @throws 500 The server could not complete the request.

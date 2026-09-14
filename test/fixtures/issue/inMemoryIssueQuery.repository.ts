@@ -221,7 +221,7 @@ function batchKey(sessionId: string, batchNo: number): string {
 }
 
 function sameOwner(left: FeedOwner, right: FeedOwner): boolean {
-  return left.userId === right.userId && left.guestKey === right.guestKey;
+  return left.userId === right.userId;
 }
 
 function compareInteraction(left: UserInteractionRecord, right: UserInteractionRecord): number {

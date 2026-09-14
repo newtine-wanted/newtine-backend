@@ -3,8 +3,6 @@ import type { IssueSelectionType, FeedContinuation } from '@newtine/core';
 
 export interface FeedSessionResponse {
   sessionId: string & tags.Format<'uuid'>;
-  /** Bearer secret for guest batch requests; never returned for member sessions. */
-  guestKey: string | null;
   expiresAt: string & tags.Format<'date-time'>;
   nextBatchNo: number & tags.Type<'uint32'>;
 }

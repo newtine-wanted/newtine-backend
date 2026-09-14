@@ -1,10 +1,12 @@
 import { TypedBody, TypedException, TypedQuery, TypedRoute } from '@nestia/core';
-import { Controller, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import { Controller, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import typia from 'typia';
 
 import { ApiException } from '@newtine/api/common/exception/api.exception.js';
+import { CurrentUser } from '@newtine/api/auth/auth.decorator.js';
+import type { AuthPrincipal } from '@newtine/core';
+import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
 import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDetails.js';
-import { requireAuthenticatedUserId, type AuthenticatedRequest } from './onboarding.auth.js';
 import { OnboardingService } from './onboarding.service.js';
 import { toEntitySearchCommand } from './type/onboarding.input.js';
 import type {
@@ -50,29 +52,31 @@ export class OnboardingController {
     );
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
   @TypedException<ProblemDetails>(ApiException.InternalError)
+  @UseGuards(JwtAuthGuard)
   @TypedRoute.Get('me/onboarding')
-  async getMyOnboarding(@Req() request: AuthenticatedRequest): Promise<OnboardingStateResult> {
-    return toStateResult(
-      await this.onboardingService.getMyOnboarding(requireAuthenticatedUserId(request)),
-    );
+  async getMyOnboarding(@CurrentUser() principal: AuthPrincipal): Promise<OnboardingStateResult> {
+    return toStateResult(await this.onboardingService.getMyOnboarding(principal.userId));
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
   @TypedException<ProblemDetails>(ApiException.InternalError)
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @TypedRoute.Post('me/onboarding/complete')
   async complete(
-    @Req() request: AuthenticatedRequest,
+    @CurrentUser() principal: AuthPrincipal,
     @TypedBody<CompleteOnboardingRequest>({
       type: 'validate',
       validate: (input) => typia.validateEquals<CompleteOnboardingRequest>(input),
     })
     body: CompleteOnboardingRequest,
   ): Promise<OnboardingStateResult> {
-    const state = await this.onboardingService.complete(requireAuthenticatedUserId(request), {
+    const state = await this.onboardingService.complete(principal.userId, {
       topicCodes: body.topicCodes,
       entityIds: body.entityIds,
       ageGroup: body.ageGroup,
@@ -81,11 +85,13 @@ export class OnboardingController {
     return toStateResult(state);
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
   @TypedException<ProblemDetails>(ApiException.InternalError)
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @TypedRoute.Post('me/onboarding/skip')
-  async skip(@Req() request: AuthenticatedRequest): Promise<OnboardingStateResult> {
-    return toStateResult(await this.onboardingService.skip(requireAuthenticatedUserId(request)));
+  async skip(@CurrentUser() principal: AuthPrincipal): Promise<OnboardingStateResult> {
+    return toStateResult(await this.onboardingService.skip(principal.userId));
   }
 }

@@ -3,14 +3,25 @@ import { Migrator } from '@mikro-orm/migrations';
 import { PostgreSqlDriver } from '@mikro-orm/postgresql';
 import { AiUsageRecordEntity } from '@newtine/core/pipeline/repository/mikroOrm/aiUsageRecord.entity.js';
 import { DatabaseConfigurationException } from './databaseConfiguration.exception.js';
+import { AUTH_PERSISTENCE_ENTITIES } from '../../auth/persistence/auth.persistence.entity.js';
+import { Migration20260914000000Authentication } from '../../auth/migrations/Migration20260914000000Authentication.js';
 import { ONBOARDING_PERSISTENCE_ENTITIES } from '../../onboarding/persistence/onboarding.persistence.entity.js';
+import { USER_PERSISTENCE_ENTITIES } from '../../user/persistence/user.persistence.entity.js';
 import { Migration20260913000000OnboardingPersistence } from '../../onboarding/migrations/Migration20260913000000OnboardingPersistence.js';
 import { Migration20260913000001CategoryCodePrimaryKey } from '../../pipeline/migrations/Migration20260913000001CategoryCodePrimaryKey.js';
 import { Migration202609130001Pipeline } from '../../pipeline/migrations/Migration202609130001Pipeline.js';
 import { Migration202609130002PipelineEmbeddingTasks } from '../../pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
 import { Migration202609130003IssueCardQuery } from '../../pipeline/migrations/Migration202609130003IssueCardQuery.js';
 import { Migration202609130004IssueCardQueryReadModel } from '../../pipeline/migrations/Migration202609130004IssueCardQueryReadModel.js';
+import { Migration20260915000000MemberOnlyFeed } from '../../pipeline/migrations/Migration20260915000000MemberOnlyFeed.js';
 import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '../../issue/persistence/issueQuery.persistence.entity.js';
+
+const PERSISTENCE_ENTITIES = [
+  ...USER_PERSISTENCE_ENTITIES,
+  ...ONBOARDING_PERSISTENCE_ENTITIES,
+  AiUsageRecordEntity,
+  ...AUTH_PERSISTENCE_ENTITIES,
+] as const;
 
 export function createDatabaseOptions(
   env: NodeJS.ProcessEnv = process.env,
@@ -37,16 +48,8 @@ export function createDatabaseOptions(
     dbName: required('DB_NAME', 'newtine'),
     user: required('DB_USER', 'postgres'),
     password: required('DB_PASSWORD', 'postgres'),
-    entities: [
-      ...ONBOARDING_PERSISTENCE_ENTITIES,
-      ...ISSUE_QUERY_PERSISTENCE_ENTITIES,
-      AiUsageRecordEntity,
-    ],
-    entitiesTs: [
-      ...ONBOARDING_PERSISTENCE_ENTITIES,
-      ...ISSUE_QUERY_PERSISTENCE_ENTITIES,
-      AiUsageRecordEntity,
-    ],
+    entities: [...PERSISTENCE_ENTITIES, ...ISSUE_QUERY_PERSISTENCE_ENTITIES],
+    entitiesTs: [...PERSISTENCE_ENTITIES, ...ISSUE_QUERY_PERSISTENCE_ENTITIES],
     extensions: [Migrator],
     migrations: {
       path: './dist/libs/core/src/pipeline/migrations',
@@ -60,6 +63,8 @@ export function createDatabaseOptions(
         Migration202609130002PipelineEmbeddingTasks,
         Migration202609130003IssueCardQuery,
         Migration202609130004IssueCardQueryReadModel,
+        Migration20260914000000Authentication,
+        Migration20260915000000MemberOnlyFeed,
       ],
       transactional: true,
       allOrNothing: true,

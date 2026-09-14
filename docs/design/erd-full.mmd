@@ -126,8 +126,9 @@ erDiagram
  }
  users {
   uuid id PK "NOT NULL"
-  text kakao_id UK "NOT NULL"
-  text email "NULL"
+  text email "NULL; canonical unique"
+  text password_hash "NULL; Argon2id"
+  text role "NOT NULL; USER or ADMIN"
   text onboarding_status "NOT NULL"
   timestamptz onboarding_completed_at "NULL"
   timestamptz created_at "NOT NULL"

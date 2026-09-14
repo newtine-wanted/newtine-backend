@@ -5,7 +5,6 @@ export const IssueExceptionCode = {
   FeedSessionNotFound: 'FEED_SESSION_NOT_FOUND',
   FeedSessionExpired: 'FEED_SESSION_EXPIRED',
   FeedBatchConflict: 'FEED_BATCH_CONFLICT',
-  FeedOwnerInvalid: 'FEED_OWNER_INVALID',
 } as const;
 
 export type IssueExceptionCodeValue = (typeof IssueExceptionCode)[keyof typeof IssueExceptionCode];

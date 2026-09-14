@@ -2,8 +2,7 @@ import { EntitySchema } from '@mikro-orm/core';
 
 export interface FeedSessionPersistenceEntity {
   id: string;
-  userId: string | null;
-  guestTokenHash: string | null;
+  userId: string;
   algorithmVersion: string;
   nextBatchNo: number;
   status: string;
@@ -20,8 +19,7 @@ export const FeedSessionEntity = new EntitySchema<FeedSessionPersistenceEntity>(
   tableName: 'feed_sessions',
   properties: {
     id: { type: String, columnType: 'uuid', primary: true },
-    userId: { type: String, columnType: 'uuid', fieldName: 'user_id', nullable: true },
-    guestTokenHash: { type: String, fieldName: 'guest_token_hash', nullable: true },
+    userId: { type: String, columnType: 'uuid', fieldName: 'user_id' },
     algorithmVersion: { type: String, fieldName: 'algorithm_version' },
     nextBatchNo: { type: Number, fieldName: 'next_batch_no' },
     status: { type: String },

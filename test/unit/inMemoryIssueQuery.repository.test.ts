@@ -12,7 +12,7 @@ import type {
 test('in-memory feed batch save keeps the first concurrent write', async () => {
   const repository = new InMemoryIssueQueryRepository();
   const session = await repository.createFeedSession(
-    { userId: null, guestKey: 'guest-hash' },
+    { userId: '00000000-0000-0000-0000-000000000001' },
     new Date('2026-01-01T00:00:00.000Z'),
   );
   const first = batch(session, 'first');

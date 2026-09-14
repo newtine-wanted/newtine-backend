@@ -101,8 +101,7 @@ export interface IssueCandidateScope {
 }
 
 export interface FeedOwner {
-  userId: string | null;
-  guestKey: string;
+  userId: string;
 }
 
 export interface FeedSessionRecord {

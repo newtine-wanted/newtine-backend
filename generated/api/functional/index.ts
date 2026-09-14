@@ -7,6 +7,7 @@
 export * as pipeline from "./pipeline/index";
 export * as onboarding from "./onboarding/index";
 export * as me from "./me/index";
-export * as health from "./health/index";
 export * as issues from "./issues/index";
 export * as feed_sessions from "./feed_sessions/index";
+export * as health from "./health/index";
+export * as auth from "./auth/index";

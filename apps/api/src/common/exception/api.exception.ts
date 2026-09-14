@@ -16,6 +16,12 @@ export const ApiException = {
     title: 'Unauthorized',
     description: 'Authentication is required.',
   },
+  Forbidden: {
+    code: ErrorCode.Forbidden,
+    status: HttpStatus.FORBIDDEN,
+    title: 'Forbidden',
+    description: 'The authenticated principal is not allowed to perform this action.',
+  },
   NotFound: {
     code: ErrorCode.NotFound,
     status: HttpStatus.NOT_FOUND,

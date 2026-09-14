@@ -2,8 +2,6 @@ import type { FeedContinuation, IssueSelectionType } from '@newtine/core';
 
 export interface FeedSessionResult {
   sessionId: string;
-  /** Returned once for guest sessions; only its hash is persisted. */
-  guestKey: string | null;
   expiresAt: Date;
   nextBatchNo: number;
 }

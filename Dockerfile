@@ -27,6 +27,7 @@ RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/config ./config
+COPY --from=build --chown=node:node /app/scripts/migrate.mjs ./scripts/migrate.mjs
 
 USER node
 

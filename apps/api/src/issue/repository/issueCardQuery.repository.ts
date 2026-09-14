@@ -79,7 +79,6 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       manager.create(FeedSessionEntity, {
         id: session.id,
         userId: owner.userId,
-        guestTokenHash: owner.userId === null ? owner.guestKey : null,
         algorithmVersion: session.algorithmVersion,
         nextBatchNo: session.nextBatchNo,
         status: session.status,
@@ -102,12 +101,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
   ): Promise<FeedSessionRecord | null> {
     void _now;
     const manager = this.currentEntityManager();
-    const row = await manager.findOne(
-      FeedSessionEntity,
-      owner.userId === null
-        ? { id, userId: null, guestTokenHash: owner.guestKey }
-        : { id, userId: owner.userId },
-    );
+    const row = await manager.findOne(FeedSessionEntity, { id, userId: owner.userId });
     return row === null ? null : toSession(row, owner);
   }
 

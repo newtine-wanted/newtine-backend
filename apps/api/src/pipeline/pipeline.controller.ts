@@ -1,8 +1,11 @@
 import { TypedBody, TypedException, TypedHeaders, TypedParam, TypedRoute } from '@nestia/core';
-import { Controller, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import typia from 'typia';
 
-import { PipelineRunService } from '@newtine/core';
+import { AuthRole, PipelineRunService } from '@newtine/core';
+import { Roles } from '@newtine/api/auth/auth.decorator.js';
+import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
+import { RolesGuard } from '@newtine/api/auth/roles.guard.js';
 import { ApiException } from '@newtine/api/common/exception/api.exception.js';
 import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDetails.js';
 import { toPipelineRunAcceptedResponse, toPipelineRunResponse } from './type/pipelineRun.mapper.js';
@@ -18,10 +21,15 @@ import type {
 } from './type/pipelineRun.response.js';
 
 @Controller('pipeline/runs')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(AuthRole.Admin)
 export class PipelineController {
   constructor(private readonly pipelineRunService: PipelineRunService) {}
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
+  @TypedException<ProblemDetails>(ApiException.Unauthorized)
+  @TypedException<ProblemDetails>(ApiException.Forbidden)
   @TypedException<ProblemDetails>(ApiException.Conflict)
   @TypedException<ProblemDetails>(ApiException.InternalError)
   @HttpCode(HttpStatus.ACCEPTED)
@@ -48,16 +56,22 @@ export class PipelineController {
     return toPipelineRunAcceptedResponse(snapshot);
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.NotFound)
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
+  @TypedException<ProblemDetails>(ApiException.Unauthorized)
+  @TypedException<ProblemDetails>(ApiException.Forbidden)
   @TypedException<ProblemDetails>(ApiException.InternalError)
   @TypedRoute.Get(':runId')
   async get(@TypedParam('runId') runId: PipelineUuidV7): Promise<PipelineRunResponse> {
     return toPipelineRunResponse(await this.pipelineRunService.get(runId));
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
   @TypedException<ProblemDetails>(ApiException.NotFound)
+  @TypedException<ProblemDetails>(ApiException.Unauthorized)
+  @TypedException<ProblemDetails>(ApiException.Forbidden)
   @TypedException<ProblemDetails>(ApiException.Conflict)
   @TypedException<ProblemDetails>(ApiException.InternalError)
   @HttpCode(HttpStatus.ACCEPTED)
@@ -77,8 +91,11 @@ export class PipelineController {
     return toPipelineRunAcceptedResponse(snapshot);
   }
 
+  /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
   @TypedException<ProblemDetails>(ApiException.NotFound)
+  @TypedException<ProblemDetails>(ApiException.Unauthorized)
+  @TypedException<ProblemDetails>(ApiException.Forbidden)
   @TypedException<ProblemDetails>(ApiException.Conflict)
   @TypedException<ProblemDetails>(ApiException.InternalError)
   @HttpCode(HttpStatus.ACCEPTED)

@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { createHash, randomBytes } from 'node:crypto';
 
 import {
   ISSUE_QUERY_REPOSITORY,
@@ -49,14 +48,10 @@ export class IssueFeedService {
   ) {}
 
   async createSession(ownerInput: FeedOwnerInput): Promise<FeedSessionResult> {
-    // A guest session is always bound to a fresh, high-entropy bearer secret. The
-    // raw value is returned once; only its hash crosses the repository boundary.
-    const guestKey = ownerInput.userId === null ? generateGuestKey() : null;
-    const owner = normalizeOwner({ userId: ownerInput.userId, guestKey });
+    const owner = normalizeOwner(ownerInput);
     const session = await this.repository.createFeedSession(owner, new Date());
     return {
       sessionId: session.id,
-      guestKey,
       expiresAt: session.expiresAt,
       nextBatchNo: session.nextBatchNo,
     };
@@ -113,17 +108,11 @@ export class IssueFeedService {
     const excludedIssueIds = new Set(
       previousBatches.flatMap((batch) => batch.items.map((item) => item.issueId)),
     );
-    const latestInteractions =
-      session.owner.userId === null
-        ? []
-        : await this.repository.findLatestInteractions(session.owner.userId);
+    const latestInteractions = await this.repository.findLatestInteractions(session.owner.userId);
     for (const interaction of latestInteractions) excludedIssueIds.add(interaction.issueId);
 
     const actedCategoryCodes = await this.findActedCategoryCodes(latestInteractions);
-    const context =
-      session.owner.userId === null
-        ? null
-        : await this.repository.findUserContext(session.owner.userId);
+    const context = await this.repository.findUserContext(session.owner.userId);
     const connectedIssueIds = await this.findConnectedIssueIds(latestInteractions);
     const issues = await this.repository.findCandidates(
       excludedIssueIds,
@@ -250,24 +239,7 @@ export class IssueFeedService {
 }
 
 export function normalizeOwner(owner: FeedOwnerInput): FeedOwner {
-  if (owner.userId !== null) {
-    return { userId: owner.userId.toLowerCase(), guestKey: '' };
-  }
-  const guestKey = owner.guestKey?.trim() ?? '';
-  if (guestKey === '') {
-    throw new IssueException(
-      IssueExceptionCode.FeedOwnerInvalid,
-      '게스트 탐색 소유 증명이 필요합니다.',
-    );
-  }
-  return {
-    userId: null,
-    guestKey: createHash('sha256').update(guestKey).digest('hex'),
-  };
-}
-
-function generateGuestKey(): string {
-  return randomBytes(32).toString('base64url');
+  return { userId: owner.userId.toLowerCase() };
 }
 
 function isUsableCard(issue: IssueRecord): boolean {

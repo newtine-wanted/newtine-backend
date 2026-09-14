@@ -176,43 +176,38 @@ try {
   assert.equal(searchBody.query, '파일럿');
   assert.ok(Array.isArray(searchBody.items));
 
-  const feedSession = await postJson('/feed-sessions', {});
-  assert.equal(feedSession.response.statusCode, 200);
-  const feedSessionBody = JSON.parse(feedSession.body);
-  assert.match(
-    feedSessionBody.sessionId,
-    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-  );
-  assert.match(feedSessionBody.guestKey, /^[A-Za-z0-9_-]{40,}$/);
-  assert.equal(feedSessionBody.nextBatchNo, 0);
-  const missingGuestProof = await postJson(`/feed-sessions/${feedSessionBody.sessionId}/batches`, {
-    batchNo: 0,
+  const invalidSignup = await postJson('/auth/signup', {
+    email: 'not-an-email',
+    password: 'short',
   });
-  assert.equal(missingGuestProof.response.statusCode, 400);
-  const firstBatch = await postJson(
-    `/feed-sessions/${feedSessionBody.sessionId}/batches`,
-    {
-      batchNo: 0,
-    },
-    { 'x-feed-guest-key': feedSessionBody.guestKey },
+  assert.equal(invalidSignup.response.statusCode, 400);
+  assert.equal(
+    invalidSignup.response.headers['content-type']?.split(';')[0],
+    'application/problem+json',
   );
-  assert.equal(firstBatch.response.statusCode, 200);
-  const firstBatchBody = JSON.parse(firstBatch.body);
-  assert.equal(firstBatchBody.batchNo, 0);
-  assert.ok(Array.isArray(firstBatchBody.items));
-  assert.equal(firstBatchBody.continuation, 'EXHAUSTED');
-  const retriedBatch = await postJson(
-    `/feed-sessions/${feedSessionBody.sessionId}/batches`,
-    {
-      batchNo: 0,
-    },
-    { 'x-feed-guest-key': feedSessionBody.guestKey },
-  );
-  assert.equal(retriedBatch.response.statusCode, 200);
-  assert.deepEqual(
-    JSON.parse(retriedBatch.body).items.map((item) => item.issueId),
-    firstBatchBody.items.map((item) => item.issueId),
-  );
+  assert.deepEqual(Object.keys(JSON.parse(invalidSignup.body)).sort(), [
+    'code',
+    'detail',
+    'status',
+    'title',
+  ]);
+
+  const unauthenticatedMe = await get('/me/onboarding');
+  assert.equal(unauthenticatedMe.response.statusCode, 401);
+  assert.equal(JSON.parse(unauthenticatedMe.body).code, 'UNAUTHORIZED');
+
+  const missingRefresh = await postRawJson('/auth/refresh', '{}');
+  assert.equal(missingRefresh.response.statusCode, 401);
+  assert.equal(JSON.parse(missingRefresh.body).code, 'UNAUTHORIZED');
+
+  const logout = await postRawJson('/auth/logout', '{}');
+  assert.equal(logout.response.statusCode, 204);
+  assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /newtine_refresh=;/);
+  assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /Max-Age=0/);
+
+  const unauthenticatedFeed = await postJson('/feed-sessions', {});
+  assert.equal(unauthenticatedFeed.response.statusCode, 401);
+  assert.equal(JSON.parse(unauthenticatedFeed.body).code, 'UNAUTHORIZED');
 
   const invalidSearch = await postJson('/issues/search', { query: '', unexpected: true });
   assert.equal(invalidSearch.response.statusCode, 400);
@@ -300,7 +295,7 @@ try {
   );
 
   console.log(
-    'API smoke passed: health, search, feed session/batch retry, four-field failures, parser 400/413, JSON logs, and request ID correlation',
+    'API smoke passed: health, search, auth route boundaries, member-only feed rejection, four-field failures, parser 400/413, JSON logs, and request ID correlation',
   );
 } finally {
   await stopApi();

@@ -28,6 +28,8 @@
 | [NestJS 초기 골격 구현 제어](nestjs-foundation-implementation.html) | 골격 구현 과정과 검증 증거             |
 | [Nestia 전환 설계](nestia-migration-design.html)                    | Nestia·Typia 계약 전환 설계            |
 | [Nestia 전환 구현 제어](nestia-migration-implementation.html)       | 생성·계약 테스트·NodeNext 검증         |
+| [의존성 보안 보완 설계](dependency-security-remediation-design.html) | npm advisory 패치 범위와 검증 설계     |
+| [의존성 보안 보완 구현 제어](dependency-security-remediation-implementation.html) | 의존성 갱신·audit·PR 검증 증거          |
 | [견고성 설계](foundationRobustness.design.html)                     | 설정 실패·HTTP 경계·프로세스 종료 설계 |
 | [견고성 구현 제어](foundationRobustness.implementation.html)        | 보완 구현과 검증 결과                  |
 | [로깅 설계](logging.design.html)                                    | 구조화 로그·요청 지연 기록 설계        |
@@ -37,6 +39,8 @@
 | [온보딩 API 설계](onboarding-api-design.html)                       | 승인된 온보딩 HTTP·상태·선호 계약      |
 | [온보딩 persistence 설계](onboarding-persistence-design.html)       | PostgreSQL schema delta·migration 경계  |
 | [온보딩 API 구현 제어](onboarding-api-implementation.html)          | 구현 범위·검증 증거·운영 보류           |
+| [인증·인가 설계](authentication-authorization-design.html)          | email/password·JWT·refresh·USER/ADMIN 경계 |
+| [인증·인가 구현 제어](authentication-authorization-implementation.html) | 인증 구현 상태·검증 증거·잔여 위험 |
 
 구현 제어 문서는 설계 승인 이후 실제 변경과 검증을 기록한다. 새로운 정책을 추가하거나 기존 결정을
 바꿀 때는 먼저 [의사결정 기록](../decisions/README.md)을 갱신한다.

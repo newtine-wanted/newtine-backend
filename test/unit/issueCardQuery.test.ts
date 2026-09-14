@@ -22,9 +22,8 @@ test('feed returns at most ten unique cards and reuses the same batch on retry',
     issues: Array.from({ length: 12 }, (_, index) => issue(index + 1)),
   });
   const service = new IssueFeedService(repository, testTransactionManager);
-  const session = await service.createSession({ userId: null, guestKey: null });
-  assert.ok(session.guestKey);
-  const owner = { userId: null, guestKey: session.guestKey };
+  const session = await service.createSession({ userId: USER_ID });
+  const owner = { userId: USER_ID };
 
   const [first, retry] = await Promise.all([
     service.getBatch({
@@ -73,10 +72,10 @@ test('feed batch generation is owned by the supplied transaction manager', async
     },
   };
   const service = new IssueFeedService(repository, transactionManager);
-  const session = await service.createSession({ userId: null, guestKey: null });
+  const session = await service.createSession({ userId: USER_ID });
 
   await service.getBatch({
-    owner: { userId: null, guestKey: session.guestKey! },
+    owner: { userId: USER_ID },
     sessionId: session.sessionId,
     batchNo: 0,
   });
@@ -104,9 +103,9 @@ test('connected cards require a verified later FOLLOW_UP event', async () => {
     relations: [relation(source.id, later.id), relation(source.id, sameTime.id)],
   });
   const service = new IssueFeedService(repository, testTransactionManager);
-  const session = await service.createSession({ userId: USER_ID, guestKey: null });
+  const session = await service.createSession({ userId: USER_ID });
   const result = await service.getBatch({
-    owner: { userId: USER_ID, guestKey: null },
+    owner: { userId: USER_ID },
     sessionId: session.sessionId,
     batchNo: 0,
   });
@@ -245,8 +244,8 @@ test('limited batch can be retried but cannot create a new batch', async () => {
     issues: Array.from({ length: 3 }, (_, index) => issue(index + 1, { mainTopic: 'same-topic' })),
   });
   const service = new IssueFeedService(repository, testTransactionManager);
-  const session = await service.createSession({ userId: null, guestKey: null });
-  const owner = { userId: null, guestKey: session.guestKey! };
+  const session = await service.createSession({ userId: USER_ID });
+  const owner = { userId: USER_ID };
 
   const first = await service.getBatch({ owner, sessionId: session.sessionId, batchNo: 0 });
   assert.equal(first.continuation, 'CONSTRAINT_LIMITED');

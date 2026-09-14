@@ -11,23 +11,35 @@ const generatedRoot = join(root, 'generated');
 const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace']);
 const EXPECTED_FAILURE_STATUSES = {
   '/issues/search': ['400', '413', '500'],
-  '/issues/{issueId}': ['400', '404', '500'],
-  '/feed-sessions': ['400', '500'],
-  '/feed-sessions/{sessionId}/batches': ['400', '404', '409', '410', '500'],
+  '/issues/{issueId}': ['400', '401', '404', '500'],
+  '/feed-sessions': ['400', '401', '500'],
+  '/feed-sessions/{sessionId}/batches': ['400', '401', '404', '409', '410', '500'],
   '/health': ['500'],
   '/onboarding/options': ['500'],
   '/onboarding/entities': ['400', '500'],
   '/me/onboarding': ['401', '500'],
   '/me/onboarding/complete': ['400', '401', '500'],
   '/me/onboarding/skip': ['401', '500'],
-  '/pipeline/runs': ['400', '409', '500'],
-  '/pipeline/runs/{runId}': ['400', '404', '500'],
-  '/pipeline/runs/{runId}/retry': ['400', '404', '409', '500'],
-  '/pipeline/runs/{runId}/interrupt': ['400', '404', '409', '500'],
+  '/pipeline/runs': ['400', '401', '403', '409', '500'],
+  '/pipeline/runs/{runId}': ['400', '401', '403', '404', '500'],
+  '/pipeline/runs/{runId}/retry': ['400', '401', '403', '404', '409', '500'],
+  '/pipeline/runs/{runId}/interrupt': ['400', '401', '403', '404', '409', '500'],
+  '/auth/signup': ['400', '409', '500'],
+  '/auth/login': ['400', '401', '500'],
+  '/auth/refresh': ['401', '403', '500'],
+  '/auth/logout': ['403', '500'],
+};
+const EXPECTED_SUCCESS_STATUSES = {
+  '/auth/signup': '201',
+  '/auth/login': '200',
+  '/auth/refresh': '200',
+  '/auth/logout': '204',
 };
 const requiredFiles = [
   'api/index.ts',
+  'api/functional/auth/index.ts',
   'e2e/features/api/automated/test_api_health_getHealth.ts',
+  'e2e/features/api/automated/test_api_auth_signup.ts',
   'e2e/features/api/automated/test_api_issues_search.ts',
   'api/functional/me/index.ts',
   'api/functional/me/onboarding/index.ts',
@@ -84,6 +96,30 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   ]);
   assert.deepEqual([...problemDetails.required].sort(), ['code', 'detail', 'status', 'title']);
 
+  for (const path of ['/me/onboarding', '/me/onboarding/complete', '/me/onboarding/skip']) {
+    const operation = Object.values(document.paths[path] ?? {}).find(
+      (value) => value && typeof value === 'object' && 'security' in value,
+    );
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }], `${path} must require bearerAuth`);
+  }
+
+  for (const path of [
+    '/feed-sessions',
+    '/feed-sessions/{sessionId}/batches',
+    '/pipeline/runs',
+    '/pipeline/runs/{runId}',
+    '/pipeline/runs/{runId}/retry',
+    '/pipeline/runs/{runId}/interrupt',
+  ]) {
+    const operation = Object.values(document.paths[path] ?? {}).find(
+      (value) => value && typeof value === 'object' && 'security' in value,
+    );
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }], `${path} must require bearerAuth`);
+  }
+
+  const publicDetail = document.paths?.['/issues/{issueId}']?.get;
+  assert.deepEqual(publicDetail?.security, [{ bearerAuth: [] }, {}]);
+
   for (const [path, pathItem] of Object.entries(document.paths ?? {})) {
     if (!pathItem || typeof pathItem !== 'object') continue;
 
@@ -98,6 +134,17 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
         [...(EXPECTED_FAILURE_STATUSES[path] ?? [])].sort(),
         `${method.toUpperCase()} ${path} must declare only its supported failure statuses`,
       );
+
+      const successStatuses = Object.keys(operation.responses ?? {}).filter((status) =>
+        /^2\d\d$/.test(status),
+      );
+      if (EXPECTED_SUCCESS_STATUSES[path] !== undefined) {
+        assert.deepEqual(
+          successStatuses,
+          [EXPECTED_SUCCESS_STATUSES[path]],
+          `${method.toUpperCase()} ${path} must declare its approved success status`,
+        );
+      }
 
       for (const status of EXPECTED_FAILURE_STATUSES[path] ?? []) {
         const response = operation.responses?.[status];

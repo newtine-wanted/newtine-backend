@@ -13,7 +13,9 @@ import type { FeedSessionResponse } from "../../../../apps/api/src/issue/type/fe
 export * as batches from "./batches/index";
 
 /**
+ * @security bearerAuth
  * @throws 400 The request is invalid.
+ * @throws 401 Authentication is required.
  * @throws 500 The server could not complete the request.
  * @controller FeedController.create
  * @path POST /feed-sessions

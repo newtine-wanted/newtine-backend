@@ -63,7 +63,10 @@ export namespace search {
 }
 
 /**
+ * @security bearerAuth
+ * @security
  * @throws 400 The request is invalid.
+ * @throws 401 Authentication is required.
  * @throws 404 The requested resource was not found.
  * @throws 500 The server could not complete the request.
  * @controller IssueController.getIssueDetail

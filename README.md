@@ -14,6 +14,7 @@ migration을 포함한 vertical slice로 구현되어 있습니다.
 | 프레임워크           | NestJS 12                            |
 | 언어·모듈            | TypeScript 6 · ESM/NodeNext          |
 | ORM·DB               | MikroORM 7 · PostgreSQL              |
+| 인증·인가             | Argon2id · jose HS256 JWT · USER/ADMIN |
 | API 계약·런타임 검증 | Nestia 13 · Typia 14                 |
 | 로깅                 | Pino · nestjs-pino                   |
 | 빌드·개발 실행       | `ttsc` · `ttsx`                      |
@@ -43,7 +44,9 @@ NODE_ENV=development npm run start:batch -- databaseCheck
 ```
 
 `databaseCheck`는 연결 확인에 성공하면 0, 작업명 오류나 연결 실패가 발생하면 1로 종료합니다.
-초기 골격은 스키마를 자동으로 생성하거나 수정하지 않습니다.
+호스트에서 직접 실행하는 초기 골격은 스키마를 자동으로 생성하거나 수정하지 않습니다. Docker
+Compose는 local-only disposable base-schema fixture와 one-shot migration service를 사용해 fresh
+volume의 재현 가능한 인증 검증 환경을 구성합니다.
 
 파이프라인 워커는 별도 장기 실행 프로세스로 시작합니다. 운영자가 이전 프로세스 종료를 확인한
 뒤 API로 접수한 실행을 처리합니다. 로컬에서 한 번만 확인하려면
@@ -58,12 +61,21 @@ NODE_ENV=development npm run start:batch -- databaseCheck
 작업의 입력·모델 계약이 섞이지 않습니다.
 ## Docker 로컬 실행
 
-Docker Engine과 Compose plugin이 필요합니다. 기본 Compose 서비스는 PostgreSQL `db`와 API
-`api`이며, batch는 `tools` profile의 일회성 작업으로 기본 실행에 포함되지 않습니다.
+Docker Engine과 Compose plugin이 필요합니다. 기본 Compose 서비스는 PostgreSQL `db`, one-shot
+schema migration `migrate`, API `api`이며, batch는 `tools` profile의 일회성 작업으로 기본 실행에
+포함되지 않습니다.
 
 ### API와 PostgreSQL 함께 실행
 
-다음 명령 하나로 이미지를 빌드하고 PostgreSQL과 API를 계속 실행합니다.
+먼저 local secret을 준비합니다. `.env.example`의 값은 local 검증용이며 production secret으로
+재사용하지 않습니다.
+
+```bash
+cp -n .env.example .env
+```
+
+다음 명령으로 이미지를 빌드하고, 빈 DB의 local base fixture·migration을 적용한 뒤 PostgreSQL과
+API를 계속 실행합니다.
 
 ```bash
 docker compose up --build
@@ -83,7 +95,7 @@ batch `databaseCheck`로 각각 확인합니다. 백그라운드에서 readiness
 사용합니다.
 
 ```bash
-docker compose up -d --build --wait db api
+docker compose up -d --build --wait db migrate api
 ```
 
 ### 필요할 때 batch 실행
@@ -102,7 +114,7 @@ batch 명령의 예상 종료 코드는 1입니다. 확인 후 DB를 health 상�
 ```bash
 docker compose stop db
 docker compose --profile tools run --rm --build --no-deps batch
-docker compose up -d --wait db
+docker compose up -d --wait db migrate
 docker compose --profile tools run --rm --build batch
 ```
 
@@ -115,7 +127,7 @@ publish된 loopback 주소를 사용합니다.
 cp -n .env.example .env
 npm install
 npm run build
-docker compose up -d --wait db
+docker compose up -d --wait db migrate
 NODE_ENV=development DB_HOST=127.0.0.1 node --env-file=.env dist/apps/api/src/main.js
 ```
 
@@ -154,10 +166,13 @@ docker compose down
 docker compose down -v
 ```
 
-공식 PostgreSQL image는 빈 volume에서 `POSTGRES_DB`, user, password만 초기화합니다. 이 Compose
-환경은 application table, init SQL, schema sync, migration, seed를 생성하거나 실행하지 않으며,
-`ensureDatabase=false` 전제를 유지합니다. schema 변경 대응은 별도의 migration 설계 또는 확인된
-데이터 삭제 절차로 다뤄야 합니다.
+공식 PostgreSQL image는 빈 volume에서 `POSTGRES_DB`, user, password를 초기화하고, 이 Compose는
+추가로 `compose/postgres-init/001-base-schema.sql`을 local-only disposable fixture로 실행합니다.
+`migrate` service가 그 위에 onboarding·category code·pipeline·authentication delta migration을
+적용합니다. 이 fixture와 자동 migration은 production base schema owner를 대체하지 않으며,
+운영 DB에는 적용하지 않습니다. `ensureDatabase=false`와 schema sync 비활성 전제는 유지합니다.
+기존 local DB 데이터를 보존한 채 schema 변경에 대응할 때는 별도의 migration 절차를 사용하고,
+fixture를 다시 만들 때만 대상 volume을 명시적으로 초기화합니다.
 
 ### Docker 검증
 
@@ -166,7 +181,7 @@ docker compose down -v
 ```bash
 docker compose config --quiet
 docker build --check .
-docker compose up -d --build --wait db api
+docker compose up -d --build --wait db migrate api
 curl --fail --silent --show-error http://127.0.0.1:3000/health
 docker compose --profile tools run --rm --build batch
 docker compose down
@@ -203,6 +218,11 @@ node --env-file=.env dist/apps/api/src/main.js
 | `PIPELINE_WORKER_POLL_MS` | `1000`                    | 워커 polling 간격(ms)   |
 | `PIPELINE_WORKER_ONCE`     | `0`                       | `1`이면 run 1건만 처리   |
 | `PIPELINE_EMBEDDING_REPAIR_RECLAIM_OWNER` | 없음 | 종료 확인된 repair processExecutionId만 지정 |
+| `JWT_SECRET`             | development/test fallback | 운영 필수, 32 UTF-8 bytes 이상 |
+| `JWT_ISSUER`             | `newtine-api`             | 필요에 따라 고정   |
+| `JWT_AUDIENCE`           | `newtine-client`          | 필요에 따라 고정   |
+| `AUTH_COOKIE_SECURE`     | development/test `false` | production `true` 필수 |
+| `AUTH_ALLOWED_ORIGINS`   | 빈 값(동일 origin)        | 허용할 절대 origin 목록 |
 
 DB 기본값은 `NODE_ENV=development` 또는 `test`일 때만 적용됩니다. 그 외 환경에서는 DB 변수
 누락·빈 값·잘못된 포트가 ORM 초기화 단계에서 실패합니다. 로컬 예시는 [.env.example](.env.example)을
@@ -222,10 +242,11 @@ worker를 재시작해야 다음 실행부터 적용되며, API 프로세스는 
 | `npm test`                                                     | unit·integration 테스트                        |
 | `npm run test:contracts`                                       | 생성 계약 테스트                               |
 | `npm run test:smoke`                                           | 빌드된 API의 실제 HTTP 동작 확인               |
+| `npm run test:smoke:compose`                                  | fresh Compose 인증 smoke 확인                  |
 | `npm run contracts:all`                                        | SDK·e2e·OpenAPI 생성                           |
 | `npm run contracts:check`                                      | 계약 재생성, 계약 테스트, 생성 TypeScript 검사 |
 | `npm run typecheck:generated`                                  | 생성 TypeScript만 검사                         |
-| `npm run db:migrate`                                            | 온보딩·파이프라인 migration을 순서대로 적용    |
+| `npm run db:migrate`                                            | 온보딩·category·pipeline·authentication migration 적용 |
 
 ## API 계약과 입력 검증
 
@@ -262,6 +283,17 @@ SDK·e2e·OpenAPI 산출물은 `npm run contracts:all`로 생성합니다. 생�
 중단 처리한 뒤 `POST /pipeline/runs/:runId/retry`로 실패 작업을 재시도합니다. `CONTENT`
 재시도는 discovery를 반복하지 않고 선택한 실패 job의 seed URL에서 본문을 다시 확보합니다.
 
+### 인증 API
+
+`POST /auth/signup`과 `POST /auth/login`은 `{ "email": "...", "password": "..." }`를 받아
+access JWT를 JSON으로 반환하고 `newtine_refresh` HttpOnly cookie를 설정합니다. `POST /auth/refresh`는
+cookie를 회전하고 새 access JWT를 반환하며, `POST /auth/logout`은 현재 refresh session만 revoke하고
+cookie를 삭제합니다. access JWT는 `Authorization: Bearer <token>`으로 `/me/**` 요청에 사용합니다.
+
+signup은 모든 계정을 `USER`로 만들며, `ADMIN` role은 운영자 절차로만 부여됩니다.
+자세한 인증·인가 정책과 migration 적용 조건은
+[인증·인가 설계 문서](docs/design/authentication-authorization-design.html)를 참고하세요.
+
 ## 구조
 
 ```text
@@ -270,6 +302,7 @@ apps/
     common/                 HTTP 예외·필터·middleware
     health/                 프로세스 확인 endpoint
     issue/                  issue HTTP feature와 type
+    auth/                   local credential·JWT·refresh·role guard
     pipeline/               실행 접수·상태·중단 확인·수동 재시도 API
     onboarding/             온보딩 HTTP feature와 principal seam
     main.ts
@@ -283,6 +316,7 @@ apps/
 libs/core/src/
   issue/                    issue domain과 repository 경계
   onboarding/               온보딩 domain·PostgreSQL adapter·migration
+  auth/                      인증 domain·session adapter·migration
   article/                  article domain과 repository 위치
   pipeline/                 실행 상태·상한·검증·repository port/adapter
   common/                   entity·exception·id·database·logging·transaction
@@ -295,12 +329,12 @@ core는 feature별로 domain과 repository를 나누고, `common`에는 여러 f
 사용합니다.
 
 스키마는 [MikroORM migration](libs/core/src/pipeline/migrations/)으로 관리하며
-`npm run db:migrate`가 외부 base schema preflight 후 온보딩·category code·파이프라인 migration을
+`npm run db:migrate`가 외부 base schema preflight 후 온보딩·category code·pipeline·authentication migration을
 등록 순서대로 한 번에 적용합니다. `users`, `entities`, `issue_categories`,
 `user_category_preferences`, `user_entity_preferences`는 이 저장소 밖의 선행 migration이 소유합니다.
 category master의 PK는 `issue_categories.code`이며 이슈·분류 선호도는 `category_code`로 참조합니다.
-파이프라인 migration은 데이터 손실을 막기 위해 `down`을 지원하지 않습니다. 애플리케이션은
-schema 자동 동기화를 수행하지 않습니다.
+파이프라인·authentication migration은 데이터 손실을 막기 위해 `down`을 지원하지 않습니다.
+애플리케이션은 schema 자동 동기화를 수행하지 않습니다.
 
 ## 문서
 

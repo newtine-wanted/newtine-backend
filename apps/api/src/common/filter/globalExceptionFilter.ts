@@ -119,6 +119,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (status === HttpStatus.UNAUTHORIZED) {
       return ErrorCode.Unauthorized;
     }
+    if (status === HttpStatus.FORBIDDEN) {
+      return ErrorCode.Forbidden;
+    }
     if (status === HttpStatus.CONFLICT) {
       return ErrorCode.Conflict;
     }

@@ -12,7 +12,9 @@ import type { FeedBatchRequest } from "../../../../../apps/api/src/issue/type/fe
 import type { FeedBatchResponse } from "../../../../../apps/api/src/issue/type/feed.response";
 
 /**
+ * @security bearerAuth
  * @throws 400 The request is invalid.
+ * @throws 401 Authentication is required.
  * @throws 404 The requested resource was not found.
  * @throws 409 The request conflicts with the current resource state.
  * @throws 410 The requested resource is no longer available.
