@@ -7,6 +7,7 @@ import { CoreModule, createLoggerOptions } from '@newtine/core';
 import { GlobalExceptionFilter } from '@newtine/api/common/filter/globalExceptionFilter.js';
 import { HealthController } from '@newtine/api/health/health.controller.js';
 import { IssueModule } from '@newtine/api/issue/issue.module.js';
+import { PipelineModule } from '@newtine/api/pipeline/pipeline.module.js';
 import { OnboardingModule } from '@newtine/api/onboarding/onboarding.module.js';
 
 @Module({
@@ -15,6 +16,7 @@ import { OnboardingModule } from '@newtine/api/onboarding/onboarding.module.js';
     CoreModule,
     IssueModule,
     OnboardingModule,
+    PipelineModule,
   ],
   controllers: [HealthController],
   providers: [

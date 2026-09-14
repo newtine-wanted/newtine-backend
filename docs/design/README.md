@@ -11,7 +11,8 @@
 ## 읽는 순서
 
 [요구사항](../policies/requirements.md) → [의사결정 기록](../decisions/README.md) → [ERD](erd.md) →
-[이슈 생성 파이프라인](issue-pipeline.md) → [구현 계획](implementation-plan.md) → 앱별 설계·구현 제어 문서.
+[이슈 생성 파이프라인](issue-pipeline.md) → [이슈·기사 콘텐츠 생성 설계](issue-content-pipeline-design.html) →
+[구현 계획](implementation-plan.md) → 앱별 설계·구현 제어 문서.
 
 ## 문서 목록
 
@@ -20,6 +21,8 @@
 | [ERD](erd.md)                                                       | 테이블·관계·키·제약과 영속 ID 설계     |
 | [ERD 전체 관계도](erd-full.mmd)                                     | 전체 테이블 관계도                     |
 | [이슈 생성 파이프라인](issue-pipeline.md)                           | 후보 판정·상태 전이·실패 복구 흐름     |
+| [이슈·기사 콘텐츠 생성 설계](issue-content-pipeline-design.html)     | 승인된 실행 계약·공개·복구·외부 호출 경계 |
+| [이슈·기사 콘텐츠 생성 구현 제어](issue-content-pipeline-implementation.html) | 구현 상태·검증 증거·잔여 위험 |
 | [구현 계획](implementation-plan.md)                                 | 의존 순서·완료 기준·검증 시나리오      |
 | [NestJS 초기 골격 설계](nestjs-foundation-design.html)              | API·batch·core 모듈 구조               |
 | [NestJS 초기 골격 구현 제어](nestjs-foundation-implementation.html) | 골격 구현 과정과 검증 증거             |

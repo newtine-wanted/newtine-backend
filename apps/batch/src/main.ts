@@ -11,6 +11,24 @@ async function bootstrap(): Promise<void> {
   let app: Awaited<ReturnType<typeof NestFactory.createApplicationContext>> | undefined;
   let pinoLogger: PinoLogger | undefined;
   let exitCode = 1;
+  const shutdownController = new AbortController();
+  const requestShutdown = (signal: NodeJS.Signals): void => {
+    if (shutdownController.signal.aborted) {
+      exitCode = 1;
+      return;
+    }
+    shutdownController.abort();
+    const message = { event: 'batch.shutdown.requested', signal };
+    if (pinoLogger) {
+      pinoLogger.warn(message, 'Batch graceful shutdown requested');
+    } else {
+      process.stderr.write(`${JSON.stringify(message)}\n`);
+    }
+  };
+  const onSigterm = (): void => requestShutdown('SIGTERM');
+  const onSigint = (): void => requestShutdown('SIGINT');
+  process.once('SIGTERM', onSigterm);
+  process.once('SIGINT', onSigint);
 
   try {
     app = await NestFactory.createApplicationContext(BatchModule, {
@@ -19,7 +37,7 @@ async function bootstrap(): Promise<void> {
     app.useLogger(app.get(NestPinoLogger));
     pinoLogger = await app.resolve(PinoLogger);
     pinoLogger?.setContext('BatchBootstrap');
-    exitCode = await app.get(BatchRunner).run(process.argv[2]);
+    exitCode = await app.get(BatchRunner).run(process.argv[2], shutdownController.signal);
   } catch (exception: unknown) {
     const diagnostic = exceptionDiagnostic(exception);
     if (pinoLogger) {
@@ -28,6 +46,8 @@ async function bootstrap(): Promise<void> {
       process.stderr.write(`${JSON.stringify({ event: 'batch.bootstrap.failed', diagnostic })}\n`);
     }
   } finally {
+    process.removeListener('SIGTERM', onSigterm);
+    process.removeListener('SIGINT', onSigint);
     if (app) {
       try {
         await app.close();

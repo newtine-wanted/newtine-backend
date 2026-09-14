@@ -43,7 +43,7 @@
 | 기사 연결        | `issue_articles`는 근거 기사 전용이다.                                                         |
 | 가공 결과        | `issue_details`에 현재 상세 1벌을 둔다. 전체 버전 스냅샷은 누적하지 않는다.                    |
 | 본문             | 본문 영구 저장 테이블은 두지 않는다. 재시작 시 입력을 다시 확보할 수 있다.                     |
-| 분류             | `issue_categories` 값 테이블과 대표 `category_id`를 사용한다.                                  |
+| 분류             | `issue_categories.code`를 PK로 사용하고, 이슈·선호도는 `category_code`로 참조한다.              |
 | 행동             | `LIKE` / `SKIP` / `PASS`만 기록한다. `dwell_time`은 밀리초다.                                  |
 | 보고서           | 마이페이지에서 지난주 보고서를 제공한다. `weekly_reports`에 상태·결과를 저장한다.              |
 | 공개             | 검증을 통과한 초기 생성 결과는 자동 공개한다.                                                  |
