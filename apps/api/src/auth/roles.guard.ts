@@ -26,10 +26,11 @@ export class RolesGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    if (request.authenticatedUserId === undefined || request.authenticatedUserRole === undefined) {
+    const principal = request.principal;
+    if (principal === undefined) {
       throw new UnauthorizedException('인증이 필요합니다.');
     }
-    if (!requiredRoles.includes(request.authenticatedUserRole)) {
+    if (!requiredRoles.includes(principal.role)) {
       throw new ForbiddenException('접근 권한이 없습니다.');
     }
     return true;

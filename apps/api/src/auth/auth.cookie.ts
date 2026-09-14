@@ -1,8 +1,7 @@
 import type { Request, Response } from 'express';
 
 import type { AuthOptions } from './auth.options.js';
-
-const REFRESH_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+import { isRefreshToken } from './security/refresh-token.js';
 
 export function readRefreshToken(request: Request, options: AuthOptions): string | undefined {
   const cookieHeader = request.headers.cookie;
@@ -19,7 +18,7 @@ export function readRefreshToken(request: Request, options: AuthOptions): string
     const encodedValue = cookie.slice(separator + 1).trim();
     try {
       const value = decodeURIComponent(encodedValue);
-      return REFRESH_TOKEN_PATTERN.test(value) ? value : undefined;
+      return isRefreshToken(value) ? value : undefined;
     } catch {
       return undefined;
     }

@@ -1,44 +1,15 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-  UnauthorizedException,
-  Inject,
-} from '@nestjs/common';
-
-import { AUTH_REPOSITORY, type AuthRepository } from '@newtine/core';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 
 import type { AuthenticatedRequest } from './auth.request.js';
-import { JwtTokenService } from './jwt-token.service.js';
+import { AccessPrincipalService } from './application/access-principal.service.js';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(
-    private readonly jwtTokenService: JwtTokenService,
-    @Inject(AUTH_REPOSITORY) private readonly authRepository: AuthRepository,
-  ) {}
+  constructor(private readonly accessPrincipalService: AccessPrincipalService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const authorization = request.headers.authorization;
-    if (typeof authorization !== 'string' || !/^Bearer [^\s]+$/.test(authorization)) {
-      throw new UnauthorizedException('인증이 필요합니다.');
-    }
-
-    let userId: string;
-    try {
-      userId = await this.jwtTokenService.verifyAccessToken(authorization.slice('Bearer '.length));
-    } catch {
-      throw new UnauthorizedException('인증이 필요합니다.');
-    }
-
-    const user = await this.authRepository.findUserById(userId);
-    if (user === undefined) {
-      throw new UnauthorizedException('인증이 필요합니다.');
-    }
-
-    request.authenticatedUserId = user.id;
-    request.authenticatedUserRole = user.role;
+    request.principal = await this.accessPrincipalService.resolve(request.headers.authorization);
     return true;
   }
 }

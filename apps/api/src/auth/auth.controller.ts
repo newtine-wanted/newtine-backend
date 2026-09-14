@@ -9,14 +9,21 @@ import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDeta
 import { assertAllowedOrigin } from './auth.origin.js';
 import { clearRefreshCookie, readRefreshToken, setRefreshCookie } from './auth.cookie.js';
 import { AUTH_OPTIONS, type AuthOptions } from './auth.options.js';
-import { AuthService, type AuthSessionResult } from './auth.service.js';
+import type { AuthSessionResult } from './application/auth.types.js';
+import { LoginUseCase } from './application/login.usecase.js';
+import { LogoutUseCase } from './application/logout.usecase.js';
+import { RefreshUseCase } from './application/refresh.usecase.js';
+import { SignupUseCase } from './application/signup.usecase.js';
 import type { AuthCredentialsRequest } from './auth.type.js';
 import type { AuthSessionResponse } from './auth.type.js';
 
 @Controller('auth')
 export class AuthController {
   constructor(
-    private readonly authService: AuthService,
+    private readonly signupUseCase: SignupUseCase,
+    private readonly loginUseCase: LoginUseCase,
+    private readonly refreshUseCase: RefreshUseCase,
+    private readonly logoutUseCase: LogoutUseCase,
     @Inject(AUTH_OPTIONS) private readonly options: AuthOptions,
   ) {}
 
@@ -33,7 +40,7 @@ export class AuthController {
     body: AuthCredentialsRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
-    const session = await this.authService.signup(body);
+    const session = await this.signupUseCase.execute(body);
     return this.writeSession(response, session);
   }
 
@@ -50,7 +57,7 @@ export class AuthController {
     body: AuthCredentialsRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
-    const session = await this.authService.login(body);
+    const session = await this.loginUseCase.execute(body);
     return this.writeSession(response, session);
   }
 
@@ -64,7 +71,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
     assertAllowedOrigin(request, this.options);
-    const session = await this.authService.refresh(readRefreshToken(request, this.options));
+    const session = await this.refreshUseCase.execute(readRefreshToken(request, this.options));
     return this.writeSession(response, session);
   }
 
@@ -77,7 +84,7 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
     assertAllowedOrigin(request, this.options);
-    await this.authService.logout(readRefreshToken(request, this.options));
+    await this.logoutUseCase.execute(readRefreshToken(request, this.options));
     clearRefreshCookie(response, this.options);
   }
 

@@ -19,8 +19,13 @@ import {
   setRefreshCookie,
 } from '@newtine/api/auth/auth.cookie.js';
 import { createAuthOptions } from '@newtine/api/auth/auth.options.js';
+import { AccessPrincipalService } from '@newtine/api/auth/application/access-principal.service.js';
+import { LoginUseCase } from '@newtine/api/auth/application/login.usecase.js';
+import { RefreshUseCase } from '@newtine/api/auth/application/refresh.usecase.js';
+import { SessionIssuer } from '@newtine/api/auth/application/session-issuer.js';
+import { SignupUseCase } from '@newtine/api/auth/application/signup.usecase.js';
+import { EmailAddress } from '@newtine/api/auth/domain/email-address.js';
 import type { AuthenticatedRequest } from '@newtine/api/auth/auth.request.js';
-import { AuthService } from '@newtine/api/auth/auth.service.js';
 import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
 import { JwtTokenService } from '@newtine/api/auth/jwt-token.service.js';
 import {
@@ -38,7 +43,7 @@ const immediateTransactionManager = {
   },
 };
 
-test('PasswordService uses Argon2id hashes and rejects password length boundaries', async () => {
+test('PasswordService가 Argon2id 해시를 사용하고 비밀번호 길이 경계를 거부한다', async () => {
   const service = new PasswordService();
   const password = 'correct horse battery staple';
   const passwordHash = await service.hash(password);
@@ -51,7 +56,7 @@ test('PasswordService uses Argon2id hashes and rejects password length boundarie
   await assert.doesNotReject(service.hash(' '.repeat(PASSWORD_MIN_LENGTH)));
 });
 
-test('createAuthOptions requires a production secret and enforces secure cookies', () => {
+test('createAuthOptions가 운영 환경의 secret을 요구하고 Secure 쿠키를 강제한다', () => {
   const options = createAuthOptions({
     NODE_ENV: 'production',
     JWT_SECRET: SECRET,
@@ -74,7 +79,12 @@ test('createAuthOptions requires a production secret and enforces secure cookies
   );
 });
 
-test('JwtTokenService fixes the algorithm, issuer, audience and UUIDv7 subject', async () => {
+test('EmailAddress가 입력 이메일을 canonical value로 만들고 잘못된 형식을 거부한다', () => {
+  assert.equal(EmailAddress.create('  USER@Example.COM ').value, 'user@example.com');
+  assert.throws(() => EmailAddress.create('invalid-email'), AuthException);
+});
+
+test('JwtTokenService가 알고리즘·issuer·audience와 UUIDv7 subject를 고정한다', async () => {
   const options = createAuthOptions({ NODE_ENV: 'test', JWT_SECRET: SECRET });
   const service = new JwtTokenService(options as never);
   const userId = '0199f000-0000-7000-8000-000000000001';
@@ -89,7 +99,7 @@ test('JwtTokenService fixes the algorithm, issuer, audience and UUIDv7 subject',
   );
 });
 
-test('AuthService canonicalizes email, always creates USER signup sessions, and stores no plaintext password', async () => {
+test('SignupUseCase가 이메일을 정규화하고 가입 계정을 항상 USER로 만들며 평문 비밀번호를 저장하지 않는다', async () => {
   const userId = '0199f000-0000-7000-8000-000000000001' as AuthUser['id'];
   const sessions: unknown[] = [];
   const createdUsers: unknown[] = [];
@@ -119,15 +129,14 @@ test('AuthService canonicalizes email, always creates USER signup sessions, and 
   const jwtTokenService = {
     signAccessToken: async () => 'access-token',
   } as unknown as JwtTokenService;
-  const service = new AuthService(
+  const useCase = new SignupUseCase(
     repository,
     immediateTransactionManager,
-    options,
     passwordService,
-    jwtTokenService,
+    new SessionIssuer(options, jwtTokenService),
   );
 
-  const result = await service.signup({
+  const result = await useCase.execute({
     email: '  USER@Example.COM ',
     password: 'password-that-is-never-stored',
   });
@@ -141,7 +150,48 @@ test('AuthService canonicalizes email, always creates USER signup sessions, and 
   assert.doesNotMatch(JSON.stringify(createdUsers), /password-that-is-never-stored/);
 });
 
-test('AuthService maps a canonical email race to a conflict', async () => {
+test('LoginUseCase가 canonical email을 조회하고 검증된 계정에 새 session을 발급한다', async () => {
+  const user = {
+    id: '0199f000-0000-7000-8000-000000000001',
+    email: 'user@example.com',
+    passwordHash: 'argon2id-hash',
+    role: AuthRole.User,
+  } as AuthUser;
+  let lookedUpEmail: string | undefined;
+  let createdSession = false;
+  const repository: AuthRepository = {
+    findUserByEmail: async (email) => {
+      lookedUpEmail = email;
+      return user;
+    },
+    findUserById: async () => user,
+    createUser: async () => user,
+    createRefreshSession: async () => {
+      createdSession = true;
+    },
+    rotateRefreshSession: async () => ({ status: 'invalid' }),
+    revokeRefreshSession: async () => undefined,
+  };
+  const options = createAuthOptions({ NODE_ENV: 'test', JWT_SECRET: SECRET });
+  const useCase = new LoginUseCase(
+    repository,
+    immediateTransactionManager,
+    { hash: async () => 'unused', verify: async () => true } as unknown as PasswordService,
+    new SessionIssuer(options, { signAccessToken: async () => 'access-token' } as never),
+  );
+
+  const result = await useCase.execute({
+    email: ' USER@Example.COM ',
+    password: 'password-that-is-valid',
+  });
+
+  assert.equal(lookedUpEmail, 'user@example.com');
+  assert.equal(createdSession, true);
+  assert.equal(result.user.email, 'user@example.com');
+  assert.equal(result.accessToken, 'access-token');
+});
+
+test('SignupUseCase가 canonical email 생성 경쟁을 충돌 오류로 변환한다', async () => {
   const repository: AuthRepository = {
     findUserByEmail: async () => undefined,
     findUserById: async () => undefined,
@@ -157,22 +207,21 @@ test('AuthService maps a canonical email race to a conflict', async () => {
     revokeRefreshSession: async () => undefined,
   };
   const options = createAuthOptions({ NODE_ENV: 'test', JWT_SECRET: SECRET });
-  const service = new AuthService(
+  const useCase = new SignupUseCase(
     repository,
     immediateTransactionManager,
-    options,
     { hash: async () => 'hash', verify: async () => true } as unknown as PasswordService,
-    { signAccessToken: async () => 'access' } as unknown as JwtTokenService,
+    new SessionIssuer(options, { signAccessToken: async () => 'access' } as never),
   );
 
   await assert.rejects(
-    service.signup({ email: 'new@example.com', password: 'password-that-is-valid' }),
+    useCase.execute({ email: 'new@example.com', password: 'password-that-is-valid' }),
     (error: unknown) =>
       error instanceof AuthException && error.code === AuthExceptionCode.DuplicateEmail,
   );
 });
 
-test('AuthService rotates an opaque refresh token and never returns it in the access response', async () => {
+test('RefreshUseCase가 opaque refresh token을 회전하고 access 응답에 반환하지 않는다', async () => {
   const user = {
     id: '0199f000-0000-7000-8000-000000000001',
     email: 'user@example.com',
@@ -192,16 +241,14 @@ test('AuthService rotates an opaque refresh token and never returns it in the ac
     revokeRefreshSession: async () => undefined,
   };
   const options = createAuthOptions({ NODE_ENV: 'test', JWT_SECRET: SECRET });
-  const service = new AuthService(
+  const useCase = new RefreshUseCase(
     repository,
     immediateTransactionManager,
-    options,
-    { hash: async () => 'hash', verify: async () => true } as unknown as PasswordService,
-    { signAccessToken: async () => 'new-access-token' } as unknown as JwtTokenService,
+    new SessionIssuer(options, { signAccessToken: async () => 'new-access-token' } as never),
   );
   const oldRefresh = 'a'.repeat(43);
 
-  const result = await service.refresh(oldRefresh);
+  const result = await useCase.execute(oldRefresh);
 
   assert.equal(result.accessToken, 'new-access-token');
   assert.equal(result.user.email, 'user@example.com');
@@ -212,7 +259,7 @@ test('AuthService rotates an opaque refresh token and never returns it in the ac
   assert.equal(JSON.stringify(rotationCommand).includes(oldRefresh), false);
 });
 
-test('AuthService turns refresh reuse into one generic unauthorized domain error', async () => {
+test('RefreshUseCase가 refresh token 재사용을 일반화된 인증 실패 도메인 오류로 변환한다', async () => {
   const repository: AuthRepository = {
     findUserByEmail: async () => undefined,
     findUserById: async () => undefined,
@@ -224,57 +271,61 @@ test('AuthService turns refresh reuse into one generic unauthorized domain error
     revokeRefreshSession: async () => undefined,
   };
   const options = createAuthOptions({ NODE_ENV: 'test', JWT_SECRET: SECRET });
-  const service = new AuthService(
+  const useCase = new RefreshUseCase(
     repository,
     immediateTransactionManager,
-    options,
-    { hash: async () => 'hash', verify: async () => true } as unknown as PasswordService,
-    { signAccessToken: async () => 'access' } as unknown as JwtTokenService,
+    new SessionIssuer(options, { signAccessToken: async () => 'access' } as never),
   );
 
   await assert.rejects(
-    service.refresh('a'.repeat(43)),
+    useCase.execute('a'.repeat(43)),
     (error: unknown) =>
       error instanceof AuthException && error.code === AuthExceptionCode.InvalidRefreshToken,
   );
 });
 
-test('JwtAuthGuard verifies the bearer token and refreshes the current DB role on the request', async () => {
+test('JwtAuthGuard가 Bearer token을 검증하고 요청에 DB의 현재 role을 주입한다', async () => {
   const request = {
     headers: { authorization: 'Bearer signed-token' },
   } as AuthenticatedRequest;
   const context = createHttpContext(request);
   const guard = new JwtAuthGuard(
-    { verifyAccessToken: async () => '0199f000-0000-7000-8000-000000000001' } as never,
-    {
-      findUserById: async () => ({
-        id: '0199f000-0000-7000-8000-000000000001',
-        email: 'user@example.com',
-        passwordHash: null,
-        role: AuthRole.Admin,
-      }),
-    } as never,
+    new AccessPrincipalService(
+      { verifyAccessToken: async () => '0199f000-0000-7000-8000-000000000001' } as never,
+      {
+        findUserById: async () => ({
+          id: '0199f000-0000-7000-8000-000000000001',
+          email: 'user@example.com',
+          passwordHash: null,
+          role: AuthRole.Admin,
+        }),
+      } as never,
+    ),
   );
 
   assert.equal(await guard.canActivate(context as never), true);
-  assert.equal(request.authenticatedUserId, '0199f000-0000-7000-8000-000000000001');
-  assert.equal(request.authenticatedUserRole, AuthRole.Admin);
+  assert.deepEqual(request.principal, {
+    userId: '0199f000-0000-7000-8000-000000000001' as AuthUser['id'],
+    role: AuthRole.Admin,
+  });
 
   await assert.rejects(
-    new JwtAuthGuard({ verifyAccessToken: async () => 'never' } as never, {} as never).canActivate(
-      createHttpContext({ headers: {} } as AuthenticatedRequest) as never,
-    ),
+    new JwtAuthGuard(
+      new AccessPrincipalService({ verifyAccessToken: async () => 'never' } as never, {} as never),
+    ).canActivate(createHttpContext({ headers: {} } as AuthenticatedRequest) as never),
     UnauthorizedException,
   );
 });
 
-test('RolesGuard returns 403 for a USER on an ADMIN route and accepts the current ADMIN role', () => {
+test('RolesGuard가 ADMIN route의 USER 요청을 403으로 거부하고 현재 ADMIN role을 허용한다', () => {
   const handler = () => undefined;
   Reflect.defineMetadata(AUTH_ROLES_KEY, [AuthRole.Admin], handler);
   const guard = new RolesGuard(new Reflector());
   const userRequest = {
-    authenticatedUserId: '0199f000-0000-7000-8000-000000000001',
-    authenticatedUserRole: AuthRole.User,
+    principal: {
+      userId: '0199f000-0000-7000-8000-000000000001' as AuthUser['id'],
+      role: AuthRole.User,
+    },
   } as AuthenticatedRequest;
 
   assert.throws(
@@ -282,11 +333,14 @@ test('RolesGuard returns 403 for a USER on an ADMIN route and accepts the curren
     ForbiddenException,
   );
 
-  userRequest.authenticatedUserRole = AuthRole.Admin;
+  userRequest.principal = {
+    userId: '0199f000-0000-7000-8000-000000000001' as AuthUser['id'],
+    role: AuthRole.Admin,
+  };
   assert.equal(guard.canActivate(createHttpContext(userRequest, handler) as never), true);
 });
 
-test('Origin validation allows same-origin requests and rejects cross-origin cookie writes', () => {
+test('Origin 검증이 same-origin 요청을 허용하고 cross-origin 쿠키 쓰기를 거부한다', () => {
   const options = createAuthOptions({ NODE_ENV: 'test', JWT_SECRET: SECRET });
   const sameOrigin = {
     headers: { origin: 'http://localhost:3000' },
@@ -303,7 +357,7 @@ test('Origin validation allows same-origin requests and rejects cross-origin coo
   assert.throws(() => assertAllowedOrigin(crossOrigin, options), ForbiddenException);
 });
 
-test('refresh cookie helpers apply the security attributes and can clear the session', () => {
+test('refresh cookie helper가 보안 속성을 적용하고 세션 쿠키를 삭제할 수 있다', () => {
   const options = createAuthOptions({ NODE_ENV: 'test', JWT_SECRET: SECRET });
   const refreshToken = 'r'.repeat(43);
   const headers: Record<string, string> = {};

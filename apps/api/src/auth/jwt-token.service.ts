@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { jwtVerify, SignJWT } from 'jose';
 
-import { isUuidV7 } from '@newtine/core';
+import { isUuidV7, type UuidV7 } from '@newtine/core';
 import { generateUuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
 
 import { AUTH_OPTIONS, type AuthOptions } from './auth.options.js';
@@ -23,7 +23,7 @@ export class JwtTokenService {
       .sign(this.options.jwtSecret);
   }
 
-  async verifyAccessToken(token: string): Promise<string> {
+  async verifyAccessToken(token: string): Promise<UuidV7> {
     const { payload } = await jwtVerify(token, this.options.jwtSecret, {
       algorithms: ['HS256'],
       issuer: this.options.jwtIssuer,
