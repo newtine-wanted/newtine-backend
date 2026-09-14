@@ -28,6 +28,8 @@
 | [NestJS 초기 골격 구현 제어](nestjs-foundation-implementation.html) | 골격 구현 과정과 검증 증거             |
 | [Nestia 전환 설계](nestia-migration-design.html)                    | Nestia·Typia 계약 전환 설계            |
 | [Nestia 전환 구현 제어](nestia-migration-implementation.html)       | 생성·계약 테스트·NodeNext 검증         |
+| [의존성 보안 보완 설계](dependency-security-remediation-design.html) | npm advisory 패치 범위와 검증 설계     |
+| [의존성 보안 보완 구현 제어](dependency-security-remediation-implementation.html) | 의존성 갱신·audit·PR 검증 증거          |
 | [견고성 설계](foundationRobustness.design.html)                     | 설정 실패·HTTP 경계·프로세스 종료 설계 |
 | [견고성 구현 제어](foundationRobustness.implementation.html)        | 보완 구현과 검증 결과                  |
 | [로깅 설계](logging.design.html)                                    | 구조화 로그·요청 지연 기록 설계        |
