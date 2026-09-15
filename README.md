@@ -223,6 +223,8 @@ node --env-file=.env dist/apps/api/src/main.js
 | `JWT_AUDIENCE`           | `newtine-client`          | 필요에 따라 고정   |
 | `AUTH_COOKIE_SECURE`     | development/test `false` | production `true` 필수 |
 | `AUTH_ALLOWED_ORIGINS`   | 빈 값(동일 origin)        | 허용할 절대 origin 목록 |
+| `INTEREST_ANALYSIS_WINDOW_DAYS` | `7` | 마이페이지 관심 분석 rolling 기간(일), 1~365 |
+| `INTEREST_ANALYSIS_MINIMUM_SAMPLE_SIZE` | `10` | 저표본 경고 임계값, 1~100000 |
 
 DB 기본값은 `NODE_ENV=development` 또는 `test`일 때만 적용됩니다. 그 외 환경에서는 DB 변수
 누락·빈 값·잘못된 포트가 ORM 초기화 단계에서 실패합니다. 로컬 예시는 [.env.example](.env.example)을

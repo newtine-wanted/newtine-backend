@@ -10,6 +10,7 @@ import { IssueModule } from '@newtine/api/issue/issue.module.js';
 import { PipelineModule } from '@newtine/api/pipeline/pipeline.module.js';
 import { OnboardingModule } from '@newtine/api/onboarding/onboarding.module.js';
 import { AuthModule } from '@newtine/api/auth/auth.module.js';
+import { InterestModule } from '@newtine/api/interest/interest.module.js';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { AuthModule } from '@newtine/api/auth/auth.module.js';
     OnboardingModule,
     PipelineModule,
     AuthModule,
+    InterestModule,
   ],
   controllers: [HealthController],
   providers: [

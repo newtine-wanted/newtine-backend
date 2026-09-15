@@ -5,3 +5,5 @@
  */
 //================================================================
 export * as onboarding from "./onboarding/index";
+export * as interest_analysis from "./interest_analysis/index";
+export * as liked_issues from "./liked_issues/index";

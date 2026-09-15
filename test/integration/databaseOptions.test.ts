@@ -20,6 +20,9 @@ import { Migration20260915000003IssueCardQueryHardening } from '@newtine/core/pi
 import { Migration20260915000004FeedAlgorithmSnapshot } from '@newtine/core/pipeline/migrations/Migration20260915000004FeedAlgorithmSnapshot.js';
 import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '@newtine/core/issue/persistence/issueQuery.persistence.entity.js';
 import { USER_PERSISTENCE_ENTITIES } from '@newtine/core/user/persistence/user.persistence.entity.js';
+import { ISSUE_PERSISTENCE_ENTITIES } from '@newtine/core/issue/persistence/issue.persistence.entity.js';
+import { INTEREST_PERSISTENCE_ENTITIES } from '@newtine/core/interest/persistence/interest.persistence.entity.js';
+import { Migration20260915000000InterestPersistence } from '@newtine/core/interest/migrations/Migration20260915000000InterestPersistence.js';
 
 test('database options never enable automatic database creation', () => {
   const options = createDatabaseOptions({ NODE_ENV: 'test' });
@@ -28,7 +31,9 @@ test('database options never enable automatic database creation', () => {
   assert.deepEqual(options.entities, [
     ...USER_PERSISTENCE_ENTITIES,
     ...ONBOARDING_PERSISTENCE_ENTITIES,
+    ...ISSUE_PERSISTENCE_ENTITIES,
     AiUsageRecordEntity,
+    ...INTEREST_PERSISTENCE_ENTITIES,
     ...AUTH_PERSISTENCE_ENTITIES,
     ...ISSUE_QUERY_PERSISTENCE_ENTITIES,
   ]);
@@ -44,6 +49,7 @@ test('database options never enable automatic database creation', () => {
     Migration202609130003IssueCardQuery,
     Migration202609130004IssueCardQueryReadModel,
     Migration20260914000000Authentication,
+    Migration20260915000000InterestPersistence,
     Migration20260915000000MemberOnlyFeed,
     Migration20260915000001IssuePersonalizationMetadata,
     Migration20260915000002GuestFeed,

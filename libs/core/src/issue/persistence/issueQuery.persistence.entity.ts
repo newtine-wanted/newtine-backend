@@ -1,5 +1,8 @@
 import { EntitySchema } from '@mikro-orm/core';
 
+import { UserInteractionEventSchema } from '../../interest/persistence/interest.persistence.entity.js';
+import { IssueSchema, type Issue } from './issue.persistence.entity.js';
+
 export interface FeedSessionPersistenceEntity {
   id: string;
   userId: string | null;
@@ -93,52 +96,9 @@ export const FeedBatchItemEntity = new EntitySchema<FeedBatchItemPersistenceEnti
   },
 });
 
-export interface IssueQueryIssuePersistenceEntity {
-  id: string;
-  categoryCode: string;
-  title: string;
-  mainTopic: string | null;
-  representativeEntityId: string | null;
-  publicationStatus: string;
-  publishedAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-  eventAt: Date | null;
-  subCategory: string | null;
-  freshnessScore: number;
-  importanceScore: number;
-}
+export type IssueQueryIssuePersistenceEntity = Issue;
 
-export const IssueQueryIssueEntity = new EntitySchema<IssueQueryIssuePersistenceEntity>({
-  name: 'IssueQueryIssue',
-  tableName: 'issues',
-  properties: {
-    id: { type: String, columnType: 'uuid', primary: true },
-    categoryCode: { type: String, fieldName: 'category_code' },
-    title: { type: String },
-    mainTopic: { type: String, fieldName: 'main_topic', nullable: true },
-    representativeEntityId: {
-      type: String,
-      columnType: 'uuid',
-      fieldName: 'representative_entity_id',
-      nullable: true,
-    },
-    publicationStatus: { type: String, fieldName: 'publication_status' },
-    publishedAt: {
-      type: Date,
-      columnType: 'timestamptz',
-      fieldName: 'published_at',
-      nullable: true,
-    },
-    createdAt: { type: Date, columnType: 'timestamptz', fieldName: 'created_at' },
-    updatedAt: { type: Date, columnType: 'timestamptz', fieldName: 'updated_at' },
-    eventAt: { type: Date, columnType: 'timestamptz', fieldName: 'event_at', nullable: true },
-    subCategory: { type: String, fieldName: 'sub_category', nullable: true },
-    freshnessScore: { type: Number, columnType: 'numeric', fieldName: 'freshness_score' },
-    importanceScore: { type: Number, columnType: 'numeric', fieldName: 'importance_score' },
-  },
-});
-
+export const IssueQueryIssueEntity = IssueSchema;
 export interface IssueQueryDetailPersistenceEntity {
   id: string;
   issueId: string;
@@ -300,26 +260,12 @@ export interface IssueQueryInteractionPersistenceEntity {
   createdAt: Date;
 }
 
-export const IssueQueryInteractionEntity = new EntitySchema<IssueQueryInteractionPersistenceEntity>(
-  {
-    name: 'IssueQueryInteraction',
-    tableName: 'user_interaction_events',
-    properties: {
-      id: { type: String, columnType: 'uuid', primary: true },
-      userId: { type: String, columnType: 'uuid', fieldName: 'user_id' },
-      issueId: { type: String, columnType: 'uuid', fieldName: 'issue_id' },
-      eventType: { type: String, fieldName: 'event_type' },
-      createdAt: { type: Date, columnType: 'timestamptz', fieldName: 'created_at' },
-    },
-  },
-);
-
+export const IssueQueryInteractionEntity = UserInteractionEventSchema;
 /** Entity metadata consumed by the shared MikroORM configuration. */
 export const ISSUE_QUERY_PERSISTENCE_ENTITIES = [
   FeedSessionEntity,
   FeedBatchEntity,
   FeedBatchItemEntity,
-  IssueQueryIssueEntity,
   IssueQueryDetailEntity,
   IssueQueryImpactEntity,
   IssueQueryArticleLinkEntity,
@@ -327,5 +273,4 @@ export const ISSUE_QUERY_PERSISTENCE_ENTITIES = [
   IssueQueryPublisherEntity,
   IssueQueryEntityLinkEntity,
   IssueQueryRelationEntity,
-  IssueQueryInteractionEntity,
 ] as const satisfies readonly EntitySchema[];
