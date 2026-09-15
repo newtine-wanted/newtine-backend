@@ -19,7 +19,14 @@ export class IssueDetailService {
       issue === null ||
       issue.publicationStatus !== 'PUBLISHED' ||
       issue.integratedSummary === null ||
-      issue.summaryLines.length !== 3
+      issue.summaryLines.length !== 3 ||
+      issue.summaryLines.some((line) => typeof line !== 'string' || line.trim().length === 0) ||
+      !Number.isFinite(issue.freshnessScore) ||
+      issue.freshnessScore < 0 ||
+      issue.freshnessScore > 1 ||
+      !Number.isFinite(issue.importanceScore) ||
+      issue.importanceScore < 0 ||
+      issue.importanceScore > 1
     ) {
       throw new IssueException(IssueExceptionCode.NotFound, '이슈를 찾을 수 없습니다.');
     }

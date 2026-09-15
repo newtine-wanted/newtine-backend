@@ -125,6 +125,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (status === HttpStatus.CONFLICT) {
       return ErrorCode.Conflict;
     }
+    if (status === HttpStatus.SERVICE_UNAVAILABLE) {
+      return ErrorCode.ServiceUnavailable;
+    }
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       return ErrorCode.InternalError;
     }

@@ -68,7 +68,7 @@ export namespace search {
  * @throws 400 The request is invalid.
  * @throws 401 Authentication is required.
  * @throws 404 The requested resource was not found.
- * @throws 500 The server could not complete the request.
+ * @throws 503 The service is temporarily unavailable.
  * @controller IssueController.getIssueDetail
  * @path GET /issues/:issueId
  * @accessor api.functional.issues.getIssueDetail

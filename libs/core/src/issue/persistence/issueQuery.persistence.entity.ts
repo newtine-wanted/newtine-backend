@@ -5,6 +5,8 @@ export interface FeedSessionPersistenceEntity {
   userId: string | null;
   guestTokenHash: string | null;
   algorithmVersion: string;
+  candidateBudget: number;
+  highScoreThreshold: number;
   nextBatchNo: number;
   status: string;
   createdAt: Date;
@@ -23,6 +25,8 @@ export const FeedSessionEntity = new EntitySchema<FeedSessionPersistenceEntity>(
     userId: { type: String, columnType: 'uuid', fieldName: 'user_id', nullable: true },
     guestTokenHash: { type: String, fieldName: 'guest_token_hash', nullable: true },
     algorithmVersion: { type: String, fieldName: 'algorithm_version' },
+    candidateBudget: { type: Number, columnType: 'integer', fieldName: 'candidate_budget' },
+    highScoreThreshold: { type: Number, columnType: 'numeric', fieldName: 'high_score_threshold' },
     nextBatchNo: { type: Number, fieldName: 'next_batch_no' },
     status: { type: String },
     createdAt: { type: Date, columnType: 'timestamptz', fieldName: 'created_at' },

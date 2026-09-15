@@ -1,12 +1,6 @@
 import { tags } from 'typia';
 import type { IssueSelectionType, FeedContinuation } from '@newtine/core';
 
-export interface FeedSessionResponse {
-  sessionId: string & tags.Format<'uuid'>;
-  expiresAt: string & tags.Format<'date-time'>;
-  nextBatchNo: number & tags.Type<'uint32'>;
-}
-
 export interface FeedCardResponse {
   issueId: string & tags.Format<'uuid'>;
   title: string;
@@ -20,10 +14,8 @@ export interface FeedCardResponse {
   reasonCodes: string[];
 }
 
-export interface FeedBatchResponse {
-  sessionId: string & tags.Format<'uuid'>;
-  batchNo: number & tags.Type<'uint32'>;
+export interface FeedResponse {
   items: FeedCardResponse[];
-  nextBatchNo: (number & tags.Type<'uint32'>) | null;
+  nextCursor: string | null;
   continuation: FeedContinuation;
 }

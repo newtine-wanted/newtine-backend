@@ -14,6 +14,7 @@ test('in-memory feed batch save keeps the first concurrent write', async () => {
   const session = await repository.createFeedSession(
     { kind: 'MEMBER', userId: '00000000-0000-0000-0000-000000000001' },
     new Date('2026-01-01T00:00:00.000Z'),
+    { candidateBudget: 500, highScoreThreshold: 0.8 },
   );
   const first = batch(session, 'first');
   const second = batch(session, 'second');
@@ -108,6 +109,25 @@ test('scoped candidate fill honors excluded ids, the limit, and public filtering
   assert.deepEqual(
     candidates.map((candidate) => candidate.id),
     [personalized.id, mismatchMajor.id, fallback.id],
+  );
+});
+
+test('public candidate filtering rejects malformed summaries and scores before slicing', async () => {
+  const valid = issue(1);
+  const malformedSummary = issue(2, {
+    summaryLines: ['첫째', 2 as unknown as string, '셋째'],
+  });
+  const invalidScore = issue(3, { freshnessScore: Number.NaN });
+  const outOfRangeScore = issue(4, { importanceScore: 1.1 });
+  const repository = new InMemoryIssueQueryRepository({
+    issues: [malformedSummary, invalidScore, outOfRangeScore, valid],
+  });
+
+  const candidates = await repository.findCandidates(new Set(), 3);
+
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.id),
+    [valid.id],
   );
 });
 

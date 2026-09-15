@@ -112,10 +112,17 @@ export interface GuestFeedOwner {
 
 export type FeedOwner = MemberFeedOwner | GuestFeedOwner;
 
+export interface FeedAlgorithmSnapshot {
+  candidateBudget: number;
+  highScoreThreshold: number;
+}
+
 export interface FeedSessionRecord {
   id: string;
   owner: FeedOwner;
   algorithmVersion: string;
+  candidateBudget: number;
+  highScoreThreshold: number;
   nextBatchNo: number;
   status: 'ACTIVE' | 'COMPLETED';
   createdAt: Date;
@@ -144,7 +151,11 @@ export interface FeedBatchRecord {
 }
 
 export interface IssueQueryRepository {
-  createFeedSession(owner: FeedOwner, now: Date): Promise<FeedSessionRecord>;
+  createFeedSession(
+    owner: FeedOwner,
+    now: Date,
+    algorithm: FeedAlgorithmSnapshot,
+  ): Promise<FeedSessionRecord>;
   findFeedSession(id: string, owner: FeedOwner, now: Date): Promise<FeedSessionRecord | null>;
   findFeedBatch(sessionId: string, batchNo: number): Promise<FeedBatchRecord | null>;
   findFeedBatches(sessionId: string): Promise<FeedBatchRecord[]>;

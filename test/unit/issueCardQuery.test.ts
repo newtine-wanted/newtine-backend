@@ -62,6 +62,25 @@ test('feed returns at most ten unique cards and reuses the same batch on retry',
   );
 });
 
+test('single feed collection starts an internal session and advances by an opaque position', async () => {
+  const repository = new InMemoryIssueQueryRepository({
+    issues: Array.from({ length: 12 }, (_, index) => issue(index + 1)),
+  });
+  const service = new IssueFeedService(repository, testTransactionManager);
+  const owner = { kind: 'MEMBER' as const, userId: USER_ID };
+
+  const first = await service.getFeed(owner);
+  const second = await service.getFeed(owner, {
+    sessionId: first.sessionId,
+    batchNo: first.nextBatchNo ?? 1,
+  });
+
+  assert.equal(first.items.length, 10);
+  assert.equal(second.items.length, 2);
+  assert.equal(second.continuation, 'EXHAUSTED');
+  assert.equal(new Set([...first.items, ...second.items].map((item) => item.issueId)).size, 12);
+});
+
 test('feed batch generation is owned by the supplied transaction manager', async () => {
   const repository = new InMemoryIssueQueryRepository({ issues: [issue(1)] });
   let transactionCalls = 0;

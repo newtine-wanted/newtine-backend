@@ -260,7 +260,7 @@ test('feed batch persistence uses a transaction, row locks, and ORM writes', asy
 
   await repository.saveFeedBatch(session(), batch(0));
 
-  assert.equal(flushCount(), 1);
+  assert.equal(flushCount(), 2);
   assert.equal(
     created.some((entry) => entry.entity === FeedBatchEntity),
     true,
@@ -532,6 +532,8 @@ function feedSessionPersistenceRow(
     userId: '00000000-0000-0000-0000-000000000001',
     guestTokenHash: null,
     algorithmVersion: 'issue-card-query-v1',
+    candidateBudget: 500,
+    highScoreThreshold: 0.8,
     nextBatchNo: 0,
     status: 'ACTIVE',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -549,6 +551,8 @@ function session(): FeedSessionRecord {
     id: SESSION_ID,
     owner: { kind: 'MEMBER', userId: '00000000-0000-0000-0000-000000000001' },
     algorithmVersion: 'issue-card-query-v1',
+    candidateBudget: 500,
+    highScoreThreshold: 0.8,
     nextBatchNo: 1,
     status: 'ACTIVE',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

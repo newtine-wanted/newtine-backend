@@ -243,6 +243,7 @@ worker를 재시작해야 다음 실행부터 적용되며, API 프로세스는 
 | `npm run test:contracts`                                       | 생성 계약 테스트                               |
 | `npm run test:smoke`                                           | 빌드된 API의 실제 HTTP 동작 확인               |
 | `npm run test:smoke:compose`                                  | fresh Compose 인증 smoke 확인                  |
+| `npm run test:smoke:compose:data`                             | disposable PostgreSQL 이슈 데이터·회원/비회원 cursor smoke |
 | `npm run contracts:all`                                        | SDK·e2e·OpenAPI 생성                           |
 | `npm run contracts:check`                                      | 계약 재생성, 계약 테스트, 생성 TypeScript 검사 |
 | `npm run typecheck:generated`                                  | 생성 TypeScript만 검사                         |

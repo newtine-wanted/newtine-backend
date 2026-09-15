@@ -16,6 +16,8 @@ import { Migration202609130004IssueCardQueryReadModel } from '@newtine/core/pipe
 import { Migration20260915000000MemberOnlyFeed } from '@newtine/core/pipeline/migrations/Migration20260915000000MemberOnlyFeed.js';
 import { Migration20260915000001IssuePersonalizationMetadata } from '@newtine/core/pipeline/migrations/Migration20260915000001IssuePersonalizationMetadata.js';
 import { Migration20260915000002GuestFeed } from '@newtine/core/pipeline/migrations/Migration20260915000002GuestFeed.js';
+import { Migration20260915000003IssueCardQueryHardening } from '@newtine/core/pipeline/migrations/Migration20260915000003IssueCardQueryHardening.js';
+import { Migration20260915000004FeedAlgorithmSnapshot } from '@newtine/core/pipeline/migrations/Migration20260915000004FeedAlgorithmSnapshot.js';
 import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '@newtine/core/issue/persistence/issueQuery.persistence.entity.js';
 import { USER_PERSISTENCE_ENTITIES } from '@newtine/core/user/persistence/user.persistence.entity.js';
 
@@ -45,6 +47,8 @@ test('database options never enable automatic database creation', () => {
     Migration20260915000000MemberOnlyFeed,
     Migration20260915000001IssuePersonalizationMetadata,
     Migration20260915000002GuestFeed,
+    Migration20260915000003IssueCardQueryHardening,
+    Migration20260915000004FeedAlgorithmSnapshot,
   ]);
   assert.equal(options.registerRequestContext, true);
 });

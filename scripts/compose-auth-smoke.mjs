@@ -1,15 +1,11 @@
 /* global URL, console, fetch, process */
 
 import assert from 'node:assert/strict';
-import { MikroORM } from '@mikro-orm/postgresql';
-
-import { createDatabaseOptions } from '../dist/libs/core/src/common/database/database.options.js';
 
 const baseUrl = new URL(process.env.API_BASE_URL ?? 'http://127.0.0.1:3000');
 const origin = baseUrl.origin;
 const email = `compose-auth-${Date.now()}@example.com`;
 const password = 'correct-horse-battery-staple';
-const SMOKE_DB_ENVIRONMENT = 'issue-card-query-smoke';
 
 async function request(path, init = {}) {
   const response = await fetch(new URL(path, baseUrl), init);
@@ -48,12 +44,12 @@ function feedGuestCookie(result) {
       : [result.response.headers.get('set-cookie') ?? ''];
   const value = setCookies.find((cookie) => cookie.startsWith('newtine_feed_guest='));
   assert.ok(value, `guest feed cookie missing for ${result.response.url}`);
-  assert.match(value, /Path=\/feed-sessions/);
+  assert.match(value, /Path=\/feed/);
   assert.match(value, /HttpOnly/);
   assert.match(value, /SameSite=Lax/);
   assert.match(value, /Secure/);
-  const token = value.slice('newtine_feed_guest='.length).split(';', 1)[0];
-  assert.match(token, /^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  const token = decodeURIComponent(value.slice('newtine_feed_guest='.length).split(';', 1)[0]);
+  assert.match(token, /^v1\.\d+\.\d+\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
   return `newtine_feed_guest=${token}`;
 }
 
@@ -65,53 +61,6 @@ async function refresh(token) {
       Cookie: cookieHeader(token),
     },
   });
-}
-
-function disposableSmokeDatabaseEnv() {
-  const databaseEnv = {
-    NODE_ENV: 'test',
-    DB_HOST: process.env.SMOKE_DB_HOST,
-    DB_PORT: process.env.SMOKE_DB_PORT,
-    DB_NAME: process.env.SMOKE_DB_NAME,
-    DB_USER: process.env.SMOKE_DB_USER,
-    DB_PASSWORD: process.env.SMOKE_DB_PASSWORD,
-  };
-  for (const [key, value] of Object.entries(databaseEnv)) {
-    if (value === undefined || value.trim() === '') {
-      throw new Error(`SMOKE_DB_${key === 'NODE_ENV' ? 'NODE_ENV' : key.slice(3)} is required`);
-    }
-  }
-  if (databaseEnv.DB_HOST !== '127.0.0.1' && databaseEnv.DB_HOST !== '::1') {
-    throw new Error('SMOKE_DB_HOST must be a loopback address');
-  }
-  return databaseEnv;
-}
-
-async function expireFeedSession(sessionId) {
-  const orm = await MikroORM.init(createDatabaseOptions(disposableSmokeDatabaseEnv()));
-  try {
-    const markerRows = await orm.em
-      .getConnection()
-      .execute(
-        'SELECT environment FROM smoke_environment_marker WHERE environment = ?',
-        [SMOKE_DB_ENVIRONMENT],
-        'all',
-      );
-    if (markerRows.length !== 1) {
-      throw new Error(
-        'SMOKE_DB_* must identify the disposable issue-card-query-smoke PostgreSQL database',
-      );
-    }
-    await orm.em
-      .getConnection()
-      .execute(
-        "UPDATE feed_sessions SET expires_at = now() - interval '1 second' WHERE id = ?",
-        [sessionId],
-        'run',
-      );
-  } finally {
-    await orm.close(true);
-  }
 }
 
 const signup = await request('/auth/signup', {
@@ -137,176 +86,64 @@ assert.equal(onboarding.completedAt, null);
 assert.equal(onboarding.ageGroup, null);
 assert.deepEqual(onboarding.regionCodes, []);
 
-const feedSessionResponse = await request('/feed-sessions', {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Authorization: `Bearer ${signupBody.accessToken}`,
-  },
-  body: JSON.stringify({}),
+function assertFeedPage(result) {
+  assert.equal(result.response.status, 200);
+  assert.match(result.response.headers.get('cache-control') ?? '', /private/);
+  assert.match(result.response.headers.get('cache-control') ?? '', /no-store/);
+  const body = parseJson(result);
+  assert.ok(Array.isArray(body.items));
+  assert.equal(Object.hasOwn(body, 'sessionId'), false);
+  assert.equal(Object.hasOwn(body, 'batchNo'), false);
+  assert.equal(Object.hasOwn(body, 'nextBatchNo'), false);
+  assert.ok(body.nextCursor === null || typeof body.nextCursor === 'string');
+  return body;
+}
+
+const memberFeedResponse = await request('/feed', {
+  headers: { Authorization: `Bearer ${signupBody.accessToken}` },
 });
-assert.equal(feedSessionResponse.response.status, 200);
-const feedSession = parseJson(feedSessionResponse);
-assert.equal(feedSession.nextBatchNo, 0);
-assert.equal(Object.hasOwn(feedSession, 'guestKey'), false);
+const memberFeed = assertFeedPage(memberFeedResponse);
+const memberCursor = memberFeed.nextCursor;
+if (memberCursor !== null) {
+  const memberNext = await request(`/feed?cursor=${encodeURIComponent(memberCursor)}`, {
+    headers: { Authorization: `Bearer ${signupBody.accessToken}` },
+  });
+  const memberNextBody = assertFeedPage(memberNext);
+  const memberReplay = await request(`/feed?cursor=${encodeURIComponent(memberCursor)}`, {
+    headers: { Authorization: `Bearer ${signupBody.accessToken}` },
+  });
+  assert.deepEqual(parseJson(memberReplay), memberNextBody);
+}
 
-const feedBatchResponse = await request(`/feed-sessions/${feedSession.sessionId}/batches`, {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Authorization: `Bearer ${signupBody.accessToken}`,
-  },
-  body: JSON.stringify({ batchNo: 0 }),
-});
-assert.equal(feedBatchResponse.response.status, 200);
-const feedBatch = parseJson(feedBatchResponse);
-assert.equal(feedBatch.sessionId, feedSession.sessionId);
-assert.equal(feedBatch.batchNo, 0);
-assert.ok(Array.isArray(feedBatch.items));
+const guestFeedResponse = await request('/feed');
+const guestFeed = assertFeedPage(guestFeedResponse);
+const guestCookie = feedGuestCookie(guestFeedResponse);
+const guestCursor = guestFeed.nextCursor;
+if (guestCursor !== null) {
+  const guestNext = await request(`/feed?cursor=${encodeURIComponent(guestCursor)}`, {
+    headers: { Cookie: guestCookie },
+  });
+  const guestNextBody = assertFeedPage(guestNext);
+  const guestReplay = await request(`/feed?cursor=${encodeURIComponent(guestCursor)}`, {
+    headers: { Cookie: guestCookie },
+  });
+  assert.deepEqual(parseJson(guestReplay), guestNextBody);
 
-const guestFeedSessionResponse = await request('/feed-sessions', {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({}),
-});
-assert.equal(guestFeedSessionResponse.response.status, 200);
-const guestFeedSession = parseJson(guestFeedSessionResponse);
-const guestCookie = feedGuestCookie(guestFeedSessionResponse);
-assert.equal(Object.hasOwn(guestFeedSession, 'guestKey'), false);
+  const guestWithoutCookie = await request(`/feed?cursor=${encodeURIComponent(guestCursor)}`);
+  assert.equal(guestWithoutCookie.response.status, 401);
+  assert.equal(parseJson(guestWithoutCookie).code, 'UNAUTHORIZED');
+}
 
-const guestFeedBatchResponse = await request(
-  `/feed-sessions/${guestFeedSession.sessionId}/batches`,
-  {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      Cookie: guestCookie,
-    },
-    body: JSON.stringify({ batchNo: 0 }),
-  },
-);
-assert.equal(guestFeedBatchResponse.response.status, 200);
-assert.equal(parseJson(guestFeedBatchResponse).sessionId, guestFeedSession.sessionId);
-
-const guestWithoutCookie = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ batchNo: 0 }),
-});
-assert.equal(guestWithoutCookie.response.status, 401);
-assert.equal(parseJson(guestWithoutCookie).code, 'UNAUTHORIZED');
-
-const guestReentry = await request('/feed-sessions', {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Cookie: guestCookie,
-  },
-  body: JSON.stringify({}),
-});
-assert.equal(guestReentry.response.status, 200);
-assert.equal(feedGuestCookie(guestReentry), guestCookie);
-
-const invalidJwtFeed = await request('/feed-sessions', {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Authorization: 'Bearer deliberately-invalid-token',
-  },
-  body: JSON.stringify({}),
+const invalidJwtFeed = await request('/feed', {
+  headers: { Authorization: 'Bearer deliberately-invalid-token' },
 });
 assert.equal(invalidJwtFeed.response.status, 401);
 assert.equal(parseJson(invalidJwtFeed).code, 'UNAUTHORIZED');
 
-const invalidJwtGuestBatch = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Authorization: 'Bearer deliberately-invalid-token',
-    Cookie: guestCookie,
-  },
-  body: JSON.stringify({ batchNo: 0 }),
-});
-assert.equal(invalidJwtGuestBatch.response.status, 401);
-assert.equal(parseJson(invalidJwtGuestBatch).code, 'UNAUTHORIZED');
-
 const forgedCookie = `newtine_feed_guest=${'A'.repeat(43)}.${'B'.repeat(43)}`;
-const forgedGuestBatch = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Cookie: forgedCookie,
-  },
-  body: JSON.stringify({ batchNo: 0 }),
-});
-assert.equal(forgedGuestBatch.response.status, 401);
-assert.equal(parseJson(forgedGuestBatch).code, 'UNAUTHORIZED');
-
-const forgedGuestCreate = await request('/feed-sessions', {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Cookie: forgedCookie,
-  },
-  body: JSON.stringify({}),
-});
-assert.equal(forgedGuestCreate.response.status, 200);
+const forgedGuestCreate = await request('/feed', { headers: { Cookie: forgedCookie } });
+assertFeedPage(forgedGuestCreate);
 assert.notEqual(feedGuestCookie(forgedGuestCreate), forgedCookie);
-
-const secondGuestFeedSessionResponse = await request('/feed-sessions', {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({}),
-});
-assert.equal(secondGuestFeedSessionResponse.response.status, 200);
-const secondGuestCookie = feedGuestCookie(secondGuestFeedSessionResponse);
-const crossGuestBatch = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Cookie: secondGuestCookie,
-  },
-  body: JSON.stringify({ batchNo: 0 }),
-});
-assert.equal(crossGuestBatch.response.status, 404);
-assert.equal(parseJson(crossGuestBatch).code, 'NOT_FOUND');
-
-const guestOnMemberBatch = await request(`/feed-sessions/${feedSession.sessionId}/batches`, {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Cookie: guestCookie,
-  },
-  body: JSON.stringify({ batchNo: 0 }),
-});
-assert.equal(guestOnMemberBatch.response.status, 404);
-assert.equal(parseJson(guestOnMemberBatch).code, 'NOT_FOUND');
-
-const guestWithMemberToken = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
-  method: 'POST',
-  headers: {
-    'content-type': 'application/json',
-    Authorization: `Bearer ${signupBody.accessToken}`,
-  },
-  body: JSON.stringify({ batchNo: 0 }),
-});
-assert.equal(guestWithMemberToken.response.status, 404);
-assert.equal(parseJson(guestWithMemberToken).code, 'NOT_FOUND');
-
-if (process.env.SMOKE_DB_EXPIRY === '1') {
-  await expireFeedSession(guestFeedSession.sessionId);
-
-  const expiredGuestBatch = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      Cookie: guestCookie,
-    },
-    body: JSON.stringify({ batchNo: 0 }),
-  });
-  assert.equal(expiredGuestBatch.response.status, 410);
-  assert.equal(parseJson(expiredGuestBatch).code, 'GONE');
-}
 
 const userPipelineResponse = await request('/pipeline/runs', {
   method: 'POST',

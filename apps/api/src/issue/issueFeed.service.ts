@@ -21,8 +21,13 @@ import {
   DEFAULT_HIGH_SCORE_THRESHOLD,
   recommendFeed,
 } from './recommendation/issueRecommendation.js';
-import type { FeedBatchInput, FeedOwnerInput } from './type/feed.input.js';
-import type { FeedBatchResult, FeedCardResult, FeedSessionResult } from './type/feed.output.js';
+import type { FeedBatchInput, FeedCursorPosition, FeedOwnerInput } from './type/feed.input.js';
+import type {
+  FeedBatchResult,
+  FeedCardResult,
+  FeedPageResult,
+  FeedSessionResult,
+} from './type/feed.output.js';
 
 const DEFAULT_LIMIT = DEFAULT_CANDIDATE_BUDGET;
 
@@ -49,7 +54,10 @@ export class IssueFeedService {
 
   async createSession(ownerInput: FeedOwnerInput): Promise<FeedSessionResult> {
     const owner = normalizeOwner(ownerInput);
-    const session = await this.repository.createFeedSession(owner, new Date());
+    const session = await this.repository.createFeedSession(owner, new Date(), {
+      candidateBudget: this.candidateBudget,
+      highScoreThreshold: this.highScoreThreshold,
+    });
     return {
       sessionId: session.id,
       expiresAt: session.expiresAt,
@@ -58,12 +66,37 @@ export class IssueFeedService {
   }
 
   async getBatch(input: FeedBatchInput): Promise<FeedBatchResult> {
+    const page = await this.getBatchPage(input);
+    return page.batch;
+  }
+
+  async getFeed(ownerInput: FeedOwnerInput, cursor?: FeedCursorPosition): Promise<FeedPageResult> {
+    const owner = normalizeOwner(ownerInput);
+    const position =
+      cursor ??
+      (await this.repository.createFeedSession(owner, new Date(), {
+        candidateBudget: this.candidateBudget,
+        highScoreThreshold: this.highScoreThreshold,
+      }));
+    const page = await this.getBatchPage({
+      owner,
+      sessionId: 'sessionId' in position ? position.sessionId : position.id,
+      batchNo: 'sessionId' in position ? position.batchNo : 0,
+    });
+    return { ...page.batch, expiresAt: page.expiresAt };
+  }
+
+  private async getBatchPage(
+    input: FeedBatchInput,
+  ): Promise<{ batch: FeedBatchResult; expiresAt: Date }> {
     return this.withLock(input.sessionId, () =>
       this.transactionManager.execute(() => this.getBatchLocked(input)),
     );
   }
 
-  private async getBatchLocked(input: FeedBatchInput): Promise<FeedBatchResult> {
+  private async getBatchLocked(
+    input: FeedBatchInput,
+  ): Promise<{ batch: FeedBatchResult; expiresAt: Date }> {
     const owner = normalizeOwner(input.owner);
     const now = new Date();
     const session = await this.repository.findFeedSession(input.sessionId, owner, now);
@@ -82,7 +115,7 @@ export class IssueFeedService {
 
     const storedBatch = await this.repository.findFeedBatch(session.id, input.batchNo);
     if (storedBatch !== null) {
-      return this.toBatchResult(storedBatch);
+      return { batch: await this.toBatchResult(storedBatch), expiresAt: session.expiresAt };
     }
     if (session.status === 'COMPLETED') {
       throw new IssueException(
@@ -122,8 +155,8 @@ export class IssueFeedService {
     const connectedIssueIds = await this.findConnectedIssueIds(latestInteractions);
     const issues = await this.repository.findCandidates(
       excludedIssueIds,
-      this.candidateBudget + 1,
-      toCandidateScope(context, actedCategoryCodes, connectedIssueIds, this.highScoreThreshold),
+      session.candidateBudget + 1,
+      toCandidateScope(context, actedCategoryCodes, connectedIssueIds, session.highScoreThreshold),
     );
     const recommendation = recommendFeed({
       issues,
@@ -132,8 +165,8 @@ export class IssueFeedService {
       actedCategoryCodes,
       connectedIssueIds,
       previousSession: session,
-      highScoreThreshold: this.highScoreThreshold,
-      candidateBudget: this.candidateBudget,
+      highScoreThreshold: session.highScoreThreshold,
+      candidateBudget: session.candidateBudget,
     });
     const batch: FeedBatchRecord = {
       sessionId: session.id,
@@ -154,7 +187,7 @@ export class IssueFeedService {
     await this.repository.saveFeedBatch(nextSession, batch);
     const committedBatch =
       (await this.repository.findFeedBatch(session.id, input.batchNo)) ?? batch;
-    return this.toBatchResult(committedBatch);
+    return { batch: await this.toBatchResult(committedBatch), expiresAt: session.expiresAt };
   }
 
   private async findActedCategoryCodes(
@@ -254,7 +287,14 @@ function isUsableCard(issue: IssueRecord): boolean {
   return (
     issue.publicationStatus === 'PUBLISHED' &&
     issue.integratedSummary !== null &&
-    issue.summaryLines.length === 3
+    issue.summaryLines.length === 3 &&
+    issue.summaryLines.every((line) => typeof line === 'string' && line.trim().length > 0) &&
+    Number.isFinite(issue.freshnessScore) &&
+    issue.freshnessScore >= 0 &&
+    issue.freshnessScore <= 1 &&
+    Number.isFinite(issue.importanceScore) &&
+    issue.importanceScore >= 0 &&
+    issue.importanceScore <= 1
   );
 }
 

@@ -8,6 +8,7 @@ import {
   IssueException,
   IssueExceptionCode,
   type FeedBatchRecord,
+  type FeedAlgorithmSnapshot,
   type FeedOwner,
   type FeedSessionRecord,
   type IssueCandidateScope,
@@ -63,11 +64,17 @@ import {
 export class IssueCardQueryRepository implements IssueQueryRepository {
   constructor(private readonly entityManager: EntityManager) {}
 
-  async createFeedSession(owner: FeedOwner, now: Date): Promise<FeedSessionRecord> {
+  async createFeedSession(
+    owner: FeedOwner,
+    now: Date,
+    algorithm: FeedAlgorithmSnapshot,
+  ): Promise<FeedSessionRecord> {
     const session: FeedSessionRecord = {
       id: generateUuidV7(),
       owner: { ...owner },
       algorithmVersion: 'issue-card-query-v1',
+      candidateBudget: algorithm.candidateBudget,
+      highScoreThreshold: algorithm.highScoreThreshold,
       nextBatchNo: 0,
       status: 'ACTIVE',
       createdAt: new Date(now),
@@ -84,6 +91,8 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
         userId: owner.kind === 'MEMBER' ? owner.userId : null,
         guestTokenHash: owner.kind === 'GUEST' ? owner.guestTokenHash : null,
         algorithmVersion: session.algorithmVersion,
+        candidateBudget: session.candidateBudget,
+        highScoreThreshold: session.highScoreThreshold,
         nextBatchNo: session.nextBatchNo,
         status: session.status,
         createdAt: session.createdAt,
@@ -186,6 +195,10 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
         createdAt: batch.createdAt,
       }),
     );
+    // FeedBatchItem has a composite FK to its parent. MikroORM may batch
+    // unrelated EntitySchema instances in an order that is not FK-safe, so
+    // make the parent visible inside this transaction before persisting items.
+    await manager.flush();
     for (const item of batch.items) {
       manager.persist(
         manager.create(FeedBatchItemEntity, {
@@ -241,7 +254,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       );
       const rows = await manager.find(
         IssueQueryIssueEntity,
-        combineIssueFilters(baseWhere, slice.where),
+        combineIssueFilters(candidateWhere(publicIssueIds, seenIds), slice.where),
         { orderBy: ISSUE_ORDER_BY, limit: sliceLimit },
       );
       for (const row of rows) {
@@ -551,8 +564,7 @@ function combineIssueFilters(...filters: (IssueFilter | undefined)[]): IssueFilt
 function publicIssueDetailIds(manager: PostgreSqlEntityManager): Subquery {
   const where = {
     integratedSummary: { $ne: null },
-    [raw((alias) => `jsonb_typeof(${alias}.summary_lines) = 'array'`)]: [],
-    [raw((alias) => `jsonb_array_length(${alias}.summary_lines) = 3`)]: [],
+    [raw((alias) => `issue_card_summary_lines_valid(${alias}.summary_lines)`)]: [],
   } as unknown as QBFilterQuery<IssueQueryDetailPersistenceEntity>;
   return manager
     .createQueryBuilder(IssueQueryDetailEntity, 'detail')
@@ -694,6 +706,8 @@ function toSession(row: FeedSessionPersistenceEntity, owner: FeedOwner): FeedSes
     id: row.id,
     owner: { ...owner },
     algorithmVersion: row.algorithmVersion,
+    candidateBudget: numberValue(row.candidateBudget),
+    highScoreThreshold: numberValue(row.highScoreThreshold),
     nextBatchNo: row.nextBatchNo,
     status: row.status === 'COMPLETED' ? 'COMPLETED' : 'ACTIVE',
     createdAt: dateValue(row.createdAt),
@@ -742,7 +756,14 @@ function isPublicIssue(issue: IssueRecord): boolean {
   return (
     issue.publicationStatus === 'PUBLISHED' &&
     issue.integratedSummary !== null &&
-    issue.summaryLines.length === 3
+    issue.summaryLines.length === 3 &&
+    issue.summaryLines.every((line) => typeof line === 'string' && line.trim().length > 0) &&
+    Number.isFinite(issue.freshnessScore) &&
+    issue.freshnessScore >= 0 &&
+    issue.freshnessScore <= 1 &&
+    Number.isFinite(issue.importanceScore) &&
+    issue.importanceScore >= 0 &&
+    issue.importanceScore <= 1
   );
 }
 

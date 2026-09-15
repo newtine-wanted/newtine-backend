@@ -16,6 +16,8 @@ import { Migration202609130004IssueCardQueryReadModel } from '../../pipeline/mig
 import { Migration20260915000000MemberOnlyFeed } from '../../pipeline/migrations/Migration20260915000000MemberOnlyFeed.js';
 import { Migration20260915000001IssuePersonalizationMetadata } from '../../pipeline/migrations/Migration20260915000001IssuePersonalizationMetadata.js';
 import { Migration20260915000002GuestFeed } from '../../pipeline/migrations/Migration20260915000002GuestFeed.js';
+import { Migration20260915000003IssueCardQueryHardening } from '../../pipeline/migrations/Migration20260915000003IssueCardQueryHardening.js';
+import { Migration20260915000004FeedAlgorithmSnapshot } from '../../pipeline/migrations/Migration20260915000004FeedAlgorithmSnapshot.js';
 import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '../../issue/persistence/issueQuery.persistence.entity.js';
 
 const PERSISTENCE_ENTITIES = [
@@ -69,6 +71,8 @@ export function createDatabaseOptions(
         Migration20260915000000MemberOnlyFeed,
         Migration20260915000001IssuePersonalizationMetadata,
         Migration20260915000002GuestFeed,
+        Migration20260915000003IssueCardQueryHardening,
+        Migration20260915000004FeedAlgorithmSnapshot,
       ],
       transactional: true,
       allOrNothing: true,

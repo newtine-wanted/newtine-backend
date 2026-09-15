@@ -1,20 +1,10 @@
-import type { FeedBatchResult, FeedCardResult, FeedSessionResult } from './feed.output.js';
-import type { FeedBatchResponse, FeedCardResponse, FeedSessionResponse } from './feed.response.js';
+import type { FeedPageResult, FeedCardResult } from './feed.output.js';
+import type { FeedResponse, FeedCardResponse } from './feed.response.js';
 
-export function toFeedSessionResponse(result: FeedSessionResult): FeedSessionResponse {
+export function toFeedResponse(result: FeedPageResult, nextCursor: string | null): FeedResponse {
   return {
-    sessionId: result.sessionId as FeedSessionResponse['sessionId'],
-    expiresAt: result.expiresAt.toISOString() as FeedSessionResponse['expiresAt'],
-    nextBatchNo: result.nextBatchNo,
-  };
-}
-
-export function toFeedBatchResponse(result: FeedBatchResult): FeedBatchResponse {
-  return {
-    sessionId: result.sessionId as FeedBatchResponse['sessionId'],
-    batchNo: result.batchNo,
     items: result.items.map(toFeedCardResponse),
-    nextBatchNo: result.nextBatchNo,
+    nextCursor,
     continuation: result.continuation,
   };
 }

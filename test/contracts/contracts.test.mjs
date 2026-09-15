@@ -11,9 +11,8 @@ const generatedRoot = join(root, 'generated');
 const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace']);
 const EXPECTED_FAILURE_STATUSES = {
   '/issues/search': ['400', '413', '500'],
-  '/issues/{issueId}': ['400', '401', '404', '500'],
-  '/feed-sessions': ['400', '401', '500'],
-  '/feed-sessions/{sessionId}/batches': ['400', '401', '404', '409', '410', '500'],
+  '/issues/{issueId}': ['400', '401', '404', '503'],
+  '/feed': ['400', '401', '404', '409', '410', '503'],
   '/health': ['500'],
   '/onboarding/options': ['500'],
   '/onboarding/entities': ['400', '500'],
@@ -41,6 +40,8 @@ const requiredFiles = [
   'e2e/features/api/automated/test_api_health_getHealth.ts',
   'e2e/features/api/automated/test_api_auth_signup.ts',
   'e2e/features/api/automated/test_api_issues_search.ts',
+  'api/functional/feed/index.ts',
+  'e2e/features/api/automated/test_api_feed_getFeed.ts',
   'api/functional/me/index.ts',
   'api/functional/me/onboarding/index.ts',
   'api/functional/onboarding/index.ts',
@@ -115,11 +116,26 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
     assert.deepEqual(operation?.security, [{ bearerAuth: [] }], `${path} must require bearerAuth`);
   }
 
-  const feedCreate = document.paths?.['/feed-sessions']?.post;
-  assert.deepEqual(feedCreate?.security, [{ bearerAuth: [] }, {}]);
-
-  const feedBatch = document.paths?.['/feed-sessions/{sessionId}/batches']?.post;
-  assert.deepEqual(feedBatch?.security, [{ bearerAuth: [] }, { guestFeedCookie: [] }]);
+  const feed = document.paths?.['/feed']?.get;
+  assert.deepEqual(feed?.security, [{ bearerAuth: [] }, { guestFeedCookie: [] }, {}]);
+  assert.deepEqual(feed?.parameters, [
+    {
+      name: 'cursor',
+      in: 'query',
+      schema: { type: 'string' },
+      required: false,
+    },
+  ]);
+  assert.deepEqual(schemas?.FeedRequest?.properties?.cursor, {
+    type: 'string',
+    minLength: 1,
+    maxLength: 4096,
+  });
+  assert.deepEqual(Object.keys(schemas?.FeedResponse?.properties ?? {}).sort(), [
+    'continuation',
+    'items',
+    'nextCursor',
+  ]);
 
   const publicDetail = document.paths?.['/issues/{issueId}']?.get;
   assert.deepEqual(publicDetail?.security, [{ bearerAuth: [] }, {}]);

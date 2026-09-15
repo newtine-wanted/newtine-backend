@@ -1,35 +1,52 @@
-import { TypedBody, TypedException, TypedParam, TypedRoute } from '@nestia/core';
+import { TypedException, TypedQuery, TypedRoute } from '@nestia/core';
 import {
+  BadRequestException,
   Controller,
   HttpCode,
+  HttpException,
   HttpStatus,
   Inject,
+  NotFoundException,
   Req,
   Res,
+  ServiceUnavailableException,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import typia, { tags } from 'typia';
+import typia from 'typia';
 
-import { ApiException } from '@newtine/api/common/exception/api.exception.js';
 import { AuthPolicy, CurrentUser } from '@newtine/api/auth/auth.decorator.js';
-import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
-import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDetails.js';
-import type { AuthPrincipal } from '@newtine/core';
 import { AUTH_OPTIONS, type AuthOptions } from '@newtine/api/auth/auth.options.js';
-import { IssueFeedService } from './issueFeed.service.js';
+import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
+import { ApiException } from '@newtine/api/common/exception/api.exception.js';
+import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDetails.js';
+import {
+  DomainException,
+  IssueException,
+  IssueExceptionCode,
+  type AuthPrincipal,
+  type FeedOwner,
+} from '@newtine/core';
+import {
+  createFeedCursor,
+  feedCursorOwnerMatches,
+  FeedCursorError,
+  readFeedCursor,
+} from './feed-cursor.js';
 import {
   createGuestFeedToken,
+  feedGuestOwner,
   hashGuestFeedToken,
-  readGuestFeedToken,
+  readGuestFeedCredential,
   setGuestFeedCookie,
 } from './guest-feed-cookie.js';
-import { toFeedBatchResponse, toFeedSessionResponse } from './type/feed.mapper.js';
-import type { FeedBatchRequest, FeedSessionCreateRequest } from './type/feed.request.js';
-import type { FeedBatchResponse, FeedSessionResponse } from './type/feed.response.js';
+import { IssueFeedService } from './issueFeed.service.js';
+import { toFeedResponse } from './type/feed.mapper.js';
+import type { FeedRequest } from './type/feed.request.js';
+import type { FeedResponse } from './type/feed.response.js';
 
-@Controller('feed-sessions')
+@Controller('feed')
 export class FeedController {
   constructor(
     private readonly issueFeedService: IssueFeedService,
@@ -38,85 +55,115 @@ export class FeedController {
 
   /**
    * @security bearerAuth
-   * @security
-   */
-  @TypedException<ProblemDetails>(ApiException.InvalidArgument)
-  @TypedException<ProblemDetails>(ApiException.Unauthorized)
-  @TypedException<ProblemDetails>(ApiException.InternalError)
-  @AuthPolicy('optional')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  @TypedRoute.Post()
-  async create(
-    @TypedBody<FeedSessionCreateRequest>({
-      type: 'validate',
-      validate: (input) => typia.validateEquals<FeedSessionCreateRequest>(input),
-    })
-    _request: FeedSessionCreateRequest,
-    @Req() request: Request,
-    @Res({ passthrough: true }) response: Response,
-    @CurrentUser({ optional: true }) principal?: AuthPrincipal,
-  ): Promise<FeedSessionResponse> {
-    response.setHeader('Cache-Control', 'private, no-store');
-    const owner =
-      principal === undefined
-        ? this.resolveGuestOwnerForCreate(request, response)
-        : { kind: 'MEMBER' as const, userId: principal.userId };
-    return toFeedSessionResponse(await this.issueFeedService.createSession(owner));
-  }
-
-  /**
-   * @security bearerAuth
    * @security guestFeedCookie
+   * @security
    */
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
   @TypedException<ProblemDetails>(ApiException.NotFound)
   @TypedException<ProblemDetails>(ApiException.Gone)
   @TypedException<ProblemDetails>(ApiException.Conflict)
-  @TypedException<ProblemDetails>(ApiException.InternalError)
+  @TypedException<ProblemDetails>(ApiException.ServiceUnavailable)
   @AuthPolicy('optional')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  @TypedRoute.Post(':sessionId/batches')
-  async getBatch(
-    @TypedParam('sessionId', (value) => typia.assert<string & tags.Format<'uuid'>>(value))
-    sessionId: string & tags.Format<'uuid'>,
-    @TypedBody<FeedBatchRequest>({
+  @TypedRoute.Get()
+  async getFeed(
+    @TypedQuery<FeedRequest>({
       type: 'validate',
-      validate: (input) => typia.validateEquals<FeedBatchRequest>(input),
+      validate: (input) => typia.validateEquals<FeedRequest>(input),
     })
-    request: FeedBatchRequest,
+    request: FeedRequest,
     @Req() httpRequest: Request,
     @Res({ passthrough: true }) response: Response,
     @CurrentUser({ optional: true }) principal?: AuthPrincipal,
-  ): Promise<FeedBatchResponse> {
+  ): Promise<FeedResponse> {
     response.setHeader('Cache-Control', 'private, no-store');
-    const owner =
-      principal === undefined
-        ? this.resolveGuestOwnerForBatch(httpRequest)
-        : { kind: 'MEMBER' as const, userId: principal.userId };
-    return toFeedBatchResponse(
-      await this.issueFeedService.getBatch({
+    try {
+      const normalizedRequest = this.normalizeRequest(request, httpRequest);
+      const claims =
+        normalizedRequest.cursor === undefined
+          ? undefined
+          : this.readCursor(normalizedRequest.cursor);
+      const owner = this.resolveOwner(httpRequest, response, principal, claims !== undefined);
+      if (claims !== undefined && !feedCursorOwnerMatches(claims, owner)) {
+        throw new NotFoundException('탐색 커서를 찾을 수 없습니다.');
+      }
+      const page = await this.issueFeedService.getFeed(
         owner,
-        sessionId,
-        batchNo: request.batchNo,
-      }),
-    );
-  }
-
-  private resolveGuestOwnerForCreate(request: Request, response: Response) {
-    const existingToken = readGuestFeedToken(request, this.authOptions.jwtSecret);
-    const token = existingToken ?? createGuestFeedToken(this.authOptions.jwtSecret);
-    setGuestFeedCookie(response, token, this.authOptions.cookieSecure);
-    return { kind: 'GUEST' as const, guestTokenHash: hashGuestFeedToken(token) };
-  }
-
-  private resolveGuestOwnerForBatch(request: Request) {
-    const token = readGuestFeedToken(request, this.authOptions.jwtSecret);
-    if (token === undefined) {
-      throw new UnauthorizedException('비회원 feed session cookie가 필요합니다.');
+        claims === undefined
+          ? undefined
+          : { sessionId: claims.sessionId, batchNo: claims.nextBatchNo },
+      );
+      const nextCursor =
+        page.continuation === 'CONTINUE'
+          ? createFeedCursor(this.authOptions.jwtSecret, {
+              sessionId: page.sessionId,
+              nextBatchNo: page.nextBatchNo ?? page.batchNo + 1,
+              owner,
+              expiresAt: page.expiresAt,
+            })
+          : null;
+      return toFeedResponse(page, nextCursor);
+    } catch (error) {
+      if (error instanceof HttpException || error instanceof DomainException) throw error;
+      throw new ServiceUnavailableException(undefined, { cause: error });
     }
-    return { kind: 'GUEST' as const, guestTokenHash: hashGuestFeedToken(token) };
+  }
+
+  private normalizeRequest(request: FeedRequest, httpRequest: Request): FeedRequest {
+    const query = httpRequest.query as Record<string, unknown>;
+    if (Object.keys(query).some((key) => key !== 'cursor')) {
+      throw new BadRequestException('feed query가 올바르지 않습니다.');
+    }
+
+    const rawCursor = query.cursor;
+    if (rawCursor === undefined) return request;
+    if (typeof rawCursor !== 'string' || rawCursor.length < 1 || rawCursor.length > 4096) {
+      throw new BadRequestException('탐색 커서가 올바르지 않습니다.');
+    }
+    return { cursor: rawCursor };
+  }
+
+  private readCursor(token: string) {
+    try {
+      return readFeedCursor(token, this.authOptions.jwtSecret);
+    } catch (error) {
+      if (error instanceof FeedCursorError && error.kind === 'EXPIRED') {
+        throw new IssueException(
+          IssueExceptionCode.FeedSessionExpired,
+          '탐색 커서가 만료되었습니다.',
+        );
+      }
+      throw new BadRequestException('탐색 커서가 올바르지 않습니다.');
+    }
+  }
+
+  private resolveOwner(
+    request: Request,
+    response: Response,
+    principal: AuthPrincipal | undefined,
+    cursorRequest: boolean,
+  ): FeedOwner {
+    if (principal !== undefined) {
+      return { kind: 'MEMBER', userId: principal.userId.toLowerCase() };
+    }
+
+    const credential = readGuestFeedCredential(request, this.authOptions.jwtSecret);
+    if (credential !== undefined) {
+      if (!cursorRequest && credential.legacy) {
+        const token = createGuestFeedToken(this.authOptions.jwtSecret);
+        setGuestFeedCookie(response, token, this.authOptions.cookieSecure);
+        return feedGuestOwner(hashGuestFeedToken(token));
+      }
+      return feedGuestOwner(hashGuestFeedToken(credential.token));
+    }
+    if (cursorRequest) {
+      throw new UnauthorizedException('탐색 커서와 일치하는 guest feed cookie가 필요합니다.');
+    }
+
+    const token = createGuestFeedToken(this.authOptions.jwtSecret);
+    setGuestFeedCookie(response, token, this.authOptions.cookieSecure);
+    return feedGuestOwner(hashGuestFeedToken(token));
   }
 }

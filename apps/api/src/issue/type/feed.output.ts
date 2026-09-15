@@ -26,3 +26,7 @@ export interface FeedBatchResult {
   nextBatchNo: number | null;
   continuation: FeedContinuation;
 }
+
+export interface FeedPageResult extends FeedBatchResult {
+  expiresAt: Date;
+}

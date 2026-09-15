@@ -3,6 +3,7 @@ import {
   IssueException,
   IssueExceptionCode,
   type FeedBatchRecord,
+  type FeedAlgorithmSnapshot,
   type FeedOwner,
   type FeedSessionRecord,
   type IssueCandidateScope,
@@ -41,11 +42,17 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     this.relations = (seed.relations ?? []).map(cloneRelation);
   }
 
-  async createFeedSession(owner: FeedOwner, now: Date): Promise<FeedSessionRecord> {
+  async createFeedSession(
+    owner: FeedOwner,
+    now: Date,
+    algorithm: FeedAlgorithmSnapshot,
+  ): Promise<FeedSessionRecord> {
     const session: FeedSessionRecord = {
       id: generateUuidV7(),
       owner: { ...owner },
       algorithmVersion: 'issue-card-query-v1',
+      candidateBudget: algorithm.candidateBudget,
+      highScoreThreshold: algorithm.highScoreThreshold,
       nextBatchNo: 0,
       status: 'ACTIVE',
       createdAt: new Date(now),
@@ -159,7 +166,7 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     for (const issue of rows) {
       if (!unique.has(issue.id)) unique.set(issue.id, issue);
     }
-    return [...unique.values()].sort(compareIssue).slice(0, candidateLimit).map(cloneIssue);
+    return [...unique.values()].slice(0, candidateLimit).map(cloneIssue);
   }
 
   async findIssue(id: string): Promise<IssueRecord | null> {
@@ -350,9 +357,22 @@ function isPublicIssue(issue: IssueRecord): boolean {
   return (
     issue.publicationStatus === 'PUBLISHED' &&
     issue.integratedSummary !== null &&
-    Array.isArray(issue.summaryLines) &&
-    issue.summaryLines.length === 3
+    isValidSummaryLines(issue.summaryLines) &&
+    isValidScore(issue.freshnessScore) &&
+    isValidScore(issue.importanceScore)
   );
+}
+
+function isValidSummaryLines(value: unknown): value is [string, string, string] {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((line) => typeof line === 'string' && line.trim().length > 0)
+  );
+}
+
+function isValidScore(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
 function clamp01(value: number): number {

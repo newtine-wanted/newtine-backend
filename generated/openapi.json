@@ -28,440 +28,6 @@
       }
     },
     "schemas": {
-      "OnboardingAgeOption": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "oneOf": [
-              {
-                "const": "AGE_19_34"
-              },
-              {
-                "const": "AGE_35_49"
-              },
-              {
-                "const": "AGE_50_64"
-              },
-              {
-                "const": "AGE_65_PLUS"
-              }
-            ],
-            "readOnly": true
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "displayOrder": {
-            "readOnly": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "code",
-          "name",
-          "displayOrder"
-        ],
-        "type": "object"
-      },
-      "OnboardingOptions": {
-        "additionalProperties": false,
-        "properties": {
-          "topics": {
-            "items": {
-              "$ref": "#/components/schemas/OnboardingTopicOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          },
-          "ageGroups": {
-            "items": {
-              "$ref": "#/components/schemas/OnboardingAgeOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          },
-          "regions": {
-            "items": {
-              "$ref": "#/components/schemas/RegionOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          }
-        },
-        "required": [
-          "topics",
-          "ageGroups",
-          "regions"
-        ],
-        "type": "object"
-      },
-      "OnboardingTopicOption": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "oneOf": [
-              {
-                "const": "climate"
-              },
-              {
-                "const": "education"
-              },
-              {
-                "const": "finance"
-              },
-              {
-                "const": "health"
-              },
-              {
-                "const": "housing"
-              },
-              {
-                "const": "labor"
-              },
-              {
-                "const": "local"
-              },
-              {
-                "const": "politics"
-              },
-              {
-                "const": "security"
-              },
-              {
-                "const": "welfare"
-              }
-            ],
-            "readOnly": true
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "displayOrder": {
-            "readOnly": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "code",
-          "name",
-          "displayOrder"
-        ],
-        "type": "object"
-      },
-      "RegionOption": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "displayOrder": {
-            "readOnly": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "code",
-          "name",
-          "displayOrder"
-        ],
-        "type": "object"
-      },
-      "ProblemDetails": {
-        "additionalProperties": false,
-        "properties": {
-          "title": {
-            "type": "string"
-          },
-          "status": {
-            "type": "number"
-          },
-          "detail": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "status",
-          "detail",
-          "code"
-        ],
-        "type": "object"
-      },
-      "OnboardingEntityResult": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "type": {
-            "oneOf": [
-              {
-                "const": "INSTITUTION"
-              },
-              {
-                "const": "PARTY"
-              },
-              {
-                "const": "POLITICIAN"
-              }
-            ],
-            "readOnly": true
-          },
-          "subtitle": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "aliases": {
-            "items": {
-              "type": "string"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "type",
-          "aliases"
-        ],
-        "type": "object"
-      },
-      "OnboardingEntitySearchResult": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/OnboardingEntityResult"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          },
-          "total": {
-            "readOnly": true,
-            "type": "number"
-          },
-          "limit": {
-            "readOnly": true,
-            "type": "number"
-          },
-          "offset": {
-            "readOnly": true,
-            "type": "number"
-          }
-        },
-        "required": [
-          "items",
-          "total",
-          "limit",
-          "offset"
-        ],
-        "type": "object"
-      },
-      "OnboardingEntityQuery": {
-        "additionalProperties": false,
-        "properties": {
-          "q": {
-            "maxLength": 100,
-            "type": "string"
-          },
-          "type": {
-            "oneOf": [
-              {
-                "const": "INSTITUTION"
-              },
-              {
-                "const": "PARTY"
-              },
-              {
-                "const": "POLITICIAN"
-              }
-            ]
-          },
-          "limit": {
-            "maximum": 100,
-            "minimum": 1,
-            "type": "integer"
-          },
-          "offset": {
-            "maximum": 2147483647,
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "OnboardingStateResult": {
-        "additionalProperties": false,
-        "properties": {
-          "status": {
-            "oneOf": [
-              {
-                "const": "COMPLETED"
-              },
-              {
-                "const": "PENDING"
-              },
-              {
-                "const": "SKIPPED"
-              }
-            ],
-            "readOnly": true
-          },
-          "completedAt": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "readOnly": true
-          },
-          "ageGroup": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "const": "AGE_19_34"
-              },
-              {
-                "const": "AGE_35_49"
-              },
-              {
-                "const": "AGE_50_64"
-              },
-              {
-                "const": "AGE_65_PLUS"
-              }
-            ],
-            "readOnly": true
-          },
-          "regionCodes": {
-            "items": {
-              "type": "string"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          }
-        },
-        "required": [
-          "status",
-          "completedAt",
-          "ageGroup",
-          "regionCodes"
-        ],
-        "type": "object"
-      },
-      "CompleteOnboardingRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "topicCodes": {
-            "items": {
-              "oneOf": [
-                {
-                  "const": "climate"
-                },
-                {
-                  "const": "education"
-                },
-                {
-                  "const": "finance"
-                },
-                {
-                  "const": "health"
-                },
-                {
-                  "const": "housing"
-                },
-                {
-                  "const": "labor"
-                },
-                {
-                  "const": "local"
-                },
-                {
-                  "const": "politics"
-                },
-                {
-                  "const": "security"
-                },
-                {
-                  "const": "welfare"
-                }
-              ]
-            },
-            "maxItems": 10,
-            "minItems": 1,
-            "type": "array"
-          },
-          "entityIds": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "maxItems": 100,
-            "type": "array"
-          },
-          "ageGroup": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "const": "AGE_19_34"
-              },
-              {
-                "const": "AGE_35_49"
-              },
-              {
-                "const": "AGE_50_64"
-              },
-              {
-                "const": "AGE_65_PLUS"
-              }
-            ]
-          },
-          "regionCodes": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 17,
-            "type": "array"
-          }
-        },
-        "required": [
-          "topicCodes",
-          "entityIds",
-          "ageGroup",
-          "regionCodes"
-        ],
-        "type": "object"
-      },
       "PipelineRunAcceptedResponse": {
         "additionalProperties": false,
         "properties": {
@@ -509,6 +75,30 @@
         },
         "required": [
           "query"
+        ],
+        "type": "object"
+      },
+      "ProblemDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "status",
+          "detail",
+          "code"
         ],
         "type": "object"
       },
@@ -815,6 +405,416 @@
         "required": [
           "expectedAttempt",
           "executionId"
+        ],
+        "type": "object"
+      },
+      "OnboardingAgeOption": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ],
+            "readOnly": true
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "displayOrder": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "displayOrder"
+        ],
+        "type": "object"
+      },
+      "OnboardingOptions": {
+        "additionalProperties": false,
+        "properties": {
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingTopicOption"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          },
+          "ageGroups": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingAgeOption"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          },
+          "regions": {
+            "items": {
+              "$ref": "#/components/schemas/RegionOption"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          }
+        },
+        "required": [
+          "topics",
+          "ageGroups",
+          "regions"
+        ],
+        "type": "object"
+      },
+      "OnboardingTopicOption": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "const": "climate"
+              },
+              {
+                "const": "education"
+              },
+              {
+                "const": "finance"
+              },
+              {
+                "const": "health"
+              },
+              {
+                "const": "housing"
+              },
+              {
+                "const": "labor"
+              },
+              {
+                "const": "local"
+              },
+              {
+                "const": "politics"
+              },
+              {
+                "const": "security"
+              },
+              {
+                "const": "welfare"
+              }
+            ],
+            "readOnly": true
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "displayOrder": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "displayOrder"
+        ],
+        "type": "object"
+      },
+      "RegionOption": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "displayOrder": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "displayOrder"
+        ],
+        "type": "object"
+      },
+      "OnboardingEntityResult": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "type": {
+            "oneOf": [
+              {
+                "const": "INSTITUTION"
+              },
+              {
+                "const": "PARTY"
+              },
+              {
+                "const": "POLITICIAN"
+              }
+            ],
+            "readOnly": true
+          },
+          "subtitle": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "aliases"
+        ],
+        "type": "object"
+      },
+      "OnboardingEntitySearchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingEntityResult"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          },
+          "total": {
+            "readOnly": true,
+            "type": "number"
+          },
+          "limit": {
+            "readOnly": true,
+            "type": "number"
+          },
+          "offset": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "type": "object"
+      },
+      "OnboardingEntityQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "q": {
+            "maxLength": 100,
+            "type": "string"
+          },
+          "type": {
+            "oneOf": [
+              {
+                "const": "INSTITUTION"
+              },
+              {
+                "const": "PARTY"
+              },
+              {
+                "const": "POLITICIAN"
+              }
+            ]
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "OnboardingStateResult": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "oneOf": [
+              {
+                "const": "COMPLETED"
+              },
+              {
+                "const": "PENDING"
+              },
+              {
+                "const": "SKIPPED"
+              }
+            ],
+            "readOnly": true
+          },
+          "completedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "readOnly": true
+          },
+          "ageGroup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ],
+            "readOnly": true
+          },
+          "regionCodes": {
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          }
+        },
+        "required": [
+          "status",
+          "completedAt",
+          "ageGroup",
+          "regionCodes"
+        ],
+        "type": "object"
+      },
+      "CompleteOnboardingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "topicCodes": {
+            "items": {
+              "oneOf": [
+                {
+                  "const": "climate"
+                },
+                {
+                  "const": "education"
+                },
+                {
+                  "const": "finance"
+                },
+                {
+                  "const": "health"
+                },
+                {
+                  "const": "housing"
+                },
+                {
+                  "const": "labor"
+                },
+                {
+                  "const": "local"
+                },
+                {
+                  "const": "politics"
+                },
+                {
+                  "const": "security"
+                },
+                {
+                  "const": "welfare"
+                }
+              ]
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "type": "array"
+          },
+          "entityIds": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "ageGroup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ]
+          },
+          "regionCodes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 17,
+            "type": "array"
+          }
+        },
+        "required": [
+          "topicCodes",
+          "entityIds",
+          "ageGroup",
+          "regionCodes"
         ],
         "type": "object"
       },
@@ -1136,89 +1136,6 @@
         ],
         "type": "object"
       },
-      "FeedSessionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "nextBatchNo": {
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "sessionId",
-          "expiresAt",
-          "nextBatchNo"
-        ],
-        "type": "object"
-      },
-      "FeedSessionCreateRequest": {
-        "additionalProperties": false,
-        "properties": {},
-        "required": [],
-        "type": "object"
-      },
-      "FeedBatchResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "batchNo": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/FeedCardResponse"
-            },
-            "type": "array"
-          },
-          "nextBatchNo": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "minimum": 0,
-                "type": "integer"
-              }
-            ]
-          },
-          "continuation": {
-            "oneOf": [
-              {
-                "const": "CONSTRAINT_LIMITED"
-              },
-              {
-                "const": "CONTINUE"
-              },
-              {
-                "const": "EXHAUSTED"
-              },
-              {
-                "const": "SEARCH_LIMITED"
-              }
-            ]
-          }
-        },
-        "required": [
-          "sessionId",
-          "batchNo",
-          "items",
-          "nextBatchNo",
-          "continuation"
-        ],
-        "type": "object"
-      },
       "FeedCardResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1329,17 +1246,59 @@
         ],
         "type": "object"
       },
-      "FeedBatchRequest": {
+      "FeedResponse": {
         "additionalProperties": false,
         "properties": {
-          "batchNo": {
-            "minimum": 0,
-            "type": "integer"
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeedCardResponse"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "continuation": {
+            "oneOf": [
+              {
+                "const": "CONSTRAINT_LIMITED"
+              },
+              {
+                "const": "CONTINUE"
+              },
+              {
+                "const": "EXHAUSTED"
+              },
+              {
+                "const": "SEARCH_LIMITED"
+              }
+            ]
           }
         },
         "required": [
-          "batchNo"
+          "items",
+          "nextCursor",
+          "continuation"
         ],
+        "type": "object"
+      },
+      "FeedRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [],
         "type": "object"
       },
       "AuthSessionResponse": {
@@ -1415,294 +1374,6 @@
     }
   },
   "paths": {
-    "/onboarding/options": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingOptions"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "onboarding",
-          "options",
-          "getOptions"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/onboarding/entities": {
-      "get": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          },
-          {
-            "name": "type",
-            "in": "query",
-            "schema": {
-              "oneOf": [
-                {
-                  "const": "INSTITUTION"
-                },
-                {
-                  "const": "PARTY"
-                },
-                {
-                  "const": "POLITICIAN"
-                }
-              ]
-            },
-            "required": false
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "number"
-            },
-            "required": false
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "number"
-            },
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingEntitySearchResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "onboarding",
-          "entities",
-          "searchEntities"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/me/onboarding": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "onboarding",
-          "getMyOnboarding"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/me/onboarding/complete": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CompleteOnboardingRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "onboarding",
-          "complete"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/me/onboarding/skip": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "onboarding",
-          "skip"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
     "/pipeline/runs": {
       "post": {
         "tags": [],
@@ -2122,6 +1793,294 @@
         "x-samchon-controller": "PipelineController"
       }
     },
+    "/onboarding/options": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingOptions"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "onboarding",
+          "options",
+          "getOptions"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/onboarding/entities": {
+      "get": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "oneOf": [
+                {
+                  "const": "INSTITUTION"
+                },
+                {
+                  "const": "PARTY"
+                },
+                {
+                  "const": "POLITICIAN"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingEntitySearchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "onboarding",
+          "entities",
+          "searchEntities"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/me/onboarding": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "getMyOnboarding"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/me/onboarding/complete": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteOnboardingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "complete"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/me/onboarding/skip": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "skip"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
     "/issues/search": {
       "post": {
         "tags": [],
@@ -2240,8 +2199,8 @@
               }
             }
           },
-          "500": {
-            "description": "The server could not complete the request.",
+          "503": {
+            "description": "The service is temporarily unavailable.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2264,106 +2223,26 @@
         "x-samchon-controller": "IssueController"
       }
     },
-    "/feed-sessions": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FeedSessionCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeedSessionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {}
-        ],
-        "x-samchon-accessor": [
-          "feed_sessions",
-          "create"
-        ],
-        "x-samchon-controller": "FeedController"
-      }
-    },
-    "/feed-sessions/{sessionId}/batches": {
-      "post": {
+    "/feed": {
+      "get": {
         "tags": [],
         "parameters": [
           {
-            "name": "sessionId",
-            "in": "path",
+            "name": "cursor",
+            "in": "query",
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "type": "string"
             },
-            "required": true
+            "required": false
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FeedBatchRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FeedBatchResponse"
+                  "$ref": "#/components/schemas/FeedResponse"
                 }
               }
             }
@@ -2418,8 +2297,8 @@
               }
             }
           },
-          "500": {
-            "description": "The server could not complete the request.",
+          "503": {
+            "description": "The service is temporarily unavailable.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2435,12 +2314,12 @@
           },
           {
             "guestFeedCookie": []
-          }
+          },
+          {}
         ],
         "x-samchon-accessor": [
-          "feed_sessions",
-          "batches",
-          "getBatch"
+          "feed",
+          "getFeed"
         ],
         "x-samchon-controller": "FeedController"
       }
