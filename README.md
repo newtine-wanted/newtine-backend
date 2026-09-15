@@ -231,6 +231,25 @@ DB 기본값은 `NODE_ENV=development` 또는 `test`일 때만 적용됩니다. 
 참고하세요. `PIPELINE_AI_CONFIG_PATH`는 batch worker가 시작할 때 한 번 읽습니다. YAML을 변경하면
 worker를 재시작해야 다음 실행부터 적용되며, API 프로세스는 이 파일을 읽지 않습니다.
 
+### 뉴스 검색 자격증명
+
+`.env.example`을 참고해 로컬 `.env` 또는 배포 환경의 `NAVER_CLIENT_ID`와
+`NAVER_CLIENT_SECRET`에 **NAVER API HUB에서 발급한**
+Client ID와 Client Secret을 직접 입력하세요. 예제에는 실제 값을 넣지 않습니다.
+환경변수 이름은 유지하지만 구 네이버 개발자센터 키로의 자동 fallback은 제공하지 않습니다.
+
+검색은 [NAVER API HUB 뉴스 검색](https://api.ncloud-docs.com/docs/naver-api-hub-search-news)의
+`https://naverapihub.apigw.ntruss.com/search/v1/news`를 호출하며,
+`X-NCP-APIGW-API-KEY-ID` / `X-NCP-APIGW-API-KEY` 헤더로 인증합니다.
+검색어는 실행 요청의 `query`를 사용합니다. `display`는 1~100으로 제한하고
+`start=1`, `sort=date`, `format=json`으로 요청합니다.
+
+제목·description은 후보 발견용이며, 상세 요약은 기존처럼 별도로 수집한 기사 본문을 사용합니다.
+본문 확보·근거 검증·공개 기준은 유지됩니다. 키가 없거나 비어 있으면 외부 요청 전에 실패하며,
+401/403은 키와 서비스 설정을 확인해야 합니다. 429/5xx는 기존 재시도 정책을 따릅니다.
+설정을 수정한 뒤 기존 실행 조회·수동 재시도 절차를 이용하세요.
+모의 테스트는 실제 API HUB 인증 성공이나 운영 쿼터를 검증하지 않습니다.
+
 ## 개발 명령
 
 | 명령                                                           | 용도                                           |
