@@ -15,6 +15,8 @@ const EXPECTED_FAILURE_STATUSES = {
   '/onboarding/options': ['500'],
   '/onboarding/entities': ['400', '500'],
   '/me/onboarding': ['401', '500'],
+  '/me/interest-analysis': ['401', '500'],
+  '/me/liked-issues': ['400', '401', '500'],
   '/me/onboarding/complete': ['400', '401', '500'],
   '/me/onboarding/skip': ['401', '500'],
   '/pipeline/runs': ['400', '409', '500'],
@@ -39,6 +41,8 @@ const requiredFiles = [
   'e2e/features/api/automated/test_api_auth_signup.ts',
   'e2e/features/api/automated/test_api_issues_search.ts',
   'api/functional/me/index.ts',
+  'api/functional/me/interest_analysis/index.ts',
+  'api/functional/me/liked_issues/index.ts',
   'api/functional/me/onboarding/index.ts',
   'api/functional/onboarding/index.ts',
   'api/functional/onboarding/entities/index.ts',
@@ -46,6 +50,8 @@ const requiredFiles = [
   'e2e/features/api/automated/test_api_me_onboarding_complete.ts',
   'e2e/features/api/automated/test_api_me_onboarding_getMyOnboarding.ts',
   'e2e/features/api/automated/test_api_me_onboarding_skip.ts',
+  'e2e/features/api/automated/test_api_me_interest_analysis_getAnalysis.ts',
+  'e2e/features/api/automated/test_api_me_liked_issues_getLikedIssues.ts',
   'e2e/features/api/automated/test_api_onboarding_entities_searchEntities.ts',
   'e2e/features/api/automated/test_api_onboarding_options_getOptions.ts',
   'api/functional/pipeline/runs/index.ts',
@@ -93,7 +99,13 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   ]);
   assert.deepEqual([...problemDetails.required].sort(), ['code', 'detail', 'status', 'title']);
 
-  for (const path of ['/me/onboarding', '/me/onboarding/complete', '/me/onboarding/skip']) {
+  for (const path of [
+    '/me/onboarding',
+    '/me/onboarding/complete',
+    '/me/onboarding/skip',
+    '/me/interest-analysis',
+    '/me/liked-issues',
+  ]) {
     const operation = Object.values(document.paths[path] ?? {}).find(
       (value) => value && typeof value === 'object' && 'security' in value,
     );

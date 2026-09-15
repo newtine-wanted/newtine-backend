@@ -143,6 +143,20 @@ export {
 } from './onboarding/inMemoryOnboarding.repository.js';
 export { InMemoryOnboardingTransactionManager } from './onboarding/inMemoryOnboarding.transactionManager.js';
 export { PostgresOnboardingRepository } from './onboarding/postgresOnboarding.repository.js';
+export { INTEREST_REPOSITORY } from './interest/interest.model.js';
+export type {
+  InterestAnalysisPeriod,
+  InterestAnalysisResult,
+  InterestAnalysisSnapshot,
+  InterestCategoryCount,
+  InterestCursor,
+  InterestRepository,
+  LikedIssue,
+  LikedIssuesQuery,
+  LikedIssuesResult,
+} from './interest/interest.model.js';
+export { MikroOrmInterestRepository } from './interest/mikroOrmInterest.repository.js';
+export { Migration20260915000000InterestPersistence } from './interest/migrations/Migration20260915000000InterestPersistence.js';
 export {
   AuthRole,
   toAuthAccount,

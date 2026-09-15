@@ -7,15 +7,20 @@ import { AUTH_PERSISTENCE_ENTITIES } from '../../auth/persistence/auth.persisten
 import { Migration20260914000000Authentication } from '../../auth/migrations/Migration20260914000000Authentication.js';
 import { ONBOARDING_PERSISTENCE_ENTITIES } from '../../onboarding/persistence/onboarding.persistence.entity.js';
 import { USER_PERSISTENCE_ENTITIES } from '../../user/persistence/user.persistence.entity.js';
+import { ISSUE_PERSISTENCE_ENTITIES } from '../../issue/persistence/issue.persistence.entity.js';
 import { Migration20260913000000OnboardingPersistence } from '../../onboarding/migrations/Migration20260913000000OnboardingPersistence.js';
 import { Migration20260913000001CategoryCodePrimaryKey } from '../../pipeline/migrations/Migration20260913000001CategoryCodePrimaryKey.js';
 import { Migration202609130001Pipeline } from '../../pipeline/migrations/Migration202609130001Pipeline.js';
 import { Migration202609130002PipelineEmbeddingTasks } from '../../pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
+import { INTEREST_PERSISTENCE_ENTITIES } from '../../interest/persistence/interest.persistence.entity.js';
+import { Migration20260915000000InterestPersistence } from '../../interest/migrations/Migration20260915000000InterestPersistence.js';
 
 const PERSISTENCE_ENTITIES = [
   ...USER_PERSISTENCE_ENTITIES,
   ...ONBOARDING_PERSISTENCE_ENTITIES,
+  ...ISSUE_PERSISTENCE_ENTITIES,
   AiUsageRecordEntity,
+  ...INTEREST_PERSISTENCE_ENTITIES,
   ...AUTH_PERSISTENCE_ENTITIES,
 ] as const;
 
@@ -58,6 +63,7 @@ export function createDatabaseOptions(
         Migration202609130001Pipeline,
         Migration202609130002PipelineEmbeddingTasks,
         Migration20260914000000Authentication,
+        Migration20260915000000InterestPersistence,
       ],
       transactional: true,
       allOrNothing: true,
