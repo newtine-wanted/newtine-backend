@@ -100,6 +100,10 @@ export interface IssueCandidate {
   confirmedFacts: string[];
   sourceArticleIds: UuidV7[];
   categoryCode: PipelineCategoryCode;
+  /** Optional producer-owned classification used by the personalized feed. */
+  mainTopic?: string;
+  /** Optional producer-resolved entity from the canonical entities master. */
+  representativeEntityId?: UuidV7;
   searchQueries?: string[];
 }
 

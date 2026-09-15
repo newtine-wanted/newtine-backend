@@ -516,6 +516,23 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
           '이슈 제목은 비어 있지 않은 문자열이어야 합니다.',
         );
       }
+      const candidateMainTopic = input.candidate.candidate.mainTopic;
+      if (
+        candidateMainTopic !== undefined &&
+        (typeof candidateMainTopic !== 'string' || candidateMainTopic.trim().length === 0)
+      ) {
+        throw new PipelineException(
+          PipelineExceptionCode.InvalidInput,
+          '이슈 main topic은 비어 있지 않은 문자열이어야 합니다.',
+        );
+      }
+      const representativeEntityId = input.candidate.candidate.representativeEntityId;
+      if (representativeEntityId !== undefined && !isUuidV7(representativeEntityId)) {
+        throw new PipelineException(
+          PipelineExceptionCode.InvalidInput,
+          '이슈 대표 대상 ID가 올바르지 않습니다.',
+        );
+      }
       const normalizedTitle = normalizeTitle(candidateTitle);
       const duplicateRows = await executeInTransaction<Row[]>(
         em,
@@ -532,9 +549,16 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
       const jobId = generateUuidV7();
       await executeInTransaction<unknown>(
         em,
-        `insert into issues (id, category_code, title, publication_status, created_at, updated_at)
-         values ($1, $2, $3, 'UNPUBLISHED', now(), now())`,
-        [issueId, input.candidate.candidate.categoryCode, input.candidate.candidate.title],
+        `insert into issues
+          (id, category_code, title, main_topic, representative_entity_id, publication_status, created_at, updated_at)
+         values ($1, $2, $3, $4, $5, 'UNPUBLISHED', now(), now())`,
+        [
+          issueId,
+          input.candidate.candidate.categoryCode,
+          input.candidate.candidate.title,
+          candidateMainTopic?.trim() ?? null,
+          representativeEntityId ?? null,
+        ],
       );
       for (const article of input.seedArticles) {
         if (article.id === undefined) continue;

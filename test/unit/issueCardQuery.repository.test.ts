@@ -30,14 +30,24 @@ import {
   type IssueQueryPublisherPersistenceEntity,
   type IssueQueryRelationPersistenceEntity,
 } from '@newtine/core/issue/persistence/issueQuery.persistence.entity.js';
-import { IssueCategorySchema } from '@newtine/core/onboarding/persistence/onboarding.persistence.entity.js';
+import {
+  IssueCategorySchema,
+  UserCategoryPreferenceSchema,
+  UserEntityPreferenceSchema,
+  UserRegionPreferenceSchema,
+  UserSchema,
+} from '@newtine/core/onboarding/persistence/onboarding.persistence.entity.js';
 
 const SESSION_ID = '00000000-0000-7000-8000-000000000001';
 const ISSUE_ID = '00000000-0000-7000-8000-000000000020';
 const ARTICLE_ID = '00000000-0000-7000-8000-000000000021';
 
 test('issue card projection uses EntityManager metadata and available article policy', async () => {
-  const issueRow = issuePersistenceRow(ISSUE_ID);
+  const representativeEntityId = '00000000-0000-7000-8000-000000000025';
+  const issueRow = issuePersistenceRow(ISSUE_ID, {
+    mainTopic: 'housing',
+    representativeEntityId,
+  });
   const detail: IssueQueryDetailPersistenceEntity = {
     id: '00000000-0000-7000-8000-000000000022',
     issueId: ISSUE_ID,
@@ -100,6 +110,8 @@ test('issue card projection uses EntityManager metadata and available article po
   assert.equal(issue?.integratedSummary, '요약');
   assert.deepEqual(issue?.ageGroups, ['AGE_19_34']);
   assert.deepEqual(issue?.entityIds, [entityLink.entityId]);
+  assert.equal(issue?.mainTopic, 'housing');
+  assert.equal(issue?.representativeEntityId, representativeEntityId);
   assert.equal(issue?.articleCount, 1);
   assert.equal(issue?.articles[0]?.publisherName, '테스트 언론');
   assert.deepEqual(calls, [
@@ -112,6 +124,61 @@ test('issue card projection uses EntityManager metadata and available article po
     'find:IssueQueryArticle',
     'find:IssueQueryPublisher',
   ]);
+});
+
+test('user context reads only positive onboarding preferences through ORM metadata', async () => {
+  const userId = '00000000-0000-7000-8000-000000000001';
+  const whereByEntity = new Map<unknown, unknown>();
+  const { entityManager } = fakeEntityManager({
+    findOne: async (entity) =>
+      entity === UserSchema ? { id: userId, ageGroup: 'AGE_35_49' } : null,
+    find: async (entity, where) => {
+      whereByEntity.set(entity, where);
+      if (entity === UserCategoryPreferenceSchema) {
+        return [
+          { categoryCode: 'politics', weight: 0 },
+          { categoryCode: 'housing', weight: 2 },
+          { categoryCode: 'retired', weight: -1 },
+        ];
+      }
+      if (entity === UserEntityPreferenceSchema) {
+        return [
+          { entityId: '00000000-0000-7000-8000-000000000030', weight: 1 },
+          { entityId: '00000000-0000-7000-8000-000000000031', weight: 0 },
+        ];
+      }
+      if (entity === UserRegionPreferenceSchema) {
+        return [
+          { regionCode: 'SEOUL', weight: 1 },
+          { regionCode: 'BUSAN', weight: -1 },
+        ];
+      }
+      return [];
+    },
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const context = await repository.findUserContext(userId);
+
+  assert.deepEqual(context, {
+    userId,
+    selectedCategoryCodes: ['housing'],
+    selectedEntityIds: ['00000000-0000-7000-8000-000000000030'],
+    preferredRegionCodes: ['SEOUL'],
+    ageGroup: 'AGE_35_49',
+  });
+  assert.deepEqual(whereByEntity.get(UserCategoryPreferenceSchema), {
+    userId,
+    weight: { $gt: 0 },
+  });
+  assert.deepEqual(whereByEntity.get(UserEntityPreferenceSchema), {
+    userId,
+    weight: { $gt: 0 },
+  });
+  assert.deepEqual(whereByEntity.get(UserRegionPreferenceSchema), {
+    userId,
+    weight: { $gt: 0 },
+  });
 });
 
 test('scoped candidates use ORM projections, public filtering, exclusion, and bounded slices', async () => {
@@ -417,6 +484,10 @@ function entityName(entity: unknown): string {
   if (entity === FeedSessionEntity) return 'FeedSession';
   if (entity === IssueQueryInteractionEntity) return 'IssueQueryInteraction';
   if (entity === IssueQueryRelationEntity) return 'IssueQueryRelation';
+  if (entity === UserSchema) return 'User';
+  if (entity === UserCategoryPreferenceSchema) return 'UserCategoryPreference';
+  if (entity === UserEntityPreferenceSchema) return 'UserEntityPreference';
+  if (entity === UserRegionPreferenceSchema) return 'UserRegionPreference';
   return 'unknown';
 }
 
@@ -428,6 +499,8 @@ function issuePersistenceRow(
     id,
     categoryCode: 'housing',
     title: `이슈 ${id.slice(-4)}`,
+    mainTopic: null,
+    representativeEntityId: null,
     publicationStatus: 'PUBLISHED',
     publishedAt: new Date('2026-01-01T00:00:00.000Z'),
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

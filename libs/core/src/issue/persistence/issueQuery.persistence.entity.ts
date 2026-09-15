@@ -91,6 +91,8 @@ export interface IssueQueryIssuePersistenceEntity {
   id: string;
   categoryCode: string;
   title: string;
+  mainTopic: string | null;
+  representativeEntityId: string | null;
   publicationStatus: string;
   publishedAt: Date | null;
   createdAt: Date;
@@ -108,6 +110,13 @@ export const IssueQueryIssueEntity = new EntitySchema<IssueQueryIssuePersistence
     id: { type: String, columnType: 'uuid', primary: true },
     categoryCode: { type: String, fieldName: 'category_code' },
     title: { type: String },
+    mainTopic: { type: String, fieldName: 'main_topic', nullable: true },
+    representativeEntityId: {
+      type: String,
+      columnType: 'uuid',
+      fieldName: 'representative_entity_id',
+      nullable: true,
+    },
     publicationStatus: { type: String, fieldName: 'publication_status' },
     publishedAt: {
       type: Date,

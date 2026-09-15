@@ -45,6 +45,9 @@ import {
 } from '@newtine/core/issue/persistence/issueQuery.persistence.entity.js';
 import {
   IssueCategorySchema,
+  UserCategoryPreferenceSchema,
+  UserEntityPreferenceSchema,
+  UserRegionPreferenceSchema,
   UserSchema,
 } from '@newtine/core/onboarding/persistence/onboarding.persistence.entity.js';
 
@@ -277,13 +280,28 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     const manager = this.currentEntityManager();
     const user = await manager.findOne(UserSchema, { id: userId });
     if (user === null) return null;
+    const [categoryPreferences, entityPreferences, regionPreferences] = await Promise.all([
+      manager.find(
+        UserCategoryPreferenceSchema,
+        { userId, weight: { $gt: 0 } },
+        { orderBy: { categoryCode: 'ASC' } },
+      ),
+      manager.find(
+        UserEntityPreferenceSchema,
+        { userId, weight: { $gt: 0 } },
+        { orderBy: { entityId: 'ASC' } },
+      ),
+      manager.find(
+        UserRegionPreferenceSchema,
+        { userId, weight: { $gt: 0 } },
+        { orderBy: { regionCode: 'ASC' } },
+      ),
+    ]);
     return {
       userId: String(user.id),
-      // Preference rows do not identify their onboarding source. Do not infer a
-      // selected set from mutable weights until the onboarding contract supplies it.
-      selectedCategoryCodes: [],
-      selectedEntityIds: [],
-      preferredRegionCodes: [],
+      selectedCategoryCodes: activePreferenceValues(categoryPreferences, 'categoryCode'),
+      selectedEntityIds: activePreferenceValues(entityPreferences, 'entityId'),
+      preferredRegionCodes: activePreferenceValues(regionPreferences, 'regionCode'),
       ageGroup: ageGroupValue(user.ageGroup),
     };
   }
@@ -646,8 +664,8 @@ function toIssue(
     categoryCode: row.categoryCode,
     categoryName,
     subCategory: nullableString(row.subCategory),
-    mainTopic: null,
-    representativeEntityId: null,
+    mainTopic: nullableString(row.mainTopic),
+    representativeEntityId: nullableString(row.representativeEntityId),
     entityIds: uniqueStrings(entityLinks.map((link) => link.entityId)),
     regionCodes,
     ageGroups,
@@ -729,6 +747,15 @@ function groupBy<T>(rows: readonly T[], keyOf: (row: T) => string): Map<string, 
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value !== ''))];
+}
+
+function activePreferenceValues(rows: readonly unknown[], property: string): string[] {
+  return uniqueStrings(
+    rows
+      .filter(isRecord)
+      .filter((row) => numberValue(row.weight) > 0)
+      .map((row) => stringValue(row[property])),
+  ).sort((left, right) => left.localeCompare(right));
 }
 
 function normalizeLimit(value: number): number {

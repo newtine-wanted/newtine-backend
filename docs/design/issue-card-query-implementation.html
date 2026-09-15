@@ -82,7 +82,7 @@
   </head>
   <body>
     <header>
-      <p>구현 제어 · <span class="status">G28~G31·CQ-REV-011 보완 완료 / 운영 제어 보류</span></p>
+      <p>구현 제어 · <span class="status">G28~G31·CQ-REV-011·PERS 보완 완료 / 운영 제어 보류</span></p>
       <h1>이슈 상세·개인화 카드 조회</h1>
       <p>
         승인된 설계의 실제 변경과 검증 증거를 기록한다. 설계 기준은
@@ -128,8 +128,8 @@
             사용자는 통합 설계안과 후속 G24-A~G27-A 선택을 확인한 뒤 “승인 — 구현 시작”으로 직접
             승인했고, G28~G31 production wiring·ORM 경계 재설계도 2026-09-15 KST “개선 ㄱ”으로
             승인했다. 기존 설계 정책은 유지하고, 인증 principal·온보딩 사용자 context·member
-            <code>x-user-id</code>·공통 점수/대표 대상 producer 연결·행동 이벤트 쓰기·최초 생성 멱등
-            키는 이번 실행에서 제외한다.
+            <code>x-user-id</code>를 실제 경계에 연결한다. 공통 점수 산정·대표 대상 자동 해석·행동
+            이벤트 쓰기·최초 생성 멱등 키는 이번 실행에서 제외한다.
           </p>
           <table>
             <caption>
@@ -165,10 +165,10 @@
               <tr>
                 <td>후속 데이터 계약</td>
                 <td>G24 canonical ERD/migration/query 정합성, G25 AVAILABLE-only 공개 predicate,
-                  G26 producer metadata capability</td>
+                  G26 producer metadata capability, PERS-001~003 onboarding context wiring</td>
                 <td>migration이 보장하지 않는 컬럼을 조회하지 않음, articleCount/reference와 공개
-                  상태 집합 일치, 없는 metadata를 추정하지 않음</td>
-                <td>migration/query/entity 계약 검사, article 상태·NULL metadata 회귀</td>
+                  상태 집합 일치, 없는 metadata를 추정하지 않음, 양수 weight만 활성 선호로 사용</td>
+                <td>migration/query/entity 계약 검사, article 상태·NULL metadata·선호 weight 회귀</td>
               </tr>
               <tr>
                 <td>후속 동시성·adapter</td>
@@ -183,7 +183,8 @@
           <p>
             구현 계약의 허용 변경은 위 후속 행과 그에 필요한 회귀 테스트로 한정한다. G26의
             <code>mainTopic</code>·<code>representativeEntity</code>는 producer가 제공하기 전까지
-            NULL로 남기며, category나 첫 entity를 대체값으로 쓰지 않는다. 실제 PostgreSQL 업무
+            NULL로 남기며, category나 첫 entity를 대체값으로 쓰지 않는다. PERS-001의 세 onboarding
+            preference는 기존 ORM 테이블에서 양수 weight만 읽고 조회 중 쓰지 않는다. 실제 PostgreSQL 업무
             schema가 현재 migration과 다르면 우연히 동작하도록 숨기지 않고 migration·entity·query의
             계약을 함께 맞춘다.
           </p>
@@ -199,8 +200,9 @@
           <p>
             승인 기준선의 API·추천 규칙·상태 경계와 후속 리뷰 개선을 구현했다. PostgreSQL 계약
             정합성, 공개 기사 상태 predicate, transaction/만료 경계, 이전 batch bulk-load,
-            InMemory scope parity, production ORM provider 경계를 반영했다. 기존 검색 계약과
-            인증·사용자 정보 경계는 보존한다.
+            InMemory scope parity, production ORM provider 경계를 반영했다. 최신 사용자 context의
+            onboarding category/entity/region 선호와 producer-owned issue metadata pass-through도
+            연결했으며, 기존 검색 계약과 인증·사용자 정보 경계는 보존한다.
           </p>
           <ul>
             <li>
@@ -277,10 +279,11 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
         <section id="implementation-status">
           <h2>구현 상태</h2>
           <p>
-            기준선과 후속 리뷰 개선, G28~G31 및 CQ-REV-011의 기술 구현과 로컬 게이트는 완료했다. Compose
-            PostgreSQL에 검증용 최소 base schema를 준비한 뒤 6개 migration·ORM 왕복·API smoke도 통과했다.
-            실제 업무 schema lock 경쟁·EXPLAIN/p95·인증·온보딩·점수 생산 계약이 연결되지 않아 운영 제어는
-            계속 보류한다.
+            기준선과 후속 리뷰 개선, G28~G31·CQ-REV-011·PERS-001~003의 기술 구현과 로컬 게이트는 완료했다.
+            Compose PostgreSQL에 검증용 최소 base schema를 준비한 뒤 7개 migration·ORM 왕복·API smoke,
+            실제 onboarding preference 기록·schema 제약 확인도 통과했다. 기존 producer가 main topic·대표
+            대상을 공급하지 않는 점과 실제 업무 schema lock 경쟁·EXPLAIN/p95·운영 인증 격리는 release gate로
+            남긴다.
           </p>
           <table>
             <caption>
@@ -297,17 +300,17 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
               <tr>
                 <td>API·순수 추천</td>
                 <td>완료</td>
-                <td>unit 20 suites/114 tests, integration 2 suites/11 tests, typecheck/build 통과</td>
+                <td>unit 25 suites/143 tests, integration 2 suites/11 tests, typecheck/build 통과</td>
               </tr>
               <tr>
                 <td>ORM issue-card adapter</td>
                 <td>코드·EntitySchema 등록·Compose DB smoke 완료, 업무 성능 보류</td>
-                <td>EntityManager 기반 focused ORM boundary 테스트, 6개 migration, 실제 databaseCheck와 API smoke, 전체 unit/integration/build 통과. 업무 schema lock·EXPLAIN/p95는 별도 실행 필요</td>
+                <td>EntityManager 기반 focused ORM boundary 테스트, 7개 migration, 실제 databaseCheck·auth/onboarding API smoke·신규 schema 제약 확인, 전체 unit/integration/build 통과. 업무 schema lock·EXPLAIN/p95는 별도 실행 필요</td>
               </tr>
               <tr>
                 <td>인증·온보딩·이벤트</td>
-                <td>범위 밖</td>
-                <td>별도 분기 통합 전 개인화 입력은 테스트 fixture로만 제공</td>
+                <td>onboarding context 연결 완료, producer 데이터 보류</td>
+                <td>양수 weight의 category/entity/region 선호를 기존 ORM EntitySchema로 읽는다. producer metadata는 optional pipeline 입력에서만 pass-through하며, 현재 producer가 값을 주지 않으면 null·generic+age fallback을 유지한다.</td>
               </tr>
               <tr>
                 <td>외부 점수·대표 대상</td>
@@ -422,7 +425,7 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
         </section>
         <section id="verification-evidence">
           <h2>검증 증거</h2>
-          <p>2026-09-15 KST G28~G31 및 CQ-REV-011 bounded query 보완 후 로컬 검증을 실행했다.</p>
+          <p>2026-09-15 KST G28~G31·CQ-REV-011 bounded query 및 PERS-001~003 보완 후 로컬 검증을 실행했다.</p>
           <pre><code>npm run format:check
 npm run lint
 npm run typecheck
@@ -431,12 +434,12 @@ npm run build
 npm run contracts:check
 npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
           <p>
-            결과: format, lint, typecheck, build, contracts:check(contract 1 suite/4 tests 포함), unit 20
-            suites/114 tests, integration 2 suites/11 tests, ORM boundary focused tests가 통과했고
+            결과: format, lint, typecheck, build, contracts:check(contract 1 suite/4 tests 포함), unit 25
+            suites/143 tests, integration 2 suites/11 tests, ORM boundary·metadata migration focused tests가 통과했고
             <code>git diff --check</code>도 통과했다. Compose <code>db</code> health, 검증용 최소 base
-            schema 생성 후 6개 migration, 실제 batch <code>databaseCheck</code>(select 1), 호스트 API의
-            DB-backed <code>test:smoke</code>도 통과했다. Docker API image build는 ttsc native plugin
-            단계에서 메모리 부족으로 실패해 호스트 build 산출물로 API smoke를 실행했다.
+            schema 생성 후 7개 migration, 실제 batch <code>databaseCheck</code>, 호스트 API의
+            auth/onboarding/feed DB-backed smoke와 신규 issues 컬럼·CHECK/FK 확인도 통과했다. producer
+            실데이터와 업무 DB lock/EXPLAIN/p95는 별도 release gate다.
           </p>
         </section>
         <section id="review">
@@ -557,23 +560,19 @@ npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
                 </td>
               </tr>
               <tr>
-                <th scope="row">CQ-REV-003 · accepted(scope) · 운영 blocker</th>
+                <th scope="row">CQ-REV-003 · fixed(scope) · producer gate remains</th>
                 <td>
-                  PostgreSQL adapter의 <code>issueSelect</code>는 <code>main_topic</code>과
-                  <code>representative_entity_id</code>를 항상 NULL로 반환하고
-                  (producer capability가 연결되지 않았기 때문),
-                  <code>findUserContext</code>는 age_group 외 주제·대상·지역 선택을 빈 집합으로
-                  반환한다. 따라서 현재 실 schema로 운영하면 2장 연속
-                  제한과 대부분의 개인화 일치가 동작하지 않는다. 외부 producer·온보딩 계약이
-                  승인 범위 밖이라는 사실은 결함을 제거하지 않으며, 연결 전 운영 blocker로 남긴다.
-                  더불어 controller는 <code>x-user-id</code>를 UUID 형식만 검사해 owner/context로
-                  사용하므로(<code>feed.controller.ts:26,51</code>), 인증 guard가 없는 현재 상태에서
-                  임의 회원 UUID를 가장할 수 있다.
+                  기존 PostgreSQL adapter는 <code>main_topic</code>·<code>representative_entity_id</code>를
+                  항상 NULL로 만들고, <code>findUserContext</code>는 age_group 외 주제·대상·지역 선택을
+                  빈 집합으로 반환했다. 그 결과 2장 연속 제한과 대부분의 개인화 일치가 동작하지 않았다.
+                  더불어 controller는 <code>x-user-id</code>를 UUID 형식만 검사해 owner/context로 사용했다.
                 </td>
                 <td>
-                  인증 principal을 주입하고 외부 <code>x-user-id</code>를 신뢰하지 않도록 한 뒤,
-                  producer가 대표 대상/주제를 제공하고 온보딩 선택 집합을 조회 port로 연결한다.
-                  실제 PostgreSQL·권한 통합 테스트 전에는 운영 배포로 판정하지 않는다.
+                  인증 principal 연결은 AUTH 통합으로 해소했다. 현재는 세 onboarding preference를
+                  MikroORM으로 읽어 양수 weight만 활성 선택으로 반환하고, read-model migration·ORM
+                  projection·pipeline 등록 경로에 nullable producer metadata를 연결했다. 기존 producer가
+                  값을 주지 않는 경우 추정/backfill하지 않고 generic+age fallback을 유지한다. 실제
+                  producer 데이터·업무 PostgreSQL·권한 통합 검증 전에는 운영 배포로 판정하지 않는다.
                 </td>
               </tr>
               <tr>
@@ -630,7 +629,8 @@ npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
           </p>
           <aside>
             리뷰 판단: CQ-REV-001·002와 G24~G27, G28~G31은 승인 범위 내 수정·회귀 검증으로 해소됐다.
-            CQ-REV-003은 인증·외부 producer/온보딩 연결 전 운영 blocker로 남고, CQ-REV-004는
+            CQ-REV-003의 인증·온보딩 context·metadata adapter wiring은 해소됐지만, 실제 producer 데이터와
+            업무 PostgreSQL 연결 전 운영 gate로 남고, CQ-REV-004는
             AVAILABLE-only 정책으로 해소됐다. CQ-REV-005는 인증 principal과 함께 API 계약을 보완해야
             하는 P2다. CQ-REV-006·007·008은 수정·재검증으로, CQ-REV-009는 문서 갱신으로 닫혔다.
             CQ-REV-011 P1은 DB-side bounded ORM query와 최종 후보 bulk-load 보완으로 닫혔다. 다만
@@ -641,8 +641,9 @@ npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
           <h2>구현 이해·통제 점검</h2>
           <p>
             상태: 기술 구현·로컬 게이트 및 Compose DB smoke 완료, 운영 제어 보류. 후속 G24~G27·G28~G31 및
-            CQ-REV-011 보완은 승인된 범위로 반영했지만, 실제 업무 PostgreSQL lock/EXPLAIN/p95·인증 principal·온보딩 지역/나이대·점수/대표
-            대상 producer 계약에 대한 운영 이해 점검은 아직 실시하지 않았다. 운영 연결 전에 요청 소유권, 같은
+            CQ-REV-011 보완과 PERS-001~003 wiring은 승인된 범위로 반영했지만, 실제 업무 PostgreSQL
+            lock/EXPLAIN/p95·인증 principal·온보딩 선호·점수/대표 대상 producer 계약에 대한 운영 이해 점검은
+            아직 실시하지 않았다. 운영 연결 전에 요청 소유권, 같은
             묶음 재시도/동시성, 24시간 만료 race, 후보 탐색 상한과 빈 피드 구분, AVAILABLE 기사
             정책을 담당자가 설명하고 격리 환경 증거로 재검증해야 한다. 이 점검은 기술 완료나
             설계 승인과 별개다.

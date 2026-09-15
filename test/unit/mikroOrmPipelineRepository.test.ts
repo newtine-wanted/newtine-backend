@@ -62,6 +62,67 @@ test('MikroORM issue registration passes the transaction context to every raw qu
   assert.ok(calls.every((call) => call.context === transactionContext));
 });
 
+test('MikroORM issue registration persists producer personalization metadata', async () => {
+  const runId = generateUuidV7();
+  const articleId = generateUuidV7();
+  const representativeEntityId = generateUuidV7();
+  let issueInsert: { query: string; params: unknown[] } | undefined;
+  const connection = {
+    execute: async (query: string, params?: unknown[]) => {
+      if (query.startsWith('select id, status, attempt')) {
+        return [{ id: runId, status: 'QUEUED', attempt: 1 }];
+      }
+      if (query.includes('insert into issues')) {
+        issueInsert = { query, params: params ?? [] };
+      }
+      return [];
+    },
+  };
+  const transactionalEntityManager = {
+    getConnection: () => connection,
+    getTransactionContext: () => ({}),
+  };
+  const entityManager = {
+    transactional: async (callback: (em: typeof transactionalEntityManager) => Promise<unknown>) =>
+      callback(transactionalEntityManager),
+  };
+  const repository = new MikroOrmPipelineRepository(entityManager as never);
+
+  await repository.registerIssue({
+    runId,
+    attempt: 1,
+    candidate: {
+      disposition: 'NEW',
+      reason: 'new',
+      candidate: {
+        title: '메타데이터가 있는 이슈',
+        scope: '정책',
+        confirmedFacts: ['사실'],
+        sourceArticleIds: [articleId],
+        categoryCode: 'politics',
+        mainTopic: '주거 정책',
+        representativeEntityId,
+      },
+    },
+    seedArticles: [
+      {
+        id: articleId,
+        title: '기사',
+        description: '설명',
+        sourceUrl: 'https://example.com/article',
+        publisherName: 'publisher',
+      },
+    ],
+  });
+
+  assert.ok(issueInsert);
+  assert.match(issueInsert.query, /main_topic, representative_entity_id/);
+  assert.equal(issueInsert.params[1], 'politics');
+  assert.equal(issueInsert.params[2], '메타데이터가 있는 이슈');
+  assert.equal(issueInsert.params[3], '주거 정책');
+  assert.equal(issueInsert.params[4], representativeEntityId);
+});
+
 test('MikroORM retry rejects an explicitly empty failed job list', async () => {
   const runId = generateUuidV7();
   const calls: string[] = [];
