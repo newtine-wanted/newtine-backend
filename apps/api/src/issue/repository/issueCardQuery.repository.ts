@@ -1,4 +1,11 @@
-import { EntityManager, LockMode, raw, type FilterQuery, type Subquery } from '@mikro-orm/core';
+import {
+  EntityManager,
+  LockMode,
+  QueryOrder,
+  raw,
+  type FilterQuery,
+  type Subquery,
+} from '@mikro-orm/core';
 import type { EntityManager as PostgreSqlEntityManager } from '@mikro-orm/postgresql';
 import type { QBFilterQuery } from '@mikro-orm/sql';
 import { Injectable } from '@nestjs/common';
@@ -40,7 +47,6 @@ import {
   type IssueQueryArticlePersistenceEntity,
   type IssueQueryDetailPersistenceEntity,
   type IssueQueryEntityLinkPersistenceEntity,
-  type IssueQueryInteractionPersistenceEntity,
   type IssueQueryIssuePersistenceEntity,
   type IssueQueryImpactPersistenceEntity,
 } from '@newtine/core/issue/persistence/issueQuery.persistence.entity.js';
@@ -324,17 +330,14 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
   }
 
   async findLatestInteractions(userId: string): Promise<UserInteractionRecord[]> {
-    const manager = this.currentEntityManager();
-    const rows = await manager.find(
-      IssueQueryInteractionEntity,
-      { userId },
-      { orderBy: { issueId: 'ASC', createdAt: 'DESC', id: 'DESC' } },
-    );
-    const latestByIssue = new Map<string, IssueQueryInteractionPersistenceEntity>();
-    for (const row of rows) {
-      if (!latestByIssue.has(row.issueId)) latestByIssue.set(row.issueId, row);
-    }
-    return [...latestByIssue.values()].map((row) => ({
+    const rows = await this.currentSqlEntityManager()
+      .createQueryBuilder(IssueQueryInteractionEntity, 'event')
+      .select(['event.id', 'event.userId', 'event.issueId', 'event.eventType', 'event.createdAt'])
+      .where({ userId })
+      .distinctOn('event.issueId')
+      .orderBy({ issueId: QueryOrder.ASC, createdAt: QueryOrder.DESC, id: QueryOrder.DESC })
+      .getResultList();
+    return rows.map((row) => ({
       id: row.id,
       userId: row.userId,
       issueId: row.issueId,

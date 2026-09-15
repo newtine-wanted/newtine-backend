@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { EntityManager } from '@mikro-orm/core';
+import { EntityManager, QueryOrder } from '@mikro-orm/core';
 import { test } from '@jest/globals';
 
 import { IssueCardQueryRepository } from '@newtine/api/issue/repository/issueCardQuery.repository.js';
@@ -337,7 +337,7 @@ test('feed batches bulk-load items through the ORM adapter', async () => {
   );
 });
 
-test('latest interactions and verified follow-ups are read through EntityManager', async () => {
+test('latest interactions are selected by PostgreSQL query builder and follow-ups use EntityManager', async () => {
   const interactionRows: IssueQueryInteractionPersistenceEntity[] = [
     {
       id: '00000000-0000-7000-8000-000000000040',
@@ -362,21 +362,70 @@ test('latest interactions and verified follow-ups are read through EntityManager
     evidenceRefs: [],
     verifiedAt: new Date('2026-01-03T00:00:00.000Z'),
   };
-  const { entityManager } = fakeEntityManager({
-    find: async (entity) =>
-      entity === IssueQueryInteractionEntity
-        ? interactionRows
-        : entity === IssueQueryRelationEntity
-          ? [relation]
-          : [],
+  const queryCalls: {
+    select?: string | readonly string[];
+    where?: unknown;
+    distinctOn?: string;
+    orderBy?: unknown;
+  } = {};
+  const interactionQuery: FakeQueryBuilder = {
+    __subquery: true,
+    select: (fields) => {
+      queryCalls.select = fields;
+      return interactionQuery;
+    },
+    where: (where) => {
+      queryCalls.where = where;
+      return interactionQuery;
+    },
+    andWhere: () => interactionQuery,
+    distinctOn: (fields) => {
+      queryCalls.distinctOn = fields;
+      return interactionQuery;
+    },
+    orderBy: (orderBy) => {
+      queryCalls.orderBy = orderBy;
+      return interactionQuery;
+    },
+    getResultList: async () => [interactionRows[0]!],
+  };
+  const { entityManager, calls } = fakeEntityManager({
+    createQueryBuilder: (entity, alias) => {
+      assert.equal(entity, IssueQueryInteractionEntity);
+      assert.equal(alias, 'event');
+      return interactionQuery;
+    },
+    find: async (entity) => (entity === IssueQueryRelationEntity ? [relation] : []),
   });
   const repository = new IssueCardQueryRepository(entityManager);
 
   const interactions = await repository.findLatestInteractions(interactionRows[0]!.userId);
   const followUps = await repository.findFollowUps(new Set([ISSUE_ID]));
 
-  assert.equal(interactions.length, 1);
-  assert.equal(interactions[0]?.eventType, 'LIKE');
+  assert.deepEqual(interactions, [
+    {
+      id: interactionRows[0]!.id,
+      userId: interactionRows[0]!.userId,
+      issueId: interactionRows[0]!.issueId,
+      eventType: 'LIKE',
+      createdAt: interactionRows[0]!.createdAt,
+    },
+  ]);
+  assert.deepEqual(queryCalls.select, [
+    'event.id',
+    'event.userId',
+    'event.issueId',
+    'event.eventType',
+    'event.createdAt',
+  ]);
+  assert.deepEqual(queryCalls.where, { userId: interactionRows[0]!.userId });
+  assert.equal(queryCalls.distinctOn, 'event.issueId');
+  assert.deepEqual(queryCalls.orderBy, {
+    issueId: QueryOrder.ASC,
+    createdAt: QueryOrder.DESC,
+    id: QueryOrder.DESC,
+  });
+  assert.equal(calls.includes('find:IssueQueryInteraction'), false);
   assert.deepEqual(followUps, [
     {
       fromIssueId: relation.fromIssueId,
@@ -401,9 +450,12 @@ interface FakeEntityManager {
 
 interface FakeQueryBuilder {
   readonly __subquery: true;
-  select: (field: string) => FakeQueryBuilder;
+  select: (field: string | readonly string[]) => FakeQueryBuilder;
   where: (where: unknown) => FakeQueryBuilder;
   andWhere: (where: unknown) => FakeQueryBuilder;
+  distinctOn: (fields: string) => FakeQueryBuilder;
+  orderBy: (orderBy: unknown) => FakeQueryBuilder;
+  getResultList: () => Promise<unknown[]>;
 }
 
 interface FakeEntityManagerOptions {
@@ -433,6 +485,9 @@ function fakeEntityManager(options: FakeEntityManagerOptions = {}): {
           select: () => query,
           where: () => query,
           andWhere: () => query,
+          distinctOn: () => query,
+          orderBy: () => query,
+          getResultList: async () => [],
         };
         void entity;
         void alias;

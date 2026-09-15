@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { MikroORM } from '@mikro-orm/postgresql';
 
 import { createDatabaseOptions } from '../dist/libs/core/src/common/database/database.options.js';
+import { IssueCardQueryRepository } from '../dist/apps/api/src/issue/repository/issueCardQuery.repository.js';
 
 const baseUrl = new URL(process.env.API_BASE_URL ?? 'http://127.0.0.1:3000');
 const smokeEnvironment = 'issue-card-query-smoke';
@@ -14,6 +15,7 @@ const issueIds = [];
 const articleIds = [];
 const publisherIds = [];
 const guestTokenHashes = new Set();
+const expectedLatestInteractions = new Map();
 let orm;
 let userId;
 
@@ -128,7 +130,7 @@ async function seedIssueData() {
     ],
   );
 
-  for (let index = 0; index < 12; index += 1) {
+  for (let index = 0; index < 14; index += 1) {
     const issueId = randomUUID();
     issueIds.push(issueId);
     const categoryCode = index % 3 === 0 ? 'housing' : index % 3 === 1 ? 'labor' : 'finance';
@@ -173,6 +175,25 @@ async function seedIssueData() {
     }
   }
 
+  const [lowerInteractionId, higherInteractionId] = [randomUUID(), randomUUID()].sort();
+  const interactionTimestamp = '2026-01-15T00:00:00.000Z';
+  for (const [id, eventType] of [
+    [lowerInteractionId, 'LIKE'],
+    [higherInteractionId, 'SKIP'],
+  ]) {
+    await execute(
+      'INSERT INTO user_interaction_events (id, user_id, issue_id, session_id, event_type, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, userId, issueIds[0], randomUUID(), eventType, interactionTimestamp],
+    );
+  }
+  const secondInteractionId = randomUUID();
+  await execute(
+    'INSERT INTO user_interaction_events (id, user_id, issue_id, session_id, event_type, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [secondInteractionId, userId, issueIds[1], randomUUID(), 'LIKE', interactionTimestamp],
+  );
+  expectedLatestInteractions.set(issueIds[0], { id: higherInteractionId, eventType: 'SKIP' });
+  expectedLatestInteractions.set(issueIds[1], { id: secondInteractionId, eventType: 'LIKE' });
+
   const contractRows = await execute(
     'SELECT issue_card_summary_lines_valid(?::jsonb) AS valid, issue_card_summary_lines_valid(?::jsonb) AS invalid',
     [JSON.stringify(['a', 'b', 'c']), JSON.stringify(['a', 2, 'c'])],
@@ -180,6 +201,18 @@ async function seedIssueData() {
   );
   assert.equal(contractRows[0]?.valid, true);
   assert.equal(contractRows[0]?.invalid, false);
+}
+
+async function assertLatestInteractionQuery() {
+  const repository = new IssueCardQueryRepository(orm.em.fork());
+  const rows = await repository.findLatestInteractions(userId);
+  const expected = [...expectedLatestInteractions.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([issueId, interaction]) => ({ issueId, ...interaction }));
+  assert.deepEqual(
+    rows.map(({ issueId, id, eventType }) => ({ issueId, id, eventType })),
+    expected,
+  );
 }
 
 async function expireMemberSession() {
@@ -210,6 +243,7 @@ async function cleanup() {
     await execute(`DELETE FROM feed_sessions WHERE ${ownerClauses.join(' OR ')}`, ownerParams);
   }
   for (const issueId of issueIds) {
+    await execute('DELETE FROM user_interaction_events WHERE issue_id = ?', [issueId]);
     await execute('DELETE FROM issue_articles WHERE issue_id = ?', [issueId]);
     await execute('DELETE FROM issue_impacts WHERE issue_id = ?', [issueId]);
     await execute('DELETE FROM issue_entities WHERE issue_id = ?', [issueId]);
@@ -247,6 +281,7 @@ try {
   const authorization = { Authorization: `Bearer ${signupBody.accessToken}` };
 
   await seedIssueData();
+  await assertLatestInteractionQuery();
 
   const memberFirst = await request('/feed', { headers: authorization });
   const memberFirstBody = assertFeedPage(memberFirst);
@@ -288,11 +323,11 @@ try {
     headers: { Cookie: firstGuestCookie },
   });
   const guestSecondBody = assertFeedPage(guestSecond);
-  assert.equal(guestSecondBody.items.length, 2);
+  assert.equal(guestSecondBody.items.length, 4);
   assert.equal(guestSecondBody.nextCursor, null);
   assert.equal(
     new Set([...guestFirstBody.items, ...guestSecondBody.items].map((item) => item.issueId)).size,
-    12,
+    14,
   );
   const guestReplay = await request(`/feed?cursor=${encodeURIComponent(guestCursor)}`, {
     headers: { Cookie: firstGuestCookie },

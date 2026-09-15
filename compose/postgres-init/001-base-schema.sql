@@ -57,23 +57,8 @@ CREATE TABLE user_entity_preferences (
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
--- The issue query adapter reads this immutable event stream. The application
--- migration that creates issues runs after init, so the local fixture leaves
--- cross-table foreign keys to the production base-schema owner.
-CREATE TABLE user_interaction_events (
-  id uuid NOT NULL,
-  user_id uuid NOT NULL,
-  issue_id uuid NOT NULL,
-  session_id uuid NOT NULL,
-  event_type text NOT NULL CHECK (event_type IN ('LIKE', 'SKIP', 'PASS')),
-  dwell_time integer,
-  previous_action text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT user_interaction_events_pkey PRIMARY KEY (id)
-);
-
-CREATE INDEX user_interaction_events_user_issue_created_idx
-  ON user_interaction_events (user_id, issue_id, created_at DESC, id DESC);
+-- user_interaction_events is application-owned. The interest migration creates
+-- it after the issue tables exist; the migration smoke must exercise that path.
 
 -- Guard for scripts that mutate only the disposable acceptance database.
 CREATE TABLE smoke_environment_marker (

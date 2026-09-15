@@ -309,7 +309,8 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
           <h2>구현 상태</h2>
           <p>
             기준선과 후속 리뷰 개선, G28~G31·CQ-REV-011·PERS-001~003·GUEST-001~004의 기술 구현과
-            로컬 게이트는 완료했다. Compose PostgreSQL에 검증용 최소 base schema를 준비한 뒤 12개
+            로컬 게이트는 완료했다. 2026-09-16 승인된 G34-A·G36-A remediation은 구현·검증을 완료했고,
+            G35 guest session admission·retention은 release gate로 보류한다. Compose PostgreSQL에 검증용 최소 base schema를 준비한 뒤 13개
             migration·ORM 왕복·회원/비회원 cursor API smoke, 실제 onboarding preference 기록·schema 제약 확인도
             통과했다. 기존 producer가 main topic·대표 대상을 공급하지 않는 점과 실제 업무 schema lock
             경쟁·EXPLAIN/p95·운영 rate-limit/session-cap·인증 격리는 release gate로 남긴다.
@@ -329,12 +330,12 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
               <tr>
                 <td>API·순수 추천</td>
                 <td>완료</td>
-                <td>unit 30 suites/157 tests, integration 2 suites/11 tests, typecheck/build 통과</td>
+                <td>unit 35 suites/169 tests, integration 2 suites/11 tests, typecheck/build 통과</td>
               </tr>
               <tr>
                 <td>ORM issue-card adapter</td>
                 <td>코드·EntitySchema 등록·Compose DB smoke 완료, 업무 성능 보류</td>
-                <td>EntityManager 기반 focused ORM boundary 테스트, 12개 migration, 실제 databaseCheck·auth/onboarding·member/guest cursor API smoke·신규 schema 제약 확인, 전체 unit/integration/build 통과. 업무 schema lock·EXPLAIN/p95는 별도 실행 필요</td>
+                <td>EntityManager 기반 focused ORM boundary 테스트, 13개 migration, 실제 databaseCheck·auth/onboarding·member/guest cursor API smoke·신규 schema 제약 확인, 전체 unit/integration/build 통과. 업무 schema lock·EXPLAIN/p95는 별도 실행 필요</td>
               </tr>
               <tr>
                 <td>인증·온보딩·이벤트</td>
@@ -447,7 +448,7 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
                 <td>G28~G31 · 해결됨 / 운영 검증 보류</td>
                 <td>production module이 환경값에 따라 InMemory fake를 선택하고, EntityManager 주입 후에도 raw SQL로 runtime persistence를 수행하던 구현 오류.</td>
                 <td><code>IssueModule</code>을 ORM adapter의 <code>useExisting</code> 단일 provider로 고정하고 CoreModule의 transaction manager를 사용한다. fake와 passthrough transaction manager는 <code>test/fixtures</code>로 이동했다. issue-card EntitySchema를 database options에 등록하고 adapter의 SQL connection 실행·projection helper를 제거했다.</td>
-                <td>ORM boundary unit 포함 전체 unit 30 suites/157 tests, integration 2 suites/11 tests, format/lint/typecheck/build 통과. Compose <code>db</code> health·12개 migration·batch <code>databaseCheck</code>·호스트 API DB-backed cursor data smoke도 통과했다.</td>
+                <td>ORM boundary unit 포함 전체 unit 35 suites/169 tests, integration 2 suites/11 tests, format/lint/typecheck/build 통과. Compose <code>db</code> health·13개 migration·batch <code>databaseCheck</code>·호스트 API DB-backed cursor data smoke도 통과했다.</td>
               </tr>
               <tr>
                 <td>GUEST-001~004 · 해결됨 / 운영 제어 보류</td>
@@ -464,9 +465,82 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
             </tbody>
           </table>
         </section>
+        <section id="remediation-20260916">
+          <h2>2026-09-16 재리뷰 remediation 구현 통제</h2>
+          <p>
+            기준선은 <a href="issue-card-query-design.html#review-remediation-20260916">G34-A·G36-A Execution Contract</a>다.
+            사용자의 <code>그래 그렇게 해</code> 승인으로 G34-A·G36-A만 구현하고, G35 guest session
+            재사용·상한·cleanup·rate limit은 별도 PR과 배포 gate로 남긴다. 이 범위는 기존
+            <code>GET /feed</code>·owner·cursor·repository interface와 interaction write contract를 바꾸지 않는다.
+          </p>
+          <table>
+            <caption>이번 구현 범위·불변식·검증</caption>
+            <thead>
+              <tr>
+                <th>이슈</th>
+                <th>변경 대상</th>
+                <th>불변식</th>
+                <th>집중 검증</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>REM-20260916-G34 · 구현·검증 완료</td>
+                <td><code>scripts/migrate.mjs</code>, <code>compose/postgres-init/001-base-schema.sql</code>, migration README 설명</td>
+                <td>외부 base table만 preflight한다. <code>user_interaction_events</code>는 interest migration이 생성하고 migration 후 PostgreSQL catalog의 column/type/nullability·PK/FK/CHECK/index 계약을 정확히 검증한다. CHECK 리터럴 대소문자와 허용 제약 집합도 보존·검사하며, migration과 검증은 같은 transaction에 묶는다. 불일치 schema는 자동 보정·삭제·backfill하지 않는다.</td>
+                <td>interaction table 없는 fresh PostgreSQL에서 base preflight → app migration → post-migration schema check를 실행하고, 이전 불완전 fixture가 fail-closed하는지 확인한다.</td>
+              </tr>
+              <tr>
+                <td>REM-20260916-G36 · 구현·검증 완료</td>
+                <td><code>IssueCardQueryRepository.findLatestInteractions</code>, <code>test/unit/issueCardQuery.repository.test.ts</code>, <code>scripts/compose-issue-data-smoke.mjs</code></td>
+                <td>PostgreSQL ORM QueryBuilder가 issue별 최신 한 건을 <code>created_at DESC, id DESC</code>로 선택한다. 반환 interface·정렬·public API는 유지한다.</td>
+                <td><code>DISTINCT ON</code>·projection·tie-breaker 호출과 중복 interaction 결과 parity를 focused test로 확인한다.</td>
+              </tr>
+              <tr>
+                <td>G35 · 보류 release gate</td>
+                <td>이번 구현에서 변경하지 않음</td>
+                <td>guest session 누적을 임의 in-memory limiter로 숨기지 않는다.</td>
+                <td>별도 PR에서 cookie 재사용·상한·cleanup·rate limit을 결정한 뒤 배포 승인한다.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            정확한 집중 명령: <code>npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code>,
+            <code>npm run typecheck</code>, <code>npm run format:check</code>, <code>npm run lint</code>,
+            <code>npm test</code>, <code>npm run build</code>, <code>npm run contracts:check</code>,
+            그리고 interaction table을 제거한 fresh Compose PostgreSQL의 <code>npm run db:migrate</code>와
+            API data smoke다. 2026-09-16 결과는 위 focused·전체 게이트와 함께 fresh migration 13개,
+            post-migration interaction schema contract, 잘못된 FK·소문자/확장된 CHECK·추가 제약·불완전 legacy fixture fail-closed와
+            migration rollback, 동일 시각·서로 다른 ID를 포함한 실제 member/guest cursor API data smoke 통과다.
+          </p>
+        </section>
+        <section id="critical-review-20260916">
+          <h2>독립 no-write critical review — 2026-09-16 KST</h2>
+          <p>
+            1차 독립 검토는 application-owned interaction schema 검증이 column/index에만 한정되어
+            legacy partial table을 통과시킬 수 있다는 P1과, QueryBuilder focused test가 이미 dedupe된
+            fake 결과만 반환해 tie-breaker를 입증하지 못한다는 P2를 지적했다. 두 finding 모두
+            implementation-control 범위 안에서 보완했다.
+          </p>
+          <p>
+            현재 검증은 PostgreSQL catalog의 column key·referenced table/column·ON DELETE·canonical CHECK
+            definition(문자열 리터럴 대소문자 포함)·nullable/type·두 lookup index를 post-migration에서 확인하고,
+            legacy PK/index-only fixture·잘못된 FK·소문자/허용 목록을 확장한 CHECK·추가 CHECK/FK를 기대한 오류로
+            거절한다. migration과 검증은 하나의
+            transaction에 묶어 실패 시 migration ledger와 새 DDL을 rollback한다. data smoke는 여러 issue,
+            동일 <code>created_at</code>, 서로 다른 interaction ID를 실제 PostgreSQL에 넣고 adapter가
+            issue별 최신 행을 반환하는지 확인한다. reviewer는 G35·public API·cursor 변경이 없음을
+            확인했으며, residual risk는 G35 운영 enforcement와 업무 데이터 EXPLAIN/p95다.
+          </p>
+          <p>
+            후속 independent no-write review는 수정 후 actionable finding이 없다고 확인했다. SQL literal case,
+            wrong FK·lowercase/expanded CHECK·unexpected required column·extra CHECK/FK fail-closed와
+            transaction rollback, <code>DISTINCT ON</code> tie-breaker를 재검토했으며 G35와 public API diff도 없었다.
+          </p>
+        </section>
         <section id="verification-evidence">
           <h2>검증 증거</h2>
-          <p>2026-09-15 KST G28~G31·CQ-REV-011·014~021 bounded query/public contract hardening·PERS-001~003·GUEST-001~004 보완 후 로컬 검증을 실행했다.</p>
+          <p>2026-09-15 KST G28~G31·CQ-REV-011·014~021 bounded query/public contract hardening·PERS-001~003·GUEST-001~004 보완 후 로컬 검증을 실행했다. 2026-09-16 KST G34-A·G36-A 보완도 같은 게이트와 fresh PostgreSQL에서 재검증했다.</p>
           <pre><code>npm run format:check
 npm run lint
 npm run typecheck
@@ -480,11 +554,13 @@ SMOKE_DB_HOST=127.0.0.1 SMOKE_DB_PORT=55432 \\
 SMOKE_DB_NAME=newtine SMOKE_DB_USER=postgres SMOKE_DB_PASSWORD=postgres \\
 npm run test:smoke:compose:data</code></pre>
           <p>
-            결과: format, lint, typecheck, build, contracts:check, unit 30 suites/157 tests, integration 2
+            결과: format, lint, typecheck, build, contracts:check, unit 35 suites/169 tests, integration 2
             suites/11 tests, ORM boundary·metadata migration focused tests와 <code>git diff --check</code>가
-            통과했다. Compose <code>db</code> health와 검증용 최소 base schema에서 12개 migration, 실제 batch
-            <code>databaseCheck</code>, 호스트 API의 auth/onboarding/member+guest cursor data smoke와 신규
-            issues/feed owner CHECK/FK를 확인했다. producer 실데이터와 업무 DB lock/EXPLAIN/p95·운영
+            통과했다. Compose <code>db</code> health와 interaction table 없는 검증용 최소 base schema에서
+            13개 migration 및 post-migration column/type/nullability·PK/FK/CHECK/index contract를 확인했고,
+            이전 interaction fixture(PK/index만 존재), 잘못된 FK, 소문자/확장된 CHECK, 추가 CHECK/FK는 기대한 application schema
+            verification 오류로 fail-closed했으며 migration ledger/신규 DDL rollback도 확인했다. 호스트 API의 auth/onboarding/member+guest cursor data smoke는 동일 시각·서로
+            다른 ID의 중복 interaction을 포함해 통과했다. producer 실데이터와 업무 DB lock/EXPLAIN/p95·운영
             rate-limit/session-cap은 별도 release gate다.
           </p>
         </section>
@@ -655,7 +731,7 @@ npm run test:smoke:compose:data</code></pre>
               <tr>
                 <th scope="row">CQ-REV-009 · fixed · Non-blocking</th>
                 <td>설계·구현 문서의 개선 상태와 테스트 수치가 구현 완료 후에도 이전 값으로 남아 있었다.</td>
-                <td>두 문서의 cursor feed 구현 완료·운영 검증 보류 상태와 unit 30 suites/157 tests, integration 2 suites/11 tests 증거를 갱신했다.</td>
+                <td>두 문서의 cursor feed 구현 완료·운영 검증 보류 상태와 unit 35 suites/169 tests, integration 2 suites/11 tests 증거를 갱신했다.</td>
               </tr>
               <tr>
                 <th scope="row">CQ-REV-010 · accepted verification gap · Non-blocking</th>
@@ -743,10 +819,11 @@ npm run test:smoke:compose:data</code></pre>
         <section id="implementation-control-state">
           <h2>구현 이해·통제 점검</h2>
           <p>
-            상태: 기술 구현·로컬 게이트 및 Compose DB smoke 완료, 운영 제어 보류. 후속 G24~G27·G28~G31,
+            상태: G34-A·G36-A 구현·검증 완료, 기존 기술 구현·로컬 게이트 및 Compose DB smoke 완료, 운영 제어 보류. 후속 G24~G27·G28~G31,
             CQ-REV-011·PERS-001~003·GUEST-001~004 보완은 승인된 범위로 반영했지만, 실제 업무 PostgreSQL
             lock/EXPLAIN/p95·점수/대표 대상 producer 계약·rate-limit/session-cap enforcement에 대한 운영
-            이해 점검은 아직 실시하지 않았다. 운영 연결 전에 JWT member와 cookie guest의 요청 소유권, 같은
+            이해 점검은 아직 실시하지 않았다. G34-A는 interaction table 없는 fresh DB migration과 post-migration
+            contract를 통과했고, G36-A는 QueryBuilder focused 회귀와 실제 API smoke를 통과했다. 운영 연결 전에 JWT member와 cookie guest의 요청 소유권, 같은
             묶음 재시도/동시성, 24시간 만료 race, 후보 탐색 상한과 빈 피드 구분, AVAILABLE 기사
             정책을 담당자가 설명하고 격리 환경 증거로 재검증해야 한다. 이 점검은 기술 완료나
             설계 승인과 별개다.
