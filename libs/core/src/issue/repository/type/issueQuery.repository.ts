@@ -100,9 +100,17 @@ export interface IssueCandidateScope {
   connectedIssueIds: string[];
 }
 
-export interface FeedOwner {
+export interface MemberFeedOwner {
+  kind: 'MEMBER';
   userId: string;
 }
+
+export interface GuestFeedOwner {
+  kind: 'GUEST';
+  guestTokenHash: string;
+}
+
+export type FeedOwner = MemberFeedOwner | GuestFeedOwner;
 
 export interface FeedSessionRecord {
   id: string;

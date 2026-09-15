@@ -20,6 +20,11 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "guestFeedCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "newtine_feed_guest"
       }
     },
     "schemas": {
@@ -2318,7 +2323,8 @@
         "security": [
           {
             "bearerAuth": []
-          }
+          },
+          {}
         ],
         "x-samchon-accessor": [
           "feed_sessions",
@@ -2426,6 +2432,9 @@
         "security": [
           {
             "bearerAuth": []
+          },
+          {
+            "guestFeedCookie": []
           }
         ],
         "x-samchon-accessor": [

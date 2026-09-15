@@ -104,8 +104,6 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   }
 
   for (const path of [
-    '/feed-sessions',
-    '/feed-sessions/{sessionId}/batches',
     '/pipeline/runs',
     '/pipeline/runs/{runId}',
     '/pipeline/runs/{runId}/retry',
@@ -116,6 +114,12 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
     );
     assert.deepEqual(operation?.security, [{ bearerAuth: [] }], `${path} must require bearerAuth`);
   }
+
+  const feedCreate = document.paths?.['/feed-sessions']?.post;
+  assert.deepEqual(feedCreate?.security, [{ bearerAuth: [] }, {}]);
+
+  const feedBatch = document.paths?.['/feed-sessions/{sessionId}/batches']?.post;
+  assert.deepEqual(feedBatch?.security, [{ bearerAuth: [] }, { guestFeedCookie: [] }]);
 
   const publicDetail = document.paths?.['/issues/{issueId}']?.get;
   assert.deepEqual(publicDetail?.security, [{ bearerAuth: [] }, {}]);

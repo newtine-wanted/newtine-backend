@@ -13,6 +13,7 @@ import type { FeedBatchResponse } from "../../../../../apps/api/src/issue/type/f
 
 /**
  * @security bearerAuth
+ * @security guestFeedCookie
  * @throws 400 The request is invalid.
  * @throws 401 Authentication is required.
  * @throws 404 The requested resource was not found.

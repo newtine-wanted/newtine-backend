@@ -221,7 +221,14 @@ function batchKey(sessionId: string, batchNo: number): string {
 }
 
 function sameOwner(left: FeedOwner, right: FeedOwner): boolean {
-  return left.userId === right.userId;
+  if (left.kind !== right.kind) return false;
+  if (left.kind === 'MEMBER' && right.kind === 'MEMBER') {
+    return left.userId === right.userId;
+  }
+  if (left.kind === 'GUEST' && right.kind === 'GUEST') {
+    return left.guestTokenHash === right.guestTokenHash;
+  }
+  return false;
 }
 
 function compareInteraction(left: UserInteractionRecord, right: UserInteractionRecord): number {

@@ -530,6 +530,7 @@ function feedSessionPersistenceRow(
   return {
     id: SESSION_ID,
     userId: '00000000-0000-0000-0000-000000000001',
+    guestTokenHash: null,
     algorithmVersion: 'issue-card-query-v1',
     nextBatchNo: 0,
     status: 'ACTIVE',
@@ -546,7 +547,7 @@ function feedSessionPersistenceRow(
 function session(): FeedSessionRecord {
   return {
     id: SESSION_ID,
-    owner: { userId: '00000000-0000-0000-0000-000000000001' },
+    owner: { kind: 'MEMBER', userId: '00000000-0000-0000-0000-000000000001' },
     algorithmVersion: 'issue-card-query-v1',
     nextBatchNo: 1,
     status: 'ACTIVE',

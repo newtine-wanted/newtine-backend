@@ -1,11 +1,15 @@
 /* global URL, console, fetch, process */
 
 import assert from 'node:assert/strict';
+import { MikroORM } from '@mikro-orm/postgresql';
+
+import { createDatabaseOptions } from '../dist/libs/core/src/common/database/database.options.js';
 
 const baseUrl = new URL(process.env.API_BASE_URL ?? 'http://127.0.0.1:3000');
 const origin = baseUrl.origin;
 const email = `compose-auth-${Date.now()}@example.com`;
 const password = 'correct-horse-battery-staple';
+const SMOKE_DB_ENVIRONMENT = 'issue-card-query-smoke';
 
 async function request(path, init = {}) {
   const response = await fetch(new URL(path, baseUrl), init);
@@ -37,6 +41,22 @@ function cookieHeader(token) {
   return `newtine_refresh=${token}`;
 }
 
+function feedGuestCookie(result) {
+  const setCookies =
+    typeof result.response.headers.getSetCookie === 'function'
+      ? result.response.headers.getSetCookie()
+      : [result.response.headers.get('set-cookie') ?? ''];
+  const value = setCookies.find((cookie) => cookie.startsWith('newtine_feed_guest='));
+  assert.ok(value, `guest feed cookie missing for ${result.response.url}`);
+  assert.match(value, /Path=\/feed-sessions/);
+  assert.match(value, /HttpOnly/);
+  assert.match(value, /SameSite=Lax/);
+  assert.match(value, /Secure/);
+  const token = value.slice('newtine_feed_guest='.length).split(';', 1)[0];
+  assert.match(token, /^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  return `newtine_feed_guest=${token}`;
+}
+
 async function refresh(token) {
   return request('/auth/refresh', {
     method: 'POST',
@@ -45,6 +65,53 @@ async function refresh(token) {
       Cookie: cookieHeader(token),
     },
   });
+}
+
+function disposableSmokeDatabaseEnv() {
+  const databaseEnv = {
+    NODE_ENV: 'test',
+    DB_HOST: process.env.SMOKE_DB_HOST,
+    DB_PORT: process.env.SMOKE_DB_PORT,
+    DB_NAME: process.env.SMOKE_DB_NAME,
+    DB_USER: process.env.SMOKE_DB_USER,
+    DB_PASSWORD: process.env.SMOKE_DB_PASSWORD,
+  };
+  for (const [key, value] of Object.entries(databaseEnv)) {
+    if (value === undefined || value.trim() === '') {
+      throw new Error(`SMOKE_DB_${key === 'NODE_ENV' ? 'NODE_ENV' : key.slice(3)} is required`);
+    }
+  }
+  if (databaseEnv.DB_HOST !== '127.0.0.1' && databaseEnv.DB_HOST !== '::1') {
+    throw new Error('SMOKE_DB_HOST must be a loopback address');
+  }
+  return databaseEnv;
+}
+
+async function expireFeedSession(sessionId) {
+  const orm = await MikroORM.init(createDatabaseOptions(disposableSmokeDatabaseEnv()));
+  try {
+    const markerRows = await orm.em
+      .getConnection()
+      .execute(
+        'SELECT environment FROM smoke_environment_marker WHERE environment = ?',
+        [SMOKE_DB_ENVIRONMENT],
+        'all',
+      );
+    if (markerRows.length !== 1) {
+      throw new Error(
+        'SMOKE_DB_* must identify the disposable issue-card-query-smoke PostgreSQL database',
+      );
+    }
+    await orm.em
+      .getConnection()
+      .execute(
+        "UPDATE feed_sessions SET expires_at = now() - interval '1 second' WHERE id = ?",
+        [sessionId],
+        'run',
+      );
+  } finally {
+    await orm.close(true);
+  }
 }
 
 const signup = await request('/auth/signup', {
@@ -96,6 +163,150 @@ const feedBatch = parseJson(feedBatchResponse);
 assert.equal(feedBatch.sessionId, feedSession.sessionId);
 assert.equal(feedBatch.batchNo, 0);
 assert.ok(Array.isArray(feedBatch.items));
+
+const guestFeedSessionResponse = await request('/feed-sessions', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({}),
+});
+assert.equal(guestFeedSessionResponse.response.status, 200);
+const guestFeedSession = parseJson(guestFeedSessionResponse);
+const guestCookie = feedGuestCookie(guestFeedSessionResponse);
+assert.equal(Object.hasOwn(guestFeedSession, 'guestKey'), false);
+
+const guestFeedBatchResponse = await request(
+  `/feed-sessions/${guestFeedSession.sessionId}/batches`,
+  {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      Cookie: guestCookie,
+    },
+    body: JSON.stringify({ batchNo: 0 }),
+  },
+);
+assert.equal(guestFeedBatchResponse.response.status, 200);
+assert.equal(parseJson(guestFeedBatchResponse).sessionId, guestFeedSession.sessionId);
+
+const guestWithoutCookie = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ batchNo: 0 }),
+});
+assert.equal(guestWithoutCookie.response.status, 401);
+assert.equal(parseJson(guestWithoutCookie).code, 'UNAUTHORIZED');
+
+const guestReentry = await request('/feed-sessions', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Cookie: guestCookie,
+  },
+  body: JSON.stringify({}),
+});
+assert.equal(guestReentry.response.status, 200);
+assert.equal(feedGuestCookie(guestReentry), guestCookie);
+
+const invalidJwtFeed = await request('/feed-sessions', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Authorization: 'Bearer deliberately-invalid-token',
+  },
+  body: JSON.stringify({}),
+});
+assert.equal(invalidJwtFeed.response.status, 401);
+assert.equal(parseJson(invalidJwtFeed).code, 'UNAUTHORIZED');
+
+const invalidJwtGuestBatch = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Authorization: 'Bearer deliberately-invalid-token',
+    Cookie: guestCookie,
+  },
+  body: JSON.stringify({ batchNo: 0 }),
+});
+assert.equal(invalidJwtGuestBatch.response.status, 401);
+assert.equal(parseJson(invalidJwtGuestBatch).code, 'UNAUTHORIZED');
+
+const forgedCookie = `newtine_feed_guest=${'A'.repeat(43)}.${'B'.repeat(43)}`;
+const forgedGuestBatch = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Cookie: forgedCookie,
+  },
+  body: JSON.stringify({ batchNo: 0 }),
+});
+assert.equal(forgedGuestBatch.response.status, 401);
+assert.equal(parseJson(forgedGuestBatch).code, 'UNAUTHORIZED');
+
+const forgedGuestCreate = await request('/feed-sessions', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Cookie: forgedCookie,
+  },
+  body: JSON.stringify({}),
+});
+assert.equal(forgedGuestCreate.response.status, 200);
+assert.notEqual(feedGuestCookie(forgedGuestCreate), forgedCookie);
+
+const secondGuestFeedSessionResponse = await request('/feed-sessions', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({}),
+});
+assert.equal(secondGuestFeedSessionResponse.response.status, 200);
+const secondGuestCookie = feedGuestCookie(secondGuestFeedSessionResponse);
+const crossGuestBatch = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Cookie: secondGuestCookie,
+  },
+  body: JSON.stringify({ batchNo: 0 }),
+});
+assert.equal(crossGuestBatch.response.status, 404);
+assert.equal(parseJson(crossGuestBatch).code, 'NOT_FOUND');
+
+const guestOnMemberBatch = await request(`/feed-sessions/${feedSession.sessionId}/batches`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Cookie: guestCookie,
+  },
+  body: JSON.stringify({ batchNo: 0 }),
+});
+assert.equal(guestOnMemberBatch.response.status, 404);
+assert.equal(parseJson(guestOnMemberBatch).code, 'NOT_FOUND');
+
+const guestWithMemberToken = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Authorization: `Bearer ${signupBody.accessToken}`,
+  },
+  body: JSON.stringify({ batchNo: 0 }),
+});
+assert.equal(guestWithMemberToken.response.status, 404);
+assert.equal(parseJson(guestWithMemberToken).code, 'NOT_FOUND');
+
+if (process.env.SMOKE_DB_EXPIRY === '1') {
+  await expireFeedSession(guestFeedSession.sessionId);
+
+  const expiredGuestBatch = await request(`/feed-sessions/${guestFeedSession.sessionId}/batches`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      Cookie: guestCookie,
+    },
+    body: JSON.stringify({ batchNo: 0 }),
+  });
+  assert.equal(expiredGuestBatch.response.status, 410);
+  assert.equal(parseJson(expiredGuestBatch).code, 'GONE');
+}
 
 const userPipelineResponse = await request('/pipeline/runs', {
   method: 'POST',
@@ -164,5 +375,5 @@ const idempotentLogout = await request('/auth/logout', {
 assert.equal(idempotentLogout.response.status, 204);
 
 console.log(
-  'Compose auth smoke passed: migration, signup, protected API, member feed, login, refresh rotation, reuse revoke, and logout',
+  'Compose auth smoke passed: migration, signup, protected API, member+guest feed, login, refresh rotation, reuse revoke, and logout',
 );

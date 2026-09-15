@@ -22,8 +22,8 @@ test('feed returns at most ten unique cards and reuses the same batch on retry',
     issues: Array.from({ length: 12 }, (_, index) => issue(index + 1)),
   });
   const service = new IssueFeedService(repository, testTransactionManager);
-  const session = await service.createSession({ userId: USER_ID });
-  const owner = { userId: USER_ID };
+  const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
+  const owner = { kind: 'MEMBER' as const, userId: USER_ID };
 
   const [first, retry] = await Promise.all([
     service.getBatch({
@@ -72,15 +72,59 @@ test('feed batch generation is owned by the supplied transaction manager', async
     },
   };
   const service = new IssueFeedService(repository, transactionManager);
-  const session = await service.createSession({ userId: USER_ID });
+  const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
 
   await service.getBatch({
-    owner: { userId: USER_ID },
+    owner: { kind: 'MEMBER', userId: USER_ID },
     sessionId: session.sessionId,
     batchNo: 0,
   });
 
   assert.equal(transactionCalls, 1);
+});
+
+test('guest feed uses an anonymous owner and skips member context reads', async () => {
+  let contextCalls = 0;
+  let interactionCalls = 0;
+  const repository = new InMemoryIssueQueryRepository({
+    issues: Array.from({ length: 12 }, (_, index) => issue(index + 1)),
+  });
+  repository.findUserContext = async () => {
+    contextCalls += 1;
+    return context();
+  };
+  repository.findLatestInteractions = async () => {
+    interactionCalls += 1;
+    return [];
+  };
+  const service = new IssueFeedService(repository, testTransactionManager);
+  const owner = { kind: 'GUEST' as const, guestTokenHash: 'a'.repeat(64) };
+  const secondOwner = { kind: 'GUEST' as const, guestTokenHash: 'b'.repeat(64) };
+  const session = await service.createSession(owner);
+  const secondSession = await service.createSession(secondOwner);
+  const result = await service.getBatch({ owner, sessionId: session.sessionId, batchNo: 0 });
+  const secondResult = await service.getBatch({
+    owner: secondOwner,
+    sessionId: secondSession.sessionId,
+    batchNo: 0,
+  });
+
+  assert.equal(result.items.length, 10);
+  assert.deepEqual(
+    secondResult.items.map((item) => item.issueId),
+    result.items.map((item) => item.issueId),
+  );
+  assert.deepEqual(repository.getStoredSession(session.sessionId)?.owner, owner);
+  assert.equal(contextCalls, 0);
+  assert.equal(interactionCalls, 0);
+  await assert.rejects(
+    service.getBatch({
+      owner: { kind: 'MEMBER', userId: USER_ID },
+      sessionId: session.sessionId,
+      batchNo: 0,
+    }),
+    /탐색 세션을 찾을 수 없습니다/,
+  );
 });
 
 test('connected cards require a verified later FOLLOW_UP event', async () => {
@@ -103,9 +147,9 @@ test('connected cards require a verified later FOLLOW_UP event', async () => {
     relations: [relation(source.id, later.id), relation(source.id, sameTime.id)],
   });
   const service = new IssueFeedService(repository, testTransactionManager);
-  const session = await service.createSession({ userId: USER_ID });
+  const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
   const result = await service.getBatch({
-    owner: { userId: USER_ID },
+    owner: { kind: 'MEMBER', userId: USER_ID },
     sessionId: session.sessionId,
     batchNo: 0,
   });
@@ -244,8 +288,8 @@ test('limited batch can be retried but cannot create a new batch', async () => {
     issues: Array.from({ length: 3 }, (_, index) => issue(index + 1, { mainTopic: 'same-topic' })),
   });
   const service = new IssueFeedService(repository, testTransactionManager);
-  const session = await service.createSession({ userId: USER_ID });
-  const owner = { userId: USER_ID };
+  const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
+  const owner = { kind: 'MEMBER' as const, userId: USER_ID };
 
   const first = await service.getBatch({ owner, sessionId: session.sessionId, batchNo: 0 });
   assert.equal(first.continuation, 'CONSTRAINT_LIMITED');

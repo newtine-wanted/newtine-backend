@@ -108,6 +108,14 @@ function postRawJson(path, body, headers = {}) {
   });
 }
 
+function readSetCookie(response, name) {
+  const cookie = response.headers['set-cookie']?.find((value) => value.startsWith(`${name}=`));
+  assert.ok(cookie, `${name} cookie missing`);
+  const value = cookie.slice(name.length + 1).split(';', 1)[0];
+  assert.match(value, /^[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  return `${name}=${value}`;
+}
+
 async function waitForApi() {
   let timeout;
   try {
@@ -205,9 +213,52 @@ try {
   assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /newtine_refresh=;/);
   assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /Max-Age=0/);
 
-  const unauthenticatedFeed = await postJson('/feed-sessions', {});
-  assert.equal(unauthenticatedFeed.response.statusCode, 401);
-  assert.equal(JSON.parse(unauthenticatedFeed.body).code, 'UNAUTHORIZED');
+  const guestFeed = await postJson('/feed-sessions', {});
+  assert.equal(guestFeed.response.statusCode, 200);
+  const guestSession = JSON.parse(guestFeed.body);
+  assert.equal(Object.hasOwn(guestSession, 'guestKey'), false);
+  const guestCookie = readSetCookie(guestFeed.response, 'newtine_feed_guest');
+  assert.match(
+    guestFeed.response.headers['set-cookie']?.find((value) =>
+      value.startsWith('newtine_feed_guest='),
+    ) ?? '',
+    /Path=\/feed-sessions/,
+  );
+  assert.match(
+    guestFeed.response.headers['set-cookie']?.find((value) =>
+      value.startsWith('newtine_feed_guest='),
+    ) ?? '',
+    /HttpOnly/,
+  );
+  assert.match(
+    guestFeed.response.headers['set-cookie']?.find((value) =>
+      value.startsWith('newtine_feed_guest='),
+    ) ?? '',
+    /SameSite=Lax/,
+  );
+
+  const guestBatch = await postJson(
+    `/feed-sessions/${guestSession.sessionId}/batches`,
+    { batchNo: 0 },
+    { Cookie: guestCookie },
+  );
+  assert.equal(guestBatch.response.statusCode, 200);
+  assert.equal(JSON.parse(guestBatch.body).sessionId, guestSession.sessionId);
+
+  const missingGuestCookieBatch = await postJson(
+    `/feed-sessions/${guestSession.sessionId}/batches`,
+    { batchNo: 0 },
+  );
+  assert.equal(missingGuestCookieBatch.response.statusCode, 401);
+  assert.equal(JSON.parse(missingGuestCookieBatch.body).code, 'UNAUTHORIZED');
+
+  const invalidJwtFeed = await postJson(
+    '/feed-sessions',
+    {},
+    { Authorization: 'Bearer deliberately-invalid-token' },
+  );
+  assert.equal(invalidJwtFeed.response.statusCode, 401);
+  assert.equal(JSON.parse(invalidJwtFeed.body).code, 'UNAUTHORIZED');
 
   const invalidSearch = await postJson('/issues/search', { query: '', unexpected: true });
   assert.equal(invalidSearch.response.statusCode, 400);
@@ -295,7 +346,7 @@ try {
   );
 
   console.log(
-    'API smoke passed: health, search, auth route boundaries, member-only feed rejection, four-field failures, parser 400/413, JSON logs, and request ID correlation',
+    'API smoke passed: health, search, auth route boundaries, member+guest feed, four-field failures, parser 400/413, JSON logs, and request ID correlation',
   );
 } finally {
   await stopApi();

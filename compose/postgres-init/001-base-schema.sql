@@ -75,4 +75,12 @@ CREATE TABLE user_interaction_events (
 CREATE INDEX user_interaction_events_user_issue_created_idx
   ON user_interaction_events (user_id, issue_id, created_at DESC, id DESC);
 
+-- Guard for scripts that mutate only the disposable acceptance database.
+CREATE TABLE smoke_environment_marker (
+  environment text PRIMARY KEY
+);
+
+INSERT INTO smoke_environment_marker (environment)
+VALUES ('issue-card-query-smoke');
+
 COMMIT;

@@ -81,7 +81,8 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     manager.persist(
       manager.create(FeedSessionEntity, {
         id: session.id,
-        userId: owner.userId,
+        userId: owner.kind === 'MEMBER' ? owner.userId : null,
+        guestTokenHash: owner.kind === 'GUEST' ? owner.guestTokenHash : null,
         algorithmVersion: session.algorithmVersion,
         nextBatchNo: session.nextBatchNo,
         status: session.status,
@@ -104,7 +105,10 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
   ): Promise<FeedSessionRecord | null> {
     void _now;
     const manager = this.currentEntityManager();
-    const row = await manager.findOne(FeedSessionEntity, { id, userId: owner.userId });
+    const row = await manager.findOne(FeedSessionEntity, {
+      id,
+      ...feedOwnerWhere(owner),
+    });
     return row === null ? null : toSession(row, owner);
   }
 
@@ -699,6 +703,14 @@ function toSession(row: FeedSessionPersistenceEntity, owner: FeedOwner): FeedSes
     topicRun: row.topicRun,
     entityRun: row.entityRun,
   };
+}
+
+function feedOwnerWhere(
+  owner: FeedOwner,
+): Pick<FeedSessionPersistenceEntity, 'userId' | 'guestTokenHash'> {
+  return owner.kind === 'MEMBER'
+    ? { userId: owner.userId, guestTokenHash: null }
+    : { userId: null, guestTokenHash: owner.guestTokenHash };
 }
 
 function toImpact(row: IssueQueryImpactPersistenceEntity): IssueImpactRecord | null {

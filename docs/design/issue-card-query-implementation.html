@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>이슈 상세·개인화 카드 조회 구현 제어</title>
-    <meta name="purpose" content="승인된 이슈 상세와 10장 개인화 카드 조회를 구현하고 검증한다" />
+  <title>이슈 상세·회원/비회원 피드 카드 조회 구현 제어</title>
+    <meta name="purpose" content="승인된 이슈 상세와 회원·비회원 10장 피드 카드 조회를 구현하고 검증한다" />
     <meta name="audience" content="피드 API를 운영·연결하는 백엔드 개발자" />
     <meta
       name="problem"
-      content="공개 후보를 개인화해 10장 단위로 전달하면서 피드 내 중복·재시도·만료를 안전하게 처리한다"
+      content="동일 피드 API에서 회원은 개인화하고 비회원은 공개 generic 후보를 전달하면서 중복·재시도·만료·소유권을 안전하게 처리한다"
     />
     <meta
       name="core-flow"
@@ -82,19 +82,19 @@
   </head>
   <body>
     <header>
-      <p>구현 제어 · <span class="status">G28~G31·CQ-REV-011·PERS 보완 완료 / 운영 제어 보류</span></p>
-      <h1>이슈 상세·개인화 카드 조회</h1>
+      <p>구현 제어 · <span class="status">GUEST-001~004·G28~G31·CQ-REV-011 구현 완료 / 운영 제어 보류</span></p>
+      <h1>이슈 상세·회원/비회원 피드 카드 조회</h1>
       <p>
         승인된 설계의 실제 변경과 검증 증거를 기록한다. 설계 기준은
         <a href="issue-card-query-design.html">issue-card-query-design.html</a>이다.
       </p>
       <dl>
         <dt>purpose · 목적</dt>
-        <dd>승인된 이슈 상세와 10장 개인화 카드 조회를 구현하고 검증한다.</dd>
+        <dd>승인된 이슈 상세와 회원·비회원 10장 피드 카드 조회를 구현하고 검증한다.</dd>
         <dt>audience · 사용자</dt>
         <dd>피드 API를 운영·연결하는 백엔드 개발자와 회원·비회원 클라이언트.</dd>
         <dt>problem · 문제</dt>
-        <dd>공개 후보를 개인화해 전달하면서 피드 내 중복·재시도·만료를 안전하게 처리한다.</dd>
+        <dd>같은 피드 API에서 회원은 개인화하고 비회원은 공개 generic 후보를 받으면서 피드 내 중복·재시도·만료·소유권을 안전하게 처리한다.</dd>
         <dt>core-flow · 핵심 흐름</dt>
         <dd>소유권 확인 → 후보·제외 → 점수·배정 → 묶음 저장 → 최신 본문 응답 → 재시도 복원.</dd>
         <dt>기준선 승인</dt>
@@ -126,9 +126,10 @@
           <h2>승인 기준선</h2>
           <p>
             사용자는 통합 설계안과 후속 G24-A~G27-A 선택을 확인한 뒤 “승인 — 구현 시작”으로 직접
-            승인했고, G28~G31 production wiring·ORM 경계 재설계도 2026-09-15 KST “개선 ㄱ”으로
-            승인했다. 기존 설계 정책은 유지하고, 인증 principal·온보딩 사용자 context·member
-            <code>x-user-id</code>를 실제 경계에 연결한다. 공통 점수 산정·대표 대상 자동 해석·행동
+            승인했고, G28~G31 production wiring·ORM 경계 재설계와 회원·비회원 동일 feed contract도
+            2026-09-15 KST 승인했다. 유효한 JWT principal은 회원 경계로 사용하고, 인증이 없는 요청은
+            서버 발급 guest cookie로 익명 소유권을 이어간다. 임의 <code>x-user-id</code>와
+            <code>x-feed-guest-key</code>는 신뢰하지 않는다. 공통 점수 산정·대표 대상 자동 해석·행동
             이벤트 쓰기·최초 생성 멱등 키는 이번 실행에서 제외한다.
           </p>
           <table>
@@ -189,16 +190,18 @@
             계약을 함께 맞춘다.
           </p>
           <aside>
-            현재 저장소에는 실제 업무 schema·인증 principal·이슈 생성 측 점수/대표 대상 데이터가
-            없다. production API는 MikroORM adapter만 사용하고, 인메모리 adapter와 passthrough
-            transaction manager는 <code>test/fixtures</code>에서만 명시적으로 주입한다. 실제 PostgreSQL
-            왕복·lock 경쟁·운영 schema 연결은 잔여 위험으로 추적한다.
+            현재 저장소에는 실제 업무 schema·이슈 생성 측 점수/대표 대상 데이터와 production rate-limit
+            정책이 없다. production API는 검증된 JWT principal 또는 서버 발급 guest cookie와 MikroORM
+            adapter만 사용하고, 인메모리 adapter와 passthrough transaction manager는
+            <code>test/fixtures</code>에서만 명시적으로 주입한다. 실제 PostgreSQL 왕복·lock 경쟁·운영
+            schema·rate-limit/session-cap 연결은 잔여 위험으로 추적한다.
           </aside>
         </section>
         <section id="current-implementation">
           <h2>현재 구현(as-built)</h2>
           <p>
-            승인 기준선의 API·추천 규칙·상태 경계와 후속 리뷰 개선을 구현했다. PostgreSQL 계약
+            승인 기준선의 API·추천 규칙·상태 경계와 후속 리뷰 개선을 구현했다. 동일 feed API의 선택적
+            JWT 분기와 guest cookie owner 경계까지 포함한다. PostgreSQL 계약
             정합성, 공개 기사 상태 predicate, transaction/만료 경계, 이전 batch bulk-load,
             InMemory scope parity, production ORM provider 경계를 반영했다. 최신 사용자 context의
             onboarding category/entity/region 선호와 producer-owned issue metadata pass-through도
@@ -231,13 +234,32 @@
               등록하고, feed/read-model migration은 schema evolution 책임으로 유지한다.
             </li>
             <li>
-              게스트 세션은 서버가 발급한 고엔트로피 bearer key를 생성 응답으로 한 번 전달하고,
-              저장소에는 SHA-256 해시만 남긴다. 배치 요청은 해당 key를 소유 증명으로 보내며, 최초
-              생성 멱등 키는 구현하지 않았다.
+              두 feed route는 기존 <code>JwtAuthGuard</code>의 optional policy를 사용한다. 유효한 JWT는
+              검증된 principal 기반 <code>MEMBER</code> owner·personal context로, 인증 없음은
+              <code>GUEST</code> owner·generic public ranking으로 분기한다. 제공된 JWT가 invalid이면
+              guest로 삼키지 않고 401이다.
             </li>
             <li>
-              <code>x-user-id</code>는 인증 분기 연결 전 임시 principal 경계이므로 운영에서 직접
-              신뢰하지 않고 검증된 인증 principal로 교체해야 한다.
+              guest create는 JWT secret으로 nonce를 서명한 고엔트로피 opaque
+              <code>HttpOnly</code>·<code>SameSite=Lax</code> cookie를 발급하고, DB에는 SHA-256 hash만
+              저장한다. guest batch는 같은 유효 cookie를 요구하며
+              <code>x-user-id</code>·<code>x-feed-guest-key</code>·client pseudo-user를 사용하지 않는다.
+              member/guest owner는 DB XOR constraint와 별도 partial index로 격리한다.
+            </li>
+            <li>
+              현재 guest cookie 서명 키는 <code>JWT_SECRET</code>과 동일하다. 따라서 JWT secret 회전은
+              TTL이 남은 기존 guest cookie도 즉시 무효화하는 전역 guest session invalidation으로
+              취급한다. versioned guest key ring과 이전 키의 유예 검증은 별도 운영 설계 범위다.
+            </li>
+            <li>
+              guest는 user row·preference·interaction을 읽거나 쓰지 않고 공개 generic 후보만 사용한다.
+              같은 공개 데이터·시점에서는 member context와 무관한 deterministic public ranking을 사용하며,
+              이후 게시·철회·시간 변화는 새 session에 반영한다. global frozen snapshot은 만들지 않는다.
+            </li>
+            <li>
+              회원과 guest 모두 session lifecycle은 24시간이다. 현재 저장소에는 edge/app rate limit과
+              guest session 상한 enforcement가 없으므로 이를 실제 배포 환경에서 확인하기 전에는
+              production release로 판정하지 않는다.
             </li>
             <li>
               상세의 관점·용어 JSON article reference는 현재 이슈의 연결 기사에 없는 ID를 제거한다.
@@ -266,24 +288,25 @@
             <pre>
 POST /feed-sessions → session
 POST /feed-sessions/:id/batches {batchNo}
-  → owner/만료/번호 확인 → 후보·최신 행동 조회
+  → JWT principal 또는 guest cookie owner 확인 → 만료/번호 확인
+  → 회원이면 context·행동, guest면 generic 공개 후보
   → 점수·유형 배정·연속 제한 → feed batch/item 저장
   → 최신 공개 카드 조회 → 응답
 GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터 → 응답</pre
             >
             <figcaption>
-              행동 이벤트 쓰기·인증 principal 발급·공통 점수 생산은 별도 분기다.
+              행동 이벤트 쓰기·인증/refresh foundation·공통 점수 생산은 별도 분기다.
             </figcaption>
           </figure>
         </section>
         <section id="implementation-status">
           <h2>구현 상태</h2>
           <p>
-            기준선과 후속 리뷰 개선, G28~G31·CQ-REV-011·PERS-001~003의 기술 구현과 로컬 게이트는 완료했다.
-            Compose PostgreSQL에 검증용 최소 base schema를 준비한 뒤 7개 migration·ORM 왕복·API smoke,
-            실제 onboarding preference 기록·schema 제약 확인도 통과했다. 기존 producer가 main topic·대표
-            대상을 공급하지 않는 점과 실제 업무 schema lock 경쟁·EXPLAIN/p95·운영 인증 격리는 release gate로
-            남긴다.
+            기준선과 후속 리뷰 개선, G28~G31·CQ-REV-011·PERS-001~003·GUEST-001~004의 기술 구현과
+            로컬 게이트는 완료했다. Compose PostgreSQL에 검증용 최소 base schema를 준비한 뒤 10개
+            migration·ORM 왕복·회원/비회원 API smoke, 실제 onboarding preference 기록·schema 제약 확인도
+            통과했다. 기존 producer가 main topic·대표 대상을 공급하지 않는 점과 실제 업무 schema lock
+            경쟁·EXPLAIN/p95·운영 rate-limit/session-cap·인증 격리는 release gate로 남긴다.
           </p>
           <table>
             <caption>
@@ -300,17 +323,22 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
               <tr>
                 <td>API·순수 추천</td>
                 <td>완료</td>
-                <td>unit 25 suites/143 tests, integration 2 suites/11 tests, typecheck/build 통과</td>
+                <td>unit 27 suites/149 tests, integration 2 suites/11 tests, typecheck/build 통과</td>
               </tr>
               <tr>
                 <td>ORM issue-card adapter</td>
                 <td>코드·EntitySchema 등록·Compose DB smoke 완료, 업무 성능 보류</td>
-                <td>EntityManager 기반 focused ORM boundary 테스트, 7개 migration, 실제 databaseCheck·auth/onboarding API smoke·신규 schema 제약 확인, 전체 unit/integration/build 통과. 업무 schema lock·EXPLAIN/p95는 별도 실행 필요</td>
+                <td>EntityManager 기반 focused ORM boundary 테스트, 10개 migration, 실제 databaseCheck·auth/onboarding·member/guest API smoke·신규 schema 제약 확인, 전체 unit/integration/build 통과. 업무 schema lock·EXPLAIN/p95는 별도 실행 필요</td>
               </tr>
               <tr>
                 <td>인증·온보딩·이벤트</td>
-                <td>onboarding context 연결 완료, producer 데이터 보류</td>
-                <td>양수 weight의 category/entity/region 선호를 기존 ORM EntitySchema로 읽는다. producer metadata는 optional pipeline 입력에서만 pass-through하며, 현재 producer가 값을 주지 않으면 null·generic+age fallback을 유지한다.</td>
+                <td>JWT principal·guest cookie owner 연결 및 onboarding context 완료, producer 데이터 보류</td>
+                <td>유효한 JWT는 member personal context, 인증 없는 요청은 user-specific query 없는 generic guest feed를 사용한다. 양수 weight의 category/entity/region 선호를 기존 ORM EntitySchema로 읽고, producer metadata는 optional pipeline 입력에서만 pass-through한다.</td>
+              </tr>
+              <tr>
+                <td>비회원 feed·abuse 제어</td>
+                <td>cookie owner·generic ranking 완료, 운영 enforcement 보류</td>
+                <td>guest create/batch·cookie 누락·member/guest 교차 소유권 smoke를 통과했다. edge/app rate limit과 guest session 상한은 실제 배포 환경에서 확인해야 한다.</td>
               </tr>
               <tr>
                 <td>외부 점수·대표 대상</td>
@@ -393,26 +421,32 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
               <tr>
                 <td>보류</td>
                 <td>
-                  인증 principal·온보딩 사용자 context·지역 선호·대표 대상·점수 생산 계약이 저장소에
-                  없다. 실제 PostgreSQL lock/rollback/운영 오류 계약도 아직 입증하지 않았다.
+                  실제 업무 schema·lock/rollback·운영 오류 계약, producer 대표 대상·점수 데이터와
+                  rate-limit/session-cap enforcement가 저장소에 없다.
                 </td>
                 <td>
-                  production ORM adapter와 test fixture를 분리했다. 외부 계약을 임의로 채우지
-                  않는다.
+                  production ORM adapter와 test fixture를 분리하고, JWT·guest cookie를 실제 owner
+                  경계에 연결했다. 외부 계약이나 운영 제어를 임의로 채우지 않는다.
                 </td>
-                <td>격리 PostgreSQL 왕복·EXPLAIN 및 인증/온보딩 연결 후 운영 제어 재개.</td>
+                <td>업무 PostgreSQL 왕복·EXPLAIN·p95, 운영 인증 격리, edge/app abuse control 연결 후 운영 제어 재개.</td>
               </tr>
               <tr>
                 <td>최종 no-write 검토·보완 완료</td>
                 <td>production wiring·ORM boundary와 후보 조회의 DB-side 상한 부재(CQ-REV-011 P1)를 모두 보완했다.</td>
-                <td>가중치 slice별 ORM root query에 공개·scope·제외 predicate, 결정적 정렬, LIMIT을 적용하고 선택된 ID만 상세 projection으로 bulk-load한다. 인증 principal·사용자 context·실제 업무 lock/p95는 보류 항목으로 분리했다.</td>
+                <td>가중치 slice별 ORM root query에 공개·scope·제외 predicate, 결정적 정렬, LIMIT을 적용하고 선택된 ID만 상세 projection으로 bulk-load한다. producer 데이터·실제 업무 lock/p95·운영 abuse control은 보류 항목으로 분리했다.</td>
                 <td>focused ORM boundary 회귀와 전체 local gate 통과. 운영 schema·EXPLAIN·lock·p95는 외부 검증 후 재개.</td>
               </tr>
               <tr>
                 <td>G28~G31 · 해결됨 / 운영 검증 보류</td>
                 <td>production module이 환경값에 따라 InMemory fake를 선택하고, EntityManager 주입 후에도 raw SQL로 runtime persistence를 수행하던 구현 오류.</td>
                 <td><code>IssueModule</code>을 ORM adapter의 <code>useExisting</code> 단일 provider로 고정하고 CoreModule의 transaction manager를 사용한다. fake와 passthrough transaction manager는 <code>test/fixtures</code>로 이동했다. issue-card EntitySchema를 database options에 등록하고 adapter의 SQL connection 실행·projection helper를 제거했다.</td>
-                <td>ORM boundary unit 6개 포함 전체 unit 20 suites/114 tests, integration 2 suites/11 tests, format/lint/typecheck/build 통과. Compose <code>db</code> health·6개 migration·batch <code>databaseCheck</code>·호스트 API DB-backed smoke도 통과했다. Docker API image build는 ttsc native plugin 단계에서 Docker Desktop 메모리 부족으로 실패했다.</td>
+                <td>ORM boundary unit 6개 포함 전체 unit 27 suites/149 tests, integration 2 suites/11 tests, format/lint/typecheck/build 통과. Compose <code>db</code> health·10개 migration·batch <code>databaseCheck</code>·호스트 API DB-backed smoke도 통과했다. Docker API image build는 ttsc native plugin 단계에서 Docker Desktop 메모리 부족으로 실패했다.</td>
+              </tr>
+              <tr>
+                <td>GUEST-001~004 · 해결됨 / 운영 제어 보류</td>
+                <td>메인 클라이언트가 회원·비회원 모두 같은 feed API를 호출하지만, 기존 회원 전용 JWT 경계는 비회원 초기 feed를 401로 종료했다.</td>
+                <td>기존 <code>JwtAuthGuard</code>의 optional policy로 유효한 JWT는 <code>MEMBER</code>, 인증 없음은 서버 발급 <code>HttpOnly</code>·<code>SameSite=Lax</code> guest cookie hash 기반 <code>GUEST</code>로 분기했다. guest는 generic public ranking만 사용하고 user/preference/interaction을 읽지 않는다. DB owner XOR/check와 member·guest partial index, 동일 24시간 lifecycle을 추가했다.</td>
+                <td>guest create/batch·cookie 속성·누락/위조 cookie 401·invalid Bearer batch 401·member JWT의 guest session 404·DB expiry 410·guest user-specific query 미실행을 unit/Compose API smoke로 확인했다. rate limit·guest session 상한 enforcement는 배포 전 실제 환경 gate다.</td>
               </tr>
               <tr>
                 <td>CQ-REV-011 · fixed · P1 addressed</td>
@@ -425,21 +459,28 @@ GET /issues/:id → 공개·상세 재검사 → age/region 명시 영향 필터
         </section>
         <section id="verification-evidence">
           <h2>검증 증거</h2>
-          <p>2026-09-15 KST G28~G31·CQ-REV-011 bounded query 및 PERS-001~003 보완 후 로컬 검증을 실행했다.</p>
+          <p>2026-09-15 KST G28~G31·CQ-REV-011 bounded query·PERS-001~003·GUEST-001~004 보완 후 로컬 검증을 실행했다.</p>
           <pre><code>npm run format:check
 npm run lint
 npm run typecheck
 npm test
 npm run build
 npm run contracts:check
-npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
+npm run test:jest -- test/unit/issueCardQuery.repository.test.ts
+API_BASE_URL=http://127.0.0.1:3001 \\
+SMOKE_DB_HOST=127.0.0.1 SMOKE_DB_PORT=55432 \\
+SMOKE_DB_NAME=newtine SMOKE_DB_USER=postgres SMOKE_DB_PASSWORD=postgres \\
+SMOKE_DB_EXPIRY=1 npm run test:smoke:compose</code></pre>
           <p>
-            결과: format, lint, typecheck, build, contracts:check(contract 1 suite/4 tests 포함), unit 25
-            suites/143 tests, integration 2 suites/11 tests, ORM boundary·metadata migration focused tests가 통과했고
+            결과: format, lint, typecheck, build, contracts:check(contract 1 suite/4 tests 포함), unit 27
+            suites/149 tests, integration 2 suites/11 tests, ORM boundary·metadata migration focused tests가 통과했고
             <code>git diff --check</code>도 통과했다. Compose <code>db</code> health, 검증용 최소 base
-            schema 생성 후 7개 migration, 실제 batch <code>databaseCheck</code>, 호스트 API의
-            auth/onboarding/feed DB-backed smoke와 신규 issues 컬럼·CHECK/FK 확인도 통과했다. producer
-            실데이터와 업무 DB lock/EXPLAIN/p95는 별도 release gate다.
+            schema 생성 후 10개 migration, 실제 batch <code>databaseCheck</code>, 호스트 API의
+            auth/onboarding/member+guest feed DB-backed smoke와 신규 issues/feed owner CHECK/FK 확인도
+            통과했다. <code>SMOKE_DB_*</code>가 loopback·marker로 명시한 disposable PostgreSQL에서
+            <code>SMOKE_DB_EXPIRY=1</code> 실행으로 session을 만료시킨 뒤 batch 410과 invalid Bearer
+            401도 확인했다. producer 실데이터와 업무 DB
+            lock/EXPLAIN/p95·운영 rate-limit/session-cap은 별도 release gate다.
           </p>
         </section>
         <section id="review">
@@ -458,15 +499,19 @@ npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
           <p>
             최종 no-write 재검토와 후속 보완 확인에서 production wiring·ORM boundary의 concrete blocker는
             확인되지 않았다. G24~G27과 CQ-REV-006~009는 수정·회귀·문서 갱신으로 닫았고, CQ-REV-011은
-            DB-side bounded ORM query와 선택 ID bulk-load 적용으로 닫았다. CQ-REV-003·005·010은 외부
-            계약·운영 검증 공백으로 유지한다.
+            DB-side bounded ORM query와 선택 ID bulk-load 적용으로 닫았다. GUEST-001~004와 CQ-REV-005도
+            optional JWT·guest cookie/hash·owner isolation·생성 계약 보완으로 닫았다. CQ-REV-003의
+            producer 데이터, CQ-REV-010의 운영 검증, GUEST-OPS의 rate-limit/session-cap enforcement는
+            외부 계약·운영 검증 공백으로 유지한다.
           </p>
           <p>
-            G28~G31 재검토에서는 production source graph의 InMemory/fallback provider와
+            G28~G31·GUEST 재검토에서는 production source graph의 InMemory/fallback provider와
             <code>getConnection().execute()</code> runtime 경로가 제거된 것을 확인했다. 테스트 double은
             <code>test/fixtures</code>에만 남고, <code>IssueModule</code>은 ORM adapter와 CoreModule
-            transaction manager를 사용한다. Compose PostgreSQL에서 migration·adapter·API smoke는
-            통과했으며, 실제 업무 데이터 lock 경쟁·EXPLAIN/p95는 운영 검증 공백으로 유지한다.
+            transaction manager를 사용한다. feed route는 기존 optional JWT policy로 member/guest를
+            분기하고, guest cookie 원문 없이 hash owner만 저장한다. Compose PostgreSQL에서
+            migration·adapter·회원/비회원 API smoke는 통과했으며, 실제 업무 데이터 lock 경쟁·EXPLAIN/p95와
+            rate-limit/session-cap enforcement는 운영 검증 공백으로 유지한다.
           </p>
           <table>
             <caption>발견 사항</caption>
@@ -589,22 +634,24 @@ npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
                 </td>
               </tr>
               <tr>
-                <th scope="row">CQ-REV-005 · non-blocking risk · P2</th>
+                <th scope="row">CQ-REV-005 · fixed · P2 해소</th>
                 <td>
-                  런타임에서 guest batch에 필요한 <code>x-feed-guest-key</code>와 회원
-                  <code>x-user-id</code>가 raw <code>@Headers</code>로만 읽혀 생성 OpenAPI/SDK의
-                  operation parameter에 나타나지 않는다. <code>IConnection.headers</code>를 직접
-                  채우면 호출되지만, per-session bearer key 요구가 계약에서 발견되지 않는다.
+                  기존 구현은 런타임에서 guest batch에 필요한 <code>x-feed-guest-key</code>와 회원
+                  <code>x-user-id</code>를 raw header로 읽어 client가 소유권을 임의로 구성할 수 있었고,
+                  생성 OpenAPI/SDK에는 인증 경계가 드러나지 않았다.
                 </td>
                 <td>
-                  typed headers 또는 OpenAPI header 명세를 추가하고 생성 SDK에서 요구 조건을
-                  드러낸다. 인증 principal 연결 시 <code>x-user-id</code> 임시 경계도 제거한다.
+                  raw user/key header를 제거하고 기존 optional JWT policy와 서버 발급 guest cookie를
+                  사용한다. OpenAPI는 create를 <code>bearerAuth 또는 anonymous</code>, batch를
+                  <code>bearerAuth 또는 guestFeedCookie</code>로 생성해 각 route의 인증 맥락과 batch의
+                  cookie 소유권 요구를 계약에 반영했다.
                 </td>
+                <td>generated OpenAPI·SDK, guest cookie/hash 단위 테스트와 member/guest API smoke 통과. 쿠키 원문은 DB·로그에 남기지 않는다.</td>
               </tr>
               <tr>
                 <th scope="row">CQ-REV-009 · fixed · Non-blocking</th>
                 <td>설계·구현 문서의 개선 상태와 테스트 수치가 구현 완료 후에도 이전 값으로 남아 있었다.</td>
-                <td>두 문서의 후속 구현 완료·운영 검증 보류 상태와 unit 20 suites/114 tests, integration 2 suites/11 tests 증거를 갱신했다.</td>
+                <td>두 문서의 후속 구현 완료·운영 검증 보류 상태와 unit 27 suites/149 tests, integration 2 suites/11 tests 증거를 갱신했다.</td>
               </tr>
               <tr>
                 <th scope="row">CQ-REV-010 · accepted verification gap · Non-blocking</th>
@@ -616,6 +663,21 @@ npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
                 <td>기존 <code>findCandidates</code>는 후보 예산과 무관하게 issue와 연관 projection을 전체 로드하고 애플리케이션에서 필터링했다. 요청당 DB work·메모리 사용량이 데이터 크기에 비례해 증가하며, DB-side LIMIT 경계가 없었다.</td>
                 <td>후보 전용 ORM root query에 public detail·scope relation·제외 predicate, 결정적 정렬·LIMIT을 적용하고 최종 후보 ID만 상세/기사 bulk-load한다. 실제 planner scan·sort·p95·메모리 측정은 CQ-REV-010으로 남긴다.</td>
               </tr>
+              <tr>
+                <th scope="row">GUEST-OPS · accepted release gate · P1 until enforced</th>
+                <td>비회원 endpoint는 공개 진입점이므로 cookie 소유권만으로는 대량 session 생성·batch abuse를 제어하지 않는다. 현재 저장소에는 edge/app rate limit과 guest session 상한 구현이 없다.</td>
+                <td>이번 PR은 guest contract와 데이터 격리를 구현하되 임의의 local/in-memory limiter를 production 정책처럼 추가하지 않는다. 실제 배포 edge/app rate limit·동시 guest session 상한·관측 지표를 연결하고 검증하기 전에는 배포 완료로 판정하지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">CQ-REV-012 · fixed · P2 보완</th>
+                <td>초기 compose smoke에는 guest batch의 invalid Bearer와 DB에서 만료시킨 session의 410 회귀가 없었다.</td>
+                <td><code>compose-auth-smoke.mjs</code>에 유효 guest cookie와 invalid Bearer의 401, loopback·marker로 보호된 disposable PostgreSQL의 <code>expires_at</code> 조작 후 410 검증을 추가했다. DB expiry 검증은 명시적인 <code>SMOKE_DB_*</code>와 <code>SMOKE_DB_EXPIRY=1</code>로 실행한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">CQ-REV-013 · documented · P3</th>
+                <td>guest HMAC에 현재 <code>JWT_SECRET</code>만 사용하므로 secret rotation 시 남은 TTL과 무관하게 기존 guest cookie가 즉시 무효화된다.</td>
+                <td>이를 의도된 전역 guest session invalidation 운영 계약으로 문서화했다. versioned key ring과 이전 키 유예 검증은 별도 운영 설계로 남긴다.</td>
+              </tr>
             </tbody>
           </table>
           <h3>검증 증거와 공백</h3>
@@ -623,27 +685,29 @@ npm run test:jest -- test/unit/issueCardQuery.repository.test.ts</code></pre>
             CQ-REV-011 보완 후 <code>findCandidates</code>의 root query LIMIT과 DB-side subquery 경계를
             focused 회귀로 확인하고, <code>npm test</code>·<code>format:check</code>·lint·typecheck·build·
             <code>contracts:check</code>·<code>git diff --check</code> 전체 게이트를 통과했다. Compose
-            PostgreSQL의 migration·adapter·API smoke와 호스트 batch <code>databaseCheck</code>도
-            통과했다. 실제 업무 데이터 왕복·rollback·lock 대기·EXPLAIN/p95·인증 격리는 아직 검증하지
-            않았다.
+            PostgreSQL의 migration·adapter·API smoke와 호스트 batch <code>databaseCheck</code>, invalid
+            Bearer·위조 cookie·교차 owner·DB expiry 410을 포함한 auth smoke도 통과했다. 실제 업무
+            데이터 왕복·rollback·lock 대기·EXPLAIN/p95·인증 격리는 아직 검증하지 않았다.
           </p>
           <aside>
-            리뷰 판단: CQ-REV-001·002와 G24~G27, G28~G31은 승인 범위 내 수정·회귀 검증으로 해소됐다.
+            리뷰 판단: CQ-REV-001·002와 G24~G27, G28~G31, GUEST-001~004는 승인 범위 내 수정·회귀 검증으로 해소됐다.
             CQ-REV-003의 인증·온보딩 context·metadata adapter wiring은 해소됐지만, 실제 producer 데이터와
             업무 PostgreSQL 연결 전 운영 gate로 남고, CQ-REV-004는
-            AVAILABLE-only 정책으로 해소됐다. CQ-REV-005는 인증 principal과 함께 API 계약을 보완해야
-            하는 P2다. CQ-REV-006·007·008은 수정·재검증으로, CQ-REV-009는 문서 갱신으로 닫혔다.
-            CQ-REV-011 P1은 DB-side bounded ORM query와 최종 후보 bulk-load 보완으로 닫혔다. 다만
-            CQ-REV-010의 실제 PostgreSQL·인증·성능 실측 전에는 배포 완료로 판정하지 않는다.
+            AVAILABLE-only 정책으로 해소됐다. CQ-REV-005는 optional JWT·cookie 기반 API 계약으로
+            해소됐다. CQ-REV-006·007·008은 수정·재검증으로, CQ-REV-009는 문서 갱신으로 닫혔다.
+            CQ-REV-011 P1은 DB-side bounded ORM query와 최종 후보 bulk-load 보완으로 닫혔다. CQ-REV-012는
+            invalid Bearer·DB expiry smoke 보완으로 닫혔고, CQ-REV-013은 JWT secret rotation의 강제
+            guest 무효화 semantics를 문서화했다. 다만 CQ-REV-010의 실제 PostgreSQL·인증·성능 실측 및
+            GUEST-OPS rate-limit/session-cap enforcement 전에는 배포 완료로 판정하지 않는다.
           </aside>
         </section>
         <section id="implementation-control-state">
           <h2>구현 이해·통제 점검</h2>
           <p>
-            상태: 기술 구현·로컬 게이트 및 Compose DB smoke 완료, 운영 제어 보류. 후속 G24~G27·G28~G31 및
-            CQ-REV-011 보완과 PERS-001~003 wiring은 승인된 범위로 반영했지만, 실제 업무 PostgreSQL
-            lock/EXPLAIN/p95·인증 principal·온보딩 선호·점수/대표 대상 producer 계약에 대한 운영 이해 점검은
-            아직 실시하지 않았다. 운영 연결 전에 요청 소유권, 같은
+            상태: 기술 구현·로컬 게이트 및 Compose DB smoke 완료, 운영 제어 보류. 후속 G24~G27·G28~G31,
+            CQ-REV-011·PERS-001~003·GUEST-001~004 보완은 승인된 범위로 반영했지만, 실제 업무 PostgreSQL
+            lock/EXPLAIN/p95·점수/대표 대상 producer 계약·rate-limit/session-cap enforcement에 대한 운영
+            이해 점검은 아직 실시하지 않았다. 운영 연결 전에 JWT member와 cookie guest의 요청 소유권, 같은
             묶음 재시도/동시성, 24시간 만료 race, 후보 탐색 상한과 빈 피드 구분, AVAILABLE 기사
             정책을 담당자가 설명하고 격리 환경 증거로 재검증해야 한다. 이 점검은 기술 완료나
             설계 승인과 별개다.

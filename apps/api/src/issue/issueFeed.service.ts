@@ -108,11 +108,17 @@ export class IssueFeedService {
     const excludedIssueIds = new Set(
       previousBatches.flatMap((batch) => batch.items.map((item) => item.issueId)),
     );
-    const latestInteractions = await this.repository.findLatestInteractions(session.owner.userId);
+    const latestInteractions =
+      session.owner.kind === 'MEMBER'
+        ? await this.repository.findLatestInteractions(session.owner.userId)
+        : [];
     for (const interaction of latestInteractions) excludedIssueIds.add(interaction.issueId);
 
     const actedCategoryCodes = await this.findActedCategoryCodes(latestInteractions);
-    const context = await this.repository.findUserContext(session.owner.userId);
+    const context =
+      session.owner.kind === 'MEMBER'
+        ? await this.repository.findUserContext(session.owner.userId)
+        : null;
     const connectedIssueIds = await this.findConnectedIssueIds(latestInteractions);
     const issues = await this.repository.findCandidates(
       excludedIssueIds,
@@ -239,7 +245,9 @@ export class IssueFeedService {
 }
 
 export function normalizeOwner(owner: FeedOwnerInput): FeedOwner {
-  return { userId: owner.userId.toLowerCase() };
+  return owner.kind === 'MEMBER'
+    ? { kind: 'MEMBER', userId: owner.userId.toLowerCase() }
+    : { kind: 'GUEST', guestTokenHash: owner.guestTokenHash.toLowerCase() };
 }
 
 function isUsableCard(issue: IssueRecord): boolean {
