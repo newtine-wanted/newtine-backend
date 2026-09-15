@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Docker ttsc 빌드 캐시 개선 설계</title>
+    <meta name="purpose" content="Docker에서 ttsc 네이티브 플러그인 cold build 반복을 줄이는 빌드 경로 개선" />
+    <meta name="audience" content="NEWTINE 백엔드 개발자와 빌드 운영자" />
+    <meta name="problem" content="소스 변경 때마다 Docker의 ttsc 네이티브 플러그인 캐시가 사라져 저메모리 환경에서 빌드가 반복적으로 느림" />
+    <meta name="core-flow" content="Docker BuildKit 캐시 mount로 ttsc 캐시 보존 → 순차 빌드 → 연속 빌드 시간과 산출물 검증" />
+    <style>
+      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; }
+      body { margin: 0; color: #182230; background: #f5f7fa; }
+      header, main { max-width: 960px; margin: 0 auto; padding: 24px; }
+      header { padding-bottom: 8px; }
+      article { background: #fff; border: 1px solid #d9e0e8; border-radius: 12px; padding: 24px; }
+      section { margin: 0 0 28px; }
+      h1, h2 { line-height: 1.25; }
+      h1 { margin: 0 0 8px; }
+      h2 { border-bottom: 1px solid #e5eaf0; padding-bottom: 8px; }
+      dt { font-weight: 700; margin-top: 10px; }
+      dd { margin: 2px 0 0; }
+      code, pre { background: #f0f3f7; border-radius: 5px; }
+      code { padding: 1px 4px; }
+      pre { padding: 12px; overflow-x: auto; }
+      .state { display: inline-block; padding: 4px 8px; border-radius: 999px; background: #e5f5ea; color: #176b35; font-weight: 700; }
+      .risk { border-left: 4px solid #d88900; padding: 8px 12px; background: #fff8e8; }
+      fieldset { border: 1px solid #d9e0e8; border-radius: 8px; margin: 16px 0; padding: 16px; }
+      legend { font-weight: 700; }
+      label { display: block; margin: 8px 0; }
+      button { border: 0; border-radius: 6px; padding: 8px 12px; margin-right: 8px; cursor: pointer; background: #1e5eff; color: white; }
+      button.secondary { background: #667085; }
+      [hidden] { display: none; }
+      .result { margin-top: 16px; padding: 12px; border-radius: 8px; background: #eef7ff; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Docker ttsc 빌드 캐시 개선 설계</h1>
+      <p><span class="state">설계 승인됨</span> · 강도: Compact · 기준일: 2026-09-16</p>
+    </header>
+    <main>
+      <article>
+        <nav aria-label="문서 목차">
+          <a href="#model">목적</a> · <a href="#decision">결정</a> · <a href="#risk">불변식·위험</a> · <a href="#control">설계 이해 점검</a>
+        </nav>
+
+        <section id="model">
+          <h2>목적과 범위</h2>
+          <dl>
+            <dt>목표</dt>
+            <dd>Docker 소스 변경 때 반복되는 ttsc 네이티브 플러그인 cold build를 줄인다.</dd>
+            <dt>범위</dt>
+            <dd><code>Dockerfile</code>의 BuildKit cache mount와 중첩 <code>node_modules</code>를 제외하는 <code>.dockerignore</code> 보완을 적용한다.</dd>
+            <dt>비범위</dt>
+            <dd>ttsc/Typia 교체, <code>GOMAXPROCS</code>·<code>GOGC</code> 변경, 런타임 이미지 구조 변경, 애플리케이션 코드 변경.</dd>
+          </dl>
+        </section>
+
+        <section id="decision">
+          <h2>확정 결정</h2>
+          <ol>
+            <li>중첩 dependency cache가 Docker context에 들어오지 않도록 <code>.dockerignore</code>에 중첩 <code>node_modules</code> 패턴을 명시한다.</li>
+            <li><code>/app/node_modules/.cache/ttsc</code>를 BuildKit cache mount로 보존한다.</li>
+            <li>캐시 id는 <code>newtine-backend-ttsc</code>로 고정하고 <code>sharing=locked</code>로 동시 plugin build 경합을 피한다.</li>
+            <li>기존 저메모리 설정은 유지하고, 컨텍스트 크기·연속 Docker build·산출물을 검증한다.</li>
+          </ol>
+          <pre><code>.dockerignore
+**/node_modules/
+
+Dockerfile
+RUN --mount=type=cache,id=newtine-backend-ttsc,target=/app/node_modules/.cache/ttsc,sharing=locked \
+    npm run build</code></pre>
+          <p>호스트에서 확인된 약 3.2GB의 ttsc cache는 Docker context에 복사하지 않고 BuildKit builder가 별도로 보존한다.</p>
+        </section>
+
+        <section id="risk">
+          <h2>불변식·실패 복구</h2>
+          <ul>
+            <li>runtime stage와 애플리케이션 실행 동작은 변경하지 않는다.</li>
+            <li>Docker context에는 dependency directory가 포함되지 않으며, context transfer가 수 MB 수준으로 줄어야 한다.</li>
+            <li>캐시가 없거나 손상되어도 <code>npm run build</code>가 다시 plugin을 컴파일하는 fallback이 남는다.</li>
+            <li><code>sharing=locked</code>는 같은 builder의 동시 빌드 일부를 직렬화할 수 있다.</li>
+            <li>다른 아키텍처·컴파일러 버전으로 전환할 때는 캐시 id를 분리하거나 clean build를 수행한다.</li>
+          </ul>
+          <p class="risk"><strong>가장 큰 잔여 위험:</strong> BuildKit cache mount를 지원하지 않는 CI builder에서는 문법 또는 캐시 동작이 달라질 수 있다. 그런 환경은 clean build로도 검증해야 한다.</p>
+        </section>
+
+        <section id="grilling-state">
+          <h2>설계 의사결정 기록</h2>
+          <dl>
+            <dt>진행 상태</dt><dd>완료</dd>
+            <dt>확정 근거</dt><dd>Docker Desktop 1.93GiB·2 CPU, 호스트 ttsc cache 약 3.2GB, 반복되는 Docker <code>RUN npm run build</code> cache layer 약 3.48GB, cold build 약 353초 기록. 새 검증에서 Docker context 3.26GB와 <code>apps/api/node_modules/.cache/ttsc</code> 포함을 관찰했다.</dd>
+            <dt>보류 범위</dt><dd>메모리 증설과 <code>GOMAXPROCS</code> 조정은 cache mount 효과 확인 후 별도 판단한다.</dd>
+            <dt>현재 frontier</dt><dd>해결 — <code>**/node_modules/</code>로 root와 nested dependency를 모두 제외한다.</dd>
+          </dl>
+        </section>
+
+        <section id="control">
+          <h2>설계 이해·통제 점검 (design-control)</h2>
+          <p>추가 설계 결정은 <code>**/node_modules/</code>로 확정했다. 점검 상태는 미실시이며, 구현 승인은 별도 기록으로 관리한다.</p>
+          <form id="control-form">
+            <p id="progress" aria-live="polite">질문 1 / 4</p>
+            <fieldset data-question="0">
+              <legend>Q1. 소스 파일을 수정하면 무엇이 재사용되는가?</legend>
+              <label><input type="radio" name="q0" value="a" /> 애플리케이션 runtime 이미지 전체</label>
+              <label><input type="radio" name="q0" value="b" /> BuildKit이 보존한 ttsc plugin cache</label>
+              <label><input type="radio" name="q0" value="c" /> 기존 dist가 항상 그대로 재사용됨</label>
+            </fieldset>
+            <fieldset data-question="1" hidden>
+              <legend>Q2. cache mount가 손상되거나 사라지면 어떻게 되는가?</legend>
+              <label><input type="radio" name="q1" value="a" /> 빌드가 반드시 실패함</label>
+              <label><input type="radio" name="q1" value="b" /> plugin을 다시 컴파일하므로 느려질 수 있음</label>
+              <label><input type="radio" name="q1" value="c" /> runtime 데이터가 삭제됨</label>
+            </fieldset>
+            <fieldset data-question="2" hidden>
+              <legend>Q3. <code>sharing=locked</code>의 주된 대가는 무엇인가?</legend>
+              <label><input type="radio" name="q2" value="a" /> 동시 build의 cache 구간이 직렬화될 수 있음</label>
+              <label><input type="radio" name="q2" value="b" /> production API 요청이 느려짐</label>
+              <label><input type="radio" name="q2" value="c" /> TypeScript 변환이 비활성화됨</label>
+            </fieldset>
+            <fieldset data-question="3" hidden>
+              <legend>Q4. 효과를 확인하는 최소 검증은 무엇인가?</legend>
+              <label><input type="radio" name="q3" value="a" /> Docker build를 한 번만 실행</label>
+              <label><input type="radio" name="q3" value="b" /> 연속 build에서 plugin 재컴파일 감소와 산출물 성공을 확인</label>
+              <label><input type="radio" name="q3" value="c" /> tsc로 바꾼 뒤 TypeScript 오류만 확인</label>
+            </fieldset>
+            <button type="button" id="previous" class="secondary">이전</button>
+            <button type="button" id="next">다음</button>
+            <button type="submit" id="submit" hidden>답변 제출</button>
+            <div id="result" class="result" hidden>
+              <strong id="result-status"></strong>
+              <p id="result-explanation"></p>
+              <p id="result-next"></p>
+            </div>
+          </form>
+        </section>
+
+        <section id="approval-state">
+          <h2>승인 상태</h2>
+          <p>2026-09-16 사용자 지시 <q>그럼 개선하자</q>와 후속 지시 <q>그래 개선해</q>로 cache mount와 중첩 <code>node_modules</code> 제외 범위를 승인했다.</p>
+          <p>승인 범위: <code>Dockerfile</code>의 ttsc BuildKit cache mount, <code>.dockerignore</code>의 <code>**/node_modules/</code>, context 크기와 연속 Docker build 검증.</p>
+        </section>
+      </article>
+    </main>
+    <script>
+      (() => {
+        const answers = ['b', 'b', 'a', 'b'];
+        const questions = [...document.querySelectorAll('[data-question]')];
+        const progress = document.querySelector('#progress');
+        const previous = document.querySelector('#previous');
+        const next = document.querySelector('#next');
+        const submit = document.querySelector('#submit');
+        const form = document.querySelector('#control-form');
+        const result = document.querySelector('#result');
+        let current = 0;
+        const render = () => {
+          questions.forEach((question, index) => { question.hidden = index !== current; });
+          progress.textContent = `질문 ${current + 1} / ${questions.length}`;
+          previous.disabled = current === 0;
+          next.hidden = current === questions.length - 1;
+          submit.hidden = current !== questions.length - 1;
+        };
+        previous.addEventListener('click', () => { current -= 1; render(); });
+        next.addEventListener('click', () => { current += 1; render(); });
+        form.addEventListener('submit', (event) => {
+          event.preventDefault();
+          const score = answers.reduce((sum, answer, index) => sum + (form.elements[`q${index}`].value === answer ? 1 : 0), 0);
+          document.querySelector('#result-status').textContent = score === answers.length ? '상태: 확립' : '상태: 보류';
+          document.querySelector('#result-explanation').textContent = `${score}/${answers.length}개 항목을 확인했습니다. 캐시가 빌드 산출물과 runtime 이미지에 미치는 범위를 구분합니다.`;
+          document.querySelector('#result-next').textContent = score === answers.length ? '다음 행동: 연속 Docker build 검증 결과를 implementation-control 문서에 기록합니다.' : '다음 행동: 캐시 경계와 clean build fallback을 다시 확인합니다.';
+          result.hidden = false;
+        });
+        render();
+      })();
+    </script>
+  </body>
+</html>
