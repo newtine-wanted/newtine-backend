@@ -9,7 +9,7 @@ import {
   type NewsSearchProvider,
 } from '@newtine/core';
 
-const NAVER_SEARCH_URL = 'https://openapi.naver.com/v1/search/news.json';
+const NAVER_SEARCH_URL = 'https://naverapihub.apigw.ntruss.com/search/v1/news';
 const NAVER_ARTICLE_HOSTS = new Set([
   'news.naver.com',
   'n.news.naver.com',
@@ -38,11 +38,12 @@ export class NaverNewsProvider implements NewsSearchProvider {
     url.searchParams.set('display', String(Math.min(100, Math.max(1, limit))));
     url.searchParams.set('start', '1');
     url.searchParams.set('sort', 'date');
+    url.searchParams.set('format', 'json');
 
     const response = await fetchOnce(url, {
       headers: {
-        'X-Naver-Client-Id': clientId,
-        'X-Naver-Client-Secret': clientSecret,
+        'X-NCP-APIGW-API-KEY-ID': clientId,
+        'X-NCP-APIGW-API-KEY': clientSecret,
         accept: 'application/json',
       },
     });
