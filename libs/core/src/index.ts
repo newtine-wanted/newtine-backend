@@ -108,6 +108,29 @@ export type {
   NewsSearchProvider,
   SemanticValidator,
 } from './pipeline/domain/pipeline.ports.js';
+export type {
+  AgeGroup as IssueAgeGroup,
+  FeedBatchItemRecord,
+  FeedBatchRecord,
+  FeedAlgorithmSnapshot,
+  FeedContinuation,
+  FeedOwner,
+  FeedSessionRecord,
+  GuestFeedOwner,
+  IssueArticleRecord,
+  IssueCandidateScope,
+  IssueGlossaryRecord,
+  IssueImpactRecord,
+  IssueQueryRepository,
+  IssueRecord,
+  IssueRelationRecord,
+  IssueSelectionType,
+  MemberFeedOwner,
+  IssueViewpointRecord,
+  UserInteractionRecord,
+  UserRecommendationContext,
+} from './issue/repository/type/issueQuery.repository.js';
+export { ISSUE_QUERY_REPOSITORY } from './issue/repository/type/issueQuery.repository.js';
 export {
   AgeGroup,
   EntityType,

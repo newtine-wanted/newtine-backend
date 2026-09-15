@@ -11,6 +11,9 @@ import {
 const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionSpec>> = {
   issue: {
     [IssueExceptionCode.NotFound]: ApiException.NotFound,
+    [IssueExceptionCode.FeedSessionNotFound]: ApiException.NotFound,
+    [IssueExceptionCode.FeedSessionExpired]: ApiException.Gone,
+    [IssueExceptionCode.FeedBatchConflict]: ApiException.Conflict,
   },
   pipeline: {
     [PipelineExceptionCode.InvalidInput]: ApiException.InvalidArgument,

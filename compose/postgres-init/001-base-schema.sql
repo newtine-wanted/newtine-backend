@@ -57,4 +57,15 @@ CREATE TABLE user_entity_preferences (
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
+-- user_interaction_events is application-owned. The interest migration creates
+-- it after the issue tables exist; the migration smoke must exercise that path.
+
+-- Guard for scripts that mutate only the disposable acceptance database.
+CREATE TABLE smoke_environment_marker (
+  environment text PRIMARY KEY
+);
+
+INSERT INTO smoke_environment_marker (environment)
+VALUES ('issue-card-query-smoke');
+
 COMMIT;

@@ -49,14 +49,14 @@ const ready = new Promise((resolve, reject) => {
   });
 });
 
-function get(path) {
+function get(path, headers = {}) {
   return new Promise((resolve, reject) => {
     if (!apiPort) {
       reject(new Error('API port is not known yet'));
       return;
     }
 
-    const req = request({ host, port: apiPort, path, method: 'GET' }, (response) => {
+    const req = request({ host, port: apiPort, path, method: 'GET', headers }, (response) => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => {
@@ -70,11 +70,11 @@ function get(path) {
   });
 }
 
-function postJson(path, payload) {
-  return postRawJson(path, JSON.stringify(payload));
+function postJson(path, payload, headers = {}) {
+  return postRawJson(path, JSON.stringify(payload), headers);
 }
 
-function postRawJson(path, body) {
+function postRawJson(path, body, headers = {}) {
   return new Promise((resolve, reject) => {
     if (!apiPort) {
       reject(new Error('API port is not known yet'));
@@ -90,6 +90,7 @@ function postRawJson(path, body) {
         headers: {
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(body),
+          ...headers,
         },
       },
       (response) => {
@@ -105,6 +106,18 @@ function postRawJson(path, body) {
     req.on('error', reject);
     req.end(body);
   });
+}
+
+function readSetCookie(response, name) {
+  const cookie = response.headers['set-cookie']?.find((value) => value.startsWith(`${name}=`));
+  assert.ok(cookie, `${name} cookie missing`);
+  const value = cookie.slice(name.length + 1).split(';', 1)[0];
+  if (name === 'newtine_feed_guest') {
+    assert.match(decodeURIComponent(value), /^v1\.\d+\.\d+\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  } else {
+    assert.match(value, /^[A-Za-z0-9_-]{43}$/);
+  }
+  return `${name}=${value}`;
 }
 
 async function waitForApi() {
@@ -204,6 +217,52 @@ try {
   assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /newtine_refresh=;/);
   assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /Max-Age=0/);
 
+  function assertFeedPage(result) {
+    assert.equal(result.response.statusCode, 200);
+    assert.match(result.response.headers['cache-control'] ?? '', /private/);
+    assert.match(result.response.headers['cache-control'] ?? '', /no-store/);
+    const body = JSON.parse(result.body);
+    assert.ok(Array.isArray(body.items));
+    assert.equal(Object.hasOwn(body, 'sessionId'), false);
+    assert.equal(Object.hasOwn(body, 'batchNo'), false);
+    assert.equal(Object.hasOwn(body, 'nextBatchNo'), false);
+    assert.ok(body.nextCursor === null || typeof body.nextCursor === 'string');
+    return body;
+  }
+
+  const guestFeed = await get('/feed');
+  const guestFeedBody = assertFeedPage(guestFeed);
+  const guestCookie = readSetCookie(guestFeed.response, 'newtine_feed_guest');
+  const guestCookieValue =
+    guestFeed.response.headers['set-cookie']?.find((value) =>
+      value.startsWith('newtine_feed_guest='),
+    ) ?? '';
+  assert.match(guestCookieValue, /Path=\/feed/);
+  assert.match(guestCookieValue, /HttpOnly/);
+  assert.match(guestCookieValue, /SameSite=Lax/);
+
+  const guestCursor = guestFeedBody.nextCursor;
+  if (guestCursor !== null) {
+    const guestNext = await get(`/feed?cursor=${encodeURIComponent(guestCursor)}`, {
+      Cookie: guestCookie,
+    });
+    const guestNextBody = assertFeedPage(guestNext);
+    const guestReplay = await get(`/feed?cursor=${encodeURIComponent(guestCursor)}`, {
+      Cookie: guestCookie,
+    });
+    assert.deepEqual(JSON.parse(guestReplay.body), guestNextBody);
+
+    const missingGuestCookie = await get(`/feed?cursor=${encodeURIComponent(guestCursor)}`);
+    assert.equal(missingGuestCookie.response.statusCode, 401);
+    assert.equal(JSON.parse(missingGuestCookie.body).code, 'UNAUTHORIZED');
+  }
+
+  const memberFeed = await get('/feed', {
+    Authorization: 'Bearer deliberately-invalid-token',
+  });
+  assert.equal(memberFeed.response.statusCode, 401);
+  assert.equal(JSON.parse(memberFeed.body).code, 'UNAUTHORIZED');
+
   const invalidSearch = await postJson('/issues/search', { query: '', unexpected: true });
   assert.equal(invalidSearch.response.statusCode, 400);
   assert.equal(
@@ -290,7 +349,7 @@ try {
   );
 
   console.log(
-    'API smoke passed: health, search, auth route boundaries, four-field failures, parser 400/413, JSON logs, and request ID correlation',
+    'API smoke passed: health, search, auth route boundaries, member+guest feed, four-field failures, parser 400/413, JSON logs, and request ID correlation',
   );
 } finally {
   await stopApi();

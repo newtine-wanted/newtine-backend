@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="purpose" content="승인된 PR #3 issue-card-query 최신 main 통합과 회원 전용 feed 인증 전환을 구현·검증한다" />
+    <meta name="audience" content="PR을 통합·검증하는 백엔드 개발자" />
+    <meta name="problem" content="최신 main의 JWT principal과 PR #3 issue-card-query를 결합하고 raw user header·guest feed credential 없이 회원 소유권과 migration·생성 계약을 검증한다" />
+    <meta name="core-flow" content="checkpoint → 최신 main merge·충돌 해소 → principal wiring → feed guest 제거 migration → 계약 재생성 → local gate → PR branch 갱신" />
+    <title>PR #3 issue-card-query·회원 feed 인증 통합 구현 기록</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; line-height: 1.55; color: #182230; }
+      body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
+      header, section, aside { border: 1px solid #d8dee8; border-radius: .6rem; padding: 1rem; margin: 1rem 0; }
+      header { background: #f4f7fb; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #d8dee8; padding: .55rem; vertical-align: top; text-align: left; }
+      th { background: #f4f7fb; }
+      code, samp { background: #eef1f5; padding: .08rem .25rem; border-radius: .2rem; }
+      .status { font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>PR #3 issue-card-query·회원 feed 인증 통합 구현</h1>
+      <p>구현-control 기록 · <span class="status">구현 완료</span></p>
+      <dl>
+        <dt>목적</dt><dd>승인된 PR #3 issue-card-query 최신 main 통합과 회원 전용 feed 인증 전환을 구현·검증한다.</dd>
+        <dt>사용자</dt><dd>PR을 통합·검증하는 백엔드 개발자.</dd>
+        <dt>문제</dt><dd>pipeline/onboarding과 PR #5 인증이 추가된 <code>origin/main=1215526</code>과 PR branch의 issue-card-query를 합치고, feed를 검증된 회원 principal 소유권으로 전환한다.</dd>
+        <dt>핵심 흐름</dt><dd>checkpoint → 최신 main merge·충돌 해소 → principal wiring → guest feed 제거 migration → 계약 재생성 → local gate → PR branch 갱신.</dd>
+        <dt>기준선</dt><dd><a href="issue-card-query-main-integration-design.html">issue-card-query-main-integration-design.html</a> · <time datetime="2026-09-15">2026-09-15 KST</time> 사용자 <code>ㅇㅋ 그러면 그렇게 구현 ㄱㄱ</code> 승인 범위.</dd>
+      </dl>
+    </header>
+
+    <main>
+      <section id="baseline-reference">
+        <h2>승인된 실행 계약</h2>
+        <ul>
+          <li><strong>범위:</strong> 최신 <code>origin/main</code> merge, 공통 예외·module·export·생성 계약·migration 등록 해소, feed schema의 회원 전용 전환, auth principal wiring, 관련 검증.</li>
+          <li><strong>불변식:</strong> pipeline/onboarding과 issue-card-query API·repository·테스트를 모두 보존한다. 공개 issue 상세 의미와 pipeline 상태 머신은 바꾸지 않으며, feed session owner는 검증된 JWT principal.userId 하나뿐이다.</li>
+          <li><strong>migration:</strong> 기존 issue-card-query migration history를 보존하고, guest column·constraint를 제거하며 user_id NOT NULL을 보장하는 ordered TypeScript migration을 추가한다. 모든 down은 데이터 삭제 없이 명시적으로 중단한다.</li>
+          <li><strong>generated:</strong> source 통합 후 <code>npm run contracts:all</code>로 재생성한다.</li>
+          <li><strong>금지:</strong> rebase/force-push, PR 기능 삭제, generated 파일 수동 합성, JWT·refresh foundation 변경, raw <code>x-user-id</code> 또는 <code>x-feed-guest-key</code> fallback.</li>
+          <li><strong>focused 검증:</strong> merge conflict 없음, <code>git diff --check</code>, auth/feed route matrix, migration·contract generation/check, typecheck, 관련 unit/integration, Compose smoke, build 및 저장소 gate.</li>
+        </ul>
+      </section>
+
+      <section id="current-implementation">
+        <h2>현재 구현</h2>
+        <p>PR worktree <code>.worktrees/issue-card-query</code>의 기존 hardening 변경을 checkpoint <code>bca46e6</code>로 보존하고, <code>origin/main=1215526</code> 인증 baseline merge 충돌을 <code>df94767</code>로 확정했다. 현재 main worktree의 사용자 변경은 건드리지 않았다.</p>
+        <ol>
+          <li>기존 production issue-card adapter·ORM entity·test fixture 경계를 checkpoint로 보존했다.</li>
+          <li>origin/main의 auth module·JWT principal·role·Compose 기반을 merge하고 공통 conflict를 합집합으로 해소했다.</li>
+          <li>feed controller/service/repository/schema를 회원 JWT owner로 전환하고 guest credential 경계를 제거했다.</li>
+          <li>source 통합 후 SDK/e2e/OpenAPI를 재생성했다.</li>
+          <li>auth/feed route matrix, migration, Compose smoke와 저장소 gate를 실행했다. 원격 PR push는 별도 승인·실행 대상으로 남겼다.</li>
+        </ol>
+      </section>
+
+      <section id="implementation-status">
+        <h2>구현 상태</h2>
+        <p><strong>구현 완료.</strong> <time datetime="2026-09-15">2026-09-15 KST</time> 사용자 승인 범위에 따라 최신 main 인증 principal을 issue/feed에 연결하고, feed를 회원 전용으로 전환했다. 로컬·fresh Compose PostgreSQL·계약·빌드 검증을 완료했으며, 현재 브랜치는 로컬 merge commit 상태이고 원격 push는 아직 하지 않았다.</p>
+      </section>
+
+      <section id="design-delta">
+        <h2>설계 delta와 영향 범위</h2>
+        <table>
+          <caption>승인 baseline 대비 이번 구현 변경</caption>
+          <thead><tr><th>ID</th><th>변경</th><th>영향</th><th>안전 경계</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>AUTH-MEMBER-FEED-001</td>
+              <td>feed session을 회원 JWT 필수로 전환하고 <code>x-feed-guest-key</code>와 guest schema를 제거한다.</td>
+              <td>feed 생성 응답·요청 contract, owner port, persistence entity, DB migration이 변경된다.</td>
+              <td>공개 issue 상세는 유지한다. feed에는 <code>request.principal.userId</code>만 전달하고 raw header fallback은 금지한다.</td>
+            </tr>
+            <tr>
+              <td>AUTH-PRINCIPAL-002</td>
+              <td>issue/feed consumer를 main의 <code>JwtAuthGuard</code>·<code>CurrentUser</code>에 연결한다.</td>
+              <td>strict feed·pipeline은 401/403 경계를 갖고, 공개 상세는 optional Bearer만 허용한다.</td>
+              <td>토큰·refresh foundation은 변경하지 않고, 유효하지 않은 Bearer를 익명으로 강등하지 않는다.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="issue-register">
+        <h2>Issue register</h2>
+        <table>
+          <caption>구현 이슈와 해결 증거</caption>
+          <thead><tr><th>ID</th><th>상태</th><th>증상·원인</th><th>조치·검증</th><th>잔여 위험</th></tr></thead>
+          <tbody>
+            <tr><td>PR3-MERGE-001</td><td>로컬 해결됨</td><td>PR #3 branch와 최신 main 사이에 generated·database options·smoke·integration test 충돌이 있었다.</td><td><code>origin/main=1215526</code>을 merge하고 source conflict를 합집합으로 정리한 뒤 <code>npm run contracts:all</code>로 generated를 재생성했다. <code>df94767</code> merge commit을 만들고 conflict marker·whitespace를 확인했다.</td><td>원격 PR에는 아직 push하지 않았으므로 GitHub mergeability/checks는 미확인이다.</td></tr>
+            <tr><td>PR3-MERGE-002</td><td>검증됨</td><td>fresh Compose DB에서 production read path가 참조하는 base table이 모두 필요하다.</td><td>local-only base fixture에 <code>user_interaction_events</code>와 bounded index를 추가하고, migration 전체 적용 후 authenticated member feed batch를 실제 PostgreSQL에서 성공시켰다.</td><td>production base-schema owner가 동일한 table 계약·foreign key를 계속 보장해야 한다.</td></tr>
+            <tr><td>AUTH-MEMBER-FEED-001</td><td>해결됨</td><td>기존 feed가 raw <code>x-user-id</code>와 guest key를 owner 입력으로 받았다.</td><td>JWT principal 기반 controller·service·repository로 전환하고 <code>user_id NOT NULL</code>·guest column 제거 migration, member feed 성공/비인증 401 smoke와 contract를 추가했다.</td><td>기존 guest client는 401을 받으므로 API consumer 전환이 필요하다. 기존 DB에 guest session이 있으면 migration은 의도적으로 fail-closed 된다.</td></tr>
+            <tr><td>AUTH-PIPELINE-002</td><td>해결됨</td><td>pipeline run·retry·interrupt route가 무인증이었다.</td><td>main auth module의 <code>JwtAuthGuard + RolesGuard + ADMIN</code>을 controller 경계에 적용하고 일반 USER의 403 Compose smoke와 unit guard 회귀를 통과시켰다.</td><td>운영 pipeline caller가 ADMIN access token을 공급해야 한다.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="verification-evidence">
+        <h2>검증 증거</h2>
+        <table>
+          <caption>실행한 기술 검증</caption>
+          <thead><tr><th>명령</th><th>결과</th><th>관찰된 증거</th></tr></thead>
+          <tbody>
+            <tr><td><code>npm run contracts:check</code></td><td>통과</td><td>6 controllers, 18 paths/routes; contract 4 tests와 generated typecheck 통과. feed/pipeline bearerAuth와 public detail optional security가 생성됐다.</td></tr>
+            <tr><td><code>npm run test:jest -- test/unit/auth.test.ts test/unit/issueCardQuery.test.ts test/unit/issueCardQuery.repository.test.ts test/integration/databaseOptions.test.ts</code></td><td>통과</td><td>4 suites, 39 tests.</td></tr>
+            <tr><td><code>npm run format:check</code> · <code>npm run lint</code> · <code>npm run typecheck</code></td><td>통과</td><td>최종 post-merge 상태 기준 Prettier, ESLint, 전체 TypeScript typecheck 통과.</td></tr>
+            <tr><td><code>npm test</code></td><td>통과</td><td>unit 24 suites/139 tests, integration 2 suites/11 tests.</td></tr>
+            <tr><td><code>npm run build</code></td><td>통과</td><td>API와 batch build 모두 통과.</td></tr>
+            <tr><td><code>docker run ... migrate.mjs up</code> · fresh Compose DB</td><td>통과</td><td>빈 PostgreSQL volume에서 onboarding·pipeline·issue-card·authentication·member-only feed migration 전체 적용.</td></tr>
+            <tr><td><code>npm run test:smoke:compose</code></td><td>통과</td><td>production Secure cookie 설정 API에서 signup, protected API, member feed 생성/batch, USER pipeline 403, login, refresh rotation/reuse revoke, logout 통과.</td></tr>
+            <tr><td><code>npm run test:smoke</code></td><td>통과</td><td>Compose PostgreSQL을 사용하는 API smoke에서 member-only feed 비인증 401과 parser/log/request-id 경계 통과.</td></tr>
+            <tr><td><code>git diff --check</code> · staged conflict check</td><td>통과</td><td>whitespace 오류와 unresolved conflict 없음.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="verification-gaps">
+        <h2>검증 공백과 잔여 위험</h2>
+        <ul>
+          <li>fresh Compose PostgreSQL migration과 API 왕복은 검증했지만, 기존 volume에 남은 guest session은 삭제하지 않았고 migration이 fail-closed 되는 것까지 확인했다. 해당 데이터의 제품/운영 정리 결정은 별도다.</li>
+          <li>Docker cold build는 두 번째 시도에서 Docker Desktop 메모리 부족으로 실패했지만, 로컬 build와 첫 Compose image build는 통과했고 기존 성공 image로 fresh DB smoke를 완료했다.</li>
+          <li>현재 변경은 로컬 branch <code>df94767</code>에만 있다. 원격 PR mergeability/checks는 push 후 별도 확인한다.</li>
+        </ul>
+      </section>
+
+      <section id="implementation-control-state">
+        <h2>implementation-control-state</h2>
+        <dl>
+          <dt>lifecycle</dt><dd>구현 완료</dd>
+          <dt>developer-understanding-state</dt><dd>구현 handoff 항목 확인 필요</dd>
+          <dt>coverage</dt><dd>기존 merge·migration·generated 축에 auth principal, feed 소유권, guest schema 제거, optional public detail, 401/403 실패 경계, 실제 PostgreSQL migration/feed/auth smoke 축을 추가했다.</dd>
+          <dt>design-delta</dt><dd><code>AUTH-MEMBER-FEED-001</code>과 <code>AUTH-PRINCIPAL-002</code>를 <time datetime="2026-09-15">2026-09-15 KST</time> 사용자 승인으로 수용했다. 이후 실제 diff가 이 범위를 넘어가면 설계 재승인으로 전환한다.</dd>
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>

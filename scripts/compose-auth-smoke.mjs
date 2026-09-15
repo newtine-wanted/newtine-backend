@@ -37,6 +37,22 @@ function cookieHeader(token) {
   return `newtine_refresh=${token}`;
 }
 
+function feedGuestCookie(result) {
+  const setCookies =
+    typeof result.response.headers.getSetCookie === 'function'
+      ? result.response.headers.getSetCookie()
+      : [result.response.headers.get('set-cookie') ?? ''];
+  const value = setCookies.find((cookie) => cookie.startsWith('newtine_feed_guest='));
+  assert.ok(value, `guest feed cookie missing for ${result.response.url}`);
+  assert.match(value, /Path=\/feed/);
+  assert.match(value, /HttpOnly/);
+  assert.match(value, /SameSite=Lax/);
+  assert.match(value, /Secure/);
+  const token = decodeURIComponent(value.slice('newtine_feed_guest='.length).split(';', 1)[0]);
+  assert.match(token, /^v1\.\d+\.\d+\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
+  return `newtine_feed_guest=${token}`;
+}
+
 async function refresh(token) {
   return request('/auth/refresh', {
     method: 'POST',
@@ -69,6 +85,77 @@ assert.equal(onboarding.status, 'PENDING');
 assert.equal(onboarding.completedAt, null);
 assert.equal(onboarding.ageGroup, null);
 assert.deepEqual(onboarding.regionCodes, []);
+
+function assertFeedPage(result) {
+  assert.equal(result.response.status, 200);
+  assert.match(result.response.headers.get('cache-control') ?? '', /private/);
+  assert.match(result.response.headers.get('cache-control') ?? '', /no-store/);
+  const body = parseJson(result);
+  assert.ok(Array.isArray(body.items));
+  assert.equal(Object.hasOwn(body, 'sessionId'), false);
+  assert.equal(Object.hasOwn(body, 'batchNo'), false);
+  assert.equal(Object.hasOwn(body, 'nextBatchNo'), false);
+  assert.ok(body.nextCursor === null || typeof body.nextCursor === 'string');
+  return body;
+}
+
+const memberFeedResponse = await request('/feed', {
+  headers: { Authorization: `Bearer ${signupBody.accessToken}` },
+});
+const memberFeed = assertFeedPage(memberFeedResponse);
+const memberCursor = memberFeed.nextCursor;
+if (memberCursor !== null) {
+  const memberNext = await request(`/feed?cursor=${encodeURIComponent(memberCursor)}`, {
+    headers: { Authorization: `Bearer ${signupBody.accessToken}` },
+  });
+  const memberNextBody = assertFeedPage(memberNext);
+  const memberReplay = await request(`/feed?cursor=${encodeURIComponent(memberCursor)}`, {
+    headers: { Authorization: `Bearer ${signupBody.accessToken}` },
+  });
+  assert.deepEqual(parseJson(memberReplay), memberNextBody);
+}
+
+const guestFeedResponse = await request('/feed');
+const guestFeed = assertFeedPage(guestFeedResponse);
+const guestCookie = feedGuestCookie(guestFeedResponse);
+const guestCursor = guestFeed.nextCursor;
+if (guestCursor !== null) {
+  const guestNext = await request(`/feed?cursor=${encodeURIComponent(guestCursor)}`, {
+    headers: { Cookie: guestCookie },
+  });
+  const guestNextBody = assertFeedPage(guestNext);
+  const guestReplay = await request(`/feed?cursor=${encodeURIComponent(guestCursor)}`, {
+    headers: { Cookie: guestCookie },
+  });
+  assert.deepEqual(parseJson(guestReplay), guestNextBody);
+
+  const guestWithoutCookie = await request(`/feed?cursor=${encodeURIComponent(guestCursor)}`);
+  assert.equal(guestWithoutCookie.response.status, 401);
+  assert.equal(parseJson(guestWithoutCookie).code, 'UNAUTHORIZED');
+}
+
+const invalidJwtFeed = await request('/feed', {
+  headers: { Authorization: 'Bearer deliberately-invalid-token' },
+});
+assert.equal(invalidJwtFeed.response.status, 401);
+assert.equal(parseJson(invalidJwtFeed).code, 'UNAUTHORIZED');
+
+const forgedCookie = `newtine_feed_guest=${'A'.repeat(43)}.${'B'.repeat(43)}`;
+const forgedGuestCreate = await request('/feed', { headers: { Cookie: forgedCookie } });
+assertFeedPage(forgedGuestCreate);
+assert.notEqual(feedGuestCookie(forgedGuestCreate), forgedCookie);
+
+const userPipelineResponse = await request('/pipeline/runs', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    Authorization: `Bearer ${signupBody.accessToken}`,
+    'idempotency-key': `compose-user-pipeline-${Date.now()}`,
+  },
+  body: JSON.stringify({ query: '권한 경계 smoke' }),
+});
+assert.equal(userPipelineResponse.response.status, 403);
+assert.equal(parseJson(userPipelineResponse).code, 'FORBIDDEN');
 
 const login = await request('/auth/login', {
   method: 'POST',
@@ -125,5 +212,5 @@ const idempotentLogout = await request('/auth/logout', {
 assert.equal(idempotentLogout.response.status, 204);
 
 console.log(
-  'Compose auth smoke passed: migration, signup, protected API, login, refresh rotation, reuse revoke, and logout',
+  'Compose auth smoke passed: migration, signup, protected API, member+guest feed, login, refresh rotation, reuse revoke, and logout',
 );

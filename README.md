@@ -245,10 +245,11 @@ worker를 재시작해야 다음 실행부터 적용되며, API 프로세스는 
 | `npm run test:contracts`                                       | 생성 계약 테스트                               |
 | `npm run test:smoke`                                           | 빌드된 API의 실제 HTTP 동작 확인               |
 | `npm run test:smoke:compose`                                  | fresh Compose 인증 smoke 확인                  |
+| `npm run test:smoke:compose:data`                             | disposable PostgreSQL 이슈 데이터·회원/비회원 cursor smoke |
 | `npm run contracts:all`                                        | SDK·e2e·OpenAPI 생성                           |
 | `npm run contracts:check`                                      | 계약 재생성, 계약 테스트, 생성 TypeScript 검사 |
 | `npm run typecheck:generated`                                  | 생성 TypeScript만 검사                         |
-| `npm run db:migrate`                                            | 온보딩·category·pipeline·authentication migration 적용 |
+| `npm run db:migrate`                                            | 외부 base schema preflight 후 애플리케이션 migration 적용 |
 
 ## API 계약과 입력 검증
 
@@ -331,9 +332,12 @@ core는 feature별로 domain과 repository를 나누고, `common`에는 여러 f
 사용합니다.
 
 스키마는 [MikroORM migration](libs/core/src/pipeline/migrations/)으로 관리하며
-`npm run db:migrate`가 외부 base schema preflight 후 온보딩·category code·pipeline·authentication migration을
-등록 순서대로 한 번에 적용합니다. `users`, `entities`, `issue_categories`,
-`user_category_preferences`, `user_entity_preferences`는 이 저장소 밖의 선행 migration이 소유합니다.
+`npm run db:migrate`가 외부 base schema preflight 후 온보딩·category code·pipeline·authentication·interest
+migration을 등록 순서대로 한 번에 적용하고, 마지막에 애플리케이션 소유 interaction schema 계약을 검증합니다.
+`users`, `entities`, `issue_categories`, `user_category_preferences`, `user_entity_preferences`는 이 저장소 밖의
+선행 migration이 소유하며, `user_interaction_events`는 interest migration이 소유합니다. 기존 interaction
+table이 없으면 migration이 만들고, 불완전한 기존 table은 자동 보정하지 않고 실패합니다. migration과 사후
+schema 검증은 하나의 transaction으로 묶여 검증 실패 시 migration 기록과 새 DDL도 함께 rollback됩니다.
 category master의 PK는 `issue_categories.code`이며 이슈·분류 선호도는 `category_code`로 참조합니다.
 파이프라인·authentication migration은 데이터 손실을 막기 위해 `down`을 지원하지 않습니다.
 애플리케이션은 schema 자동 동기화를 수행하지 않습니다.

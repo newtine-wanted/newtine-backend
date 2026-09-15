@@ -12,6 +12,14 @@ import { Migration20260913000000OnboardingPersistence } from '../../onboarding/m
 import { Migration20260913000001CategoryCodePrimaryKey } from '../../pipeline/migrations/Migration20260913000001CategoryCodePrimaryKey.js';
 import { Migration202609130001Pipeline } from '../../pipeline/migrations/Migration202609130001Pipeline.js';
 import { Migration202609130002PipelineEmbeddingTasks } from '../../pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
+import { Migration202609130003IssueCardQuery } from '../../pipeline/migrations/Migration202609130003IssueCardQuery.js';
+import { Migration202609130004IssueCardQueryReadModel } from '../../pipeline/migrations/Migration202609130004IssueCardQueryReadModel.js';
+import { Migration20260915000000MemberOnlyFeed } from '../../pipeline/migrations/Migration20260915000000MemberOnlyFeed.js';
+import { Migration20260915000001IssuePersonalizationMetadata } from '../../pipeline/migrations/Migration20260915000001IssuePersonalizationMetadata.js';
+import { Migration20260915000002GuestFeed } from '../../pipeline/migrations/Migration20260915000002GuestFeed.js';
+import { Migration20260915000003IssueCardQueryHardening } from '../../pipeline/migrations/Migration20260915000003IssueCardQueryHardening.js';
+import { Migration20260915000004FeedAlgorithmSnapshot } from '../../pipeline/migrations/Migration20260915000004FeedAlgorithmSnapshot.js';
+import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '../../issue/persistence/issueQuery.persistence.entity.js';
 import { INTEREST_PERSISTENCE_ENTITIES } from '../../interest/persistence/interest.persistence.entity.js';
 import { Migration20260915000000InterestPersistence } from '../../interest/migrations/Migration20260915000000InterestPersistence.js';
 
@@ -49,8 +57,8 @@ export function createDatabaseOptions(
     dbName: required('DB_NAME', 'newtine'),
     user: required('DB_USER', 'postgres'),
     password: required('DB_PASSWORD', 'postgres'),
-    entities: PERSISTENCE_ENTITIES,
-    entitiesTs: PERSISTENCE_ENTITIES,
+    entities: [...PERSISTENCE_ENTITIES, ...ISSUE_QUERY_PERSISTENCE_ENTITIES],
+    entitiesTs: [...PERSISTENCE_ENTITIES, ...ISSUE_QUERY_PERSISTENCE_ENTITIES],
     extensions: [Migrator],
     migrations: {
       path: './dist/libs/core/src/pipeline/migrations',
@@ -62,8 +70,15 @@ export function createDatabaseOptions(
         Migration20260913000001CategoryCodePrimaryKey,
         Migration202609130001Pipeline,
         Migration202609130002PipelineEmbeddingTasks,
+        Migration202609130003IssueCardQuery,
+        Migration202609130004IssueCardQueryReadModel,
         Migration20260914000000Authentication,
         Migration20260915000000InterestPersistence,
+        Migration20260915000000MemberOnlyFeed,
+        Migration20260915000001IssuePersonalizationMetadata,
+        Migration20260915000002GuestFeed,
+        Migration20260915000003IssueCardQueryHardening,
+        Migration20260915000004FeedAlgorithmSnapshot,
       ],
       transactional: true,
       allOrNothing: true,

@@ -23,6 +23,11 @@ const config: INestiaConfig = {
         scheme: 'bearer',
         bearerFormat: 'JWT',
       },
+      guestFeedCookie: {
+        type: 'apiKey',
+        in: 'cookie',
+        name: 'newtine_feed_guest',
+      },
     },
   },
   primitive: false,

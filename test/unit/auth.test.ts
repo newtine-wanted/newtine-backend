@@ -12,7 +12,7 @@ import {
   type AuthRepository,
   type AuthUser,
 } from '@newtine/core';
-import { AUTH_ROLES_KEY } from '@newtine/api/auth/auth.decorator.js';
+import { AUTH_POLICY_KEY, AUTH_ROLES_KEY } from '@newtine/api/auth/auth.decorator.js';
 import {
   clearRefreshCookie,
   readRefreshToken,
@@ -301,6 +301,7 @@ test('JwtAuthGuard가 Bearer token을 검증하고 요청에 DB의 현재 role�
         }),
       } as never,
     ),
+    new Reflector(),
   );
 
   assert.equal(await guard.canActivate(context as never), true);
@@ -312,9 +313,42 @@ test('JwtAuthGuard가 Bearer token을 검증하고 요청에 DB의 현재 role�
   await assert.rejects(
     new JwtAuthGuard(
       new AccessPrincipalService({ verifyAccessToken: async () => 'never' } as never, {} as never),
+      new Reflector(),
     ).canActivate(createHttpContext({ headers: {} } as AuthenticatedRequest) as never),
     UnauthorizedException,
   );
+});
+
+test('JwtAuthGuard가 명시적 optional route에서 헤더 없는 요청만 익명으로 통과시킨다', async () => {
+  const handler = () => undefined;
+  Reflect.defineMetadata(AUTH_POLICY_KEY, 'optional', handler);
+  let resolveCalled = false;
+  const guard = new JwtAuthGuard(
+    {
+      resolve: async () => {
+        resolveCalled = true;
+        throw new UnauthorizedException('invalid token');
+      },
+    } as never,
+    new Reflector(),
+  );
+  const anonymousRequest = { headers: {} } as AuthenticatedRequest;
+
+  assert.equal(
+    await guard.canActivate(createHttpContext(anonymousRequest, handler) as never),
+    true,
+  );
+  assert.equal(anonymousRequest.principal, undefined);
+  assert.equal(resolveCalled, false);
+
+  const invalidRequest = {
+    headers: { authorization: 'Bearer malformed' },
+  } as AuthenticatedRequest;
+  await assert.rejects(
+    guard.canActivate(createHttpContext(invalidRequest, handler) as never),
+    UnauthorizedException,
+  );
+  assert.equal(resolveCalled, true);
 });
 
 test('RolesGuard가 ADMIN route의 USER 요청을 403으로 거부하고 현재 ADMIN role을 허용한다', () => {

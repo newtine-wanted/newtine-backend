@@ -42,6 +42,7 @@ import { MikroOrmInterestRepository } from '@newtine/core/interest/mikroOrmInter
     },
   ],
   exports: [
+    MikroOrmTransactionManager,
     TRANSACTION_MANAGER,
     ONBOARDING_REPOSITORY,
     PIPELINE_RUN_REPOSITORY,

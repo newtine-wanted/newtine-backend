@@ -11,6 +11,14 @@ import { AiUsageRecordEntity } from '@newtine/core/pipeline/repository/mikroOrm/
 import { Migration20260913000001CategoryCodePrimaryKey } from '@newtine/core/pipeline/migrations/Migration20260913000001CategoryCodePrimaryKey.js';
 import { Migration202609130001Pipeline } from '@newtine/core/pipeline/migrations/Migration202609130001Pipeline.js';
 import { Migration202609130002PipelineEmbeddingTasks } from '@newtine/core/pipeline/migrations/Migration202609130002PipelineEmbeddingTasks.js';
+import { Migration202609130003IssueCardQuery } from '@newtine/core/pipeline/migrations/Migration202609130003IssueCardQuery.js';
+import { Migration202609130004IssueCardQueryReadModel } from '@newtine/core/pipeline/migrations/Migration202609130004IssueCardQueryReadModel.js';
+import { Migration20260915000000MemberOnlyFeed } from '@newtine/core/pipeline/migrations/Migration20260915000000MemberOnlyFeed.js';
+import { Migration20260915000001IssuePersonalizationMetadata } from '@newtine/core/pipeline/migrations/Migration20260915000001IssuePersonalizationMetadata.js';
+import { Migration20260915000002GuestFeed } from '@newtine/core/pipeline/migrations/Migration20260915000002GuestFeed.js';
+import { Migration20260915000003IssueCardQueryHardening } from '@newtine/core/pipeline/migrations/Migration20260915000003IssueCardQueryHardening.js';
+import { Migration20260915000004FeedAlgorithmSnapshot } from '@newtine/core/pipeline/migrations/Migration20260915000004FeedAlgorithmSnapshot.js';
+import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '@newtine/core/issue/persistence/issueQuery.persistence.entity.js';
 import { USER_PERSISTENCE_ENTITIES } from '@newtine/core/user/persistence/user.persistence.entity.js';
 import { ISSUE_PERSISTENCE_ENTITIES } from '@newtine/core/issue/persistence/issue.persistence.entity.js';
 import { INTEREST_PERSISTENCE_ENTITIES } from '@newtine/core/interest/persistence/interest.persistence.entity.js';
@@ -27,6 +35,7 @@ test('database options never enable automatic database creation', () => {
     AiUsageRecordEntity,
     ...INTEREST_PERSISTENCE_ENTITIES,
     ...AUTH_PERSISTENCE_ENTITIES,
+    ...ISSUE_QUERY_PERSISTENCE_ENTITIES,
   ]);
   assert.ok(options.extensions?.length);
   assert.equal(options.migrations?.transactional, true);
@@ -37,8 +46,15 @@ test('database options never enable automatic database creation', () => {
     Migration20260913000001CategoryCodePrimaryKey,
     Migration202609130001Pipeline,
     Migration202609130002PipelineEmbeddingTasks,
+    Migration202609130003IssueCardQuery,
+    Migration202609130004IssueCardQueryReadModel,
     Migration20260914000000Authentication,
     Migration20260915000000InterestPersistence,
+    Migration20260915000000MemberOnlyFeed,
+    Migration20260915000001IssuePersonalizationMetadata,
+    Migration20260915000002GuestFeed,
+    Migration20260915000003IssueCardQueryHardening,
+    Migration20260915000004FeedAlgorithmSnapshot,
   ]);
   assert.equal(options.registerRequestContext, true);
 });
