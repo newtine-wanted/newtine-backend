@@ -1,7 +1,10 @@
 import type { IssueDetailResponse } from './issueDetail.response.js';
 import type { IssueDetailResult } from './issueDetail.output.js';
 
-export function toIssueDetailResponse(result: IssueDetailResult): IssueDetailResponse {
+export function toIssueDetailResponse(
+  result: IssueDetailResult,
+  myAction: IssueDetailResponse['myAction'] = null,
+): IssueDetailResponse {
   const { issue, context } = result;
   const ageGroup = context?.ageGroup;
   const preferredRegionCodes = context?.preferredRegionCodes ?? [];
@@ -48,6 +51,7 @@ export function toIssueDetailResponse(result: IssueDetailResult): IssueDetailRes
           : (article.publishedAt.toISOString() as IssueDetailResponse['articles'][number]['publishedAt']),
     })),
     impacts,
+    myAction,
   };
 }
 

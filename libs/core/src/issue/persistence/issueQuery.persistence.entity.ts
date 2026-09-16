@@ -257,6 +257,7 @@ export interface IssueQueryInteractionPersistenceEntity {
   userId: string;
   issueId: string;
   eventType: string;
+  acceptedOrder: number;
   createdAt: Date;
 }
 

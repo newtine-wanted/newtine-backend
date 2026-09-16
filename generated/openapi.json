@@ -818,6 +818,453 @@
         ],
         "type": "object"
       },
+      "InterestAnalysisResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period": {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "ROLLING_DAYS",
+                "title": null,
+                "description": null
+              },
+              "days": {
+                "type": "number"
+              },
+              "startAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "endAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "timeZone": {
+                "const": "Asia/Seoul",
+                "title": null,
+                "description": null
+              }
+            },
+            "required": [
+              "type",
+              "days",
+              "startAt",
+              "endAt",
+              "timeZone"
+            ],
+            "type": "object"
+          },
+          "sampleStatus": {
+            "oneOf": [
+              {
+                "const": "EMPTY"
+              },
+              {
+                "const": "LOW_SAMPLE"
+              },
+              {
+                "const": "READY"
+              }
+            ]
+          },
+          "minimumSampleSize": {
+            "type": "number"
+          },
+          "issueCount": {
+            "type": "number"
+          },
+          "likedIssueCount": {
+            "type": "number"
+          },
+          "categoryCounts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "oneOf": [
+                    {
+                      "const": "climate"
+                    },
+                    {
+                      "const": "education"
+                    },
+                    {
+                      "const": "finance"
+                    },
+                    {
+                      "const": "health"
+                    },
+                    {
+                      "const": "housing"
+                    },
+                    {
+                      "const": "labor"
+                    },
+                    {
+                      "const": "local"
+                    },
+                    {
+                      "const": "politics"
+                    },
+                    {
+                      "const": "security"
+                    },
+                    {
+                      "const": "welfare"
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "name",
+                "count"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "period",
+          "sampleStatus",
+          "minimumSampleSize",
+          "issueCount",
+          "likedIssueCount",
+          "categoryCounts"
+        ],
+        "type": "object"
+      },
+      "LikedIssuesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "issueId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "category": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "oneOf": [
+                        {
+                          "const": "climate"
+                        },
+                        {
+                          "const": "education"
+                        },
+                        {
+                          "const": "finance"
+                        },
+                        {
+                          "const": "health"
+                        },
+                        {
+                          "const": "housing"
+                        },
+                        {
+                          "const": "labor"
+                        },
+                        {
+                          "const": "local"
+                        },
+                        {
+                          "const": "politics"
+                        },
+                        {
+                          "const": "security"
+                        },
+                        {
+                          "const": "welfare"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "likedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "thumbnailUrl": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "issueId",
+                "title",
+                "category",
+                "likedAt",
+                "thumbnailUrl"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "totalCount": {
+            "type": "number"
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "totalCount",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "LikedIssuesQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "categoryCode": {
+            "oneOf": [
+              {
+                "const": "climate"
+              },
+              {
+                "const": "education"
+              },
+              {
+                "const": "finance"
+              },
+              {
+                "const": "health"
+              },
+              {
+                "const": "housing"
+              },
+              {
+                "const": "labor"
+              },
+              {
+                "const": "local"
+              },
+              {
+                "const": "politics"
+              },
+              {
+                "const": "security"
+              },
+              {
+                "const": "welfare"
+              }
+            ]
+          },
+          "cursor": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "IssueInteractionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "acceptedAction": {
+            "oneOf": [
+              {
+                "const": "LIKE"
+              },
+              {
+                "const": "PASS"
+              },
+              {
+                "const": "SKIP"
+              }
+            ]
+          },
+          "acceptedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "eventId",
+          "issueId",
+          "acceptedAction",
+          "acceptedAt"
+        ],
+        "type": "object"
+      },
+      "IssueInteractionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "oneOf": [
+              {
+                "const": "LIKE"
+              },
+              {
+                "const": "PASS"
+              },
+              {
+                "const": "SKIP"
+              }
+            ]
+          }
+        },
+        "required": [
+          "eventId",
+          "sessionId",
+          "action"
+        ],
+        "type": "object"
+      },
+      "DetailViewStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "viewId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "viewId",
+          "issueId",
+          "startedAt",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "DetailViewStartRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      "DetailViewProgressResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "viewId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "acceptedActiveMilliseconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "totalCreditedMilliseconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dwellScore": {
+            "oneOf": [
+              {
+                "const": 0
+              },
+              {
+                "const": 0.5
+              },
+              {
+                "const": 1
+              }
+            ]
+          }
+        },
+        "required": [
+          "viewId",
+          "issueId",
+          "acceptedActiveMilliseconds",
+          "totalCreditedMilliseconds",
+          "dwellScore"
+        ],
+        "type": "object"
+      },
+      "DetailViewProgressRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "activeMilliseconds": {
+            "maximum": 1800000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "activeMilliseconds"
+        ],
+        "type": "object"
+      },
       "IssueSearchItem": {
         "additionalProperties": false,
         "properties": {
@@ -1096,6 +1543,22 @@
               "$ref": "#/components/schemas/IssueDetailImpact"
             },
             "type": "array"
+          },
+          "myAction": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "const": "LIKE"
+              },
+              {
+                "const": "PASS"
+              },
+              {
+                "const": "SKIP"
+              }
+            ]
           }
         },
         "required": [
@@ -1112,7 +1575,8 @@
           "viewpoints",
           "glossary",
           "articles",
-          "impacts"
+          "impacts",
+          "myAction"
         ],
         "type": "object"
       },
@@ -1296,287 +1760,6 @@
             "maxLength": 4096,
             "minLength": 1,
             "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "InterestAnalysisResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "asOf": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "period": {
-            "additionalProperties": false,
-            "properties": {
-              "type": {
-                "const": "ROLLING_DAYS",
-                "title": null,
-                "description": null
-              },
-              "days": {
-                "type": "number"
-              },
-              "startAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "endAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "timeZone": {
-                "const": "Asia/Seoul",
-                "title": null,
-                "description": null
-              }
-            },
-            "required": [
-              "type",
-              "days",
-              "startAt",
-              "endAt",
-              "timeZone"
-            ],
-            "type": "object"
-          },
-          "sampleStatus": {
-            "oneOf": [
-              {
-                "const": "EMPTY"
-              },
-              {
-                "const": "LOW_SAMPLE"
-              },
-              {
-                "const": "READY"
-              }
-            ]
-          },
-          "minimumSampleSize": {
-            "type": "number"
-          },
-          "issueCount": {
-            "type": "number"
-          },
-          "likedIssueCount": {
-            "type": "number"
-          },
-          "categoryCounts": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "oneOf": [
-                    {
-                      "const": "climate"
-                    },
-                    {
-                      "const": "education"
-                    },
-                    {
-                      "const": "finance"
-                    },
-                    {
-                      "const": "health"
-                    },
-                    {
-                      "const": "housing"
-                    },
-                    {
-                      "const": "labor"
-                    },
-                    {
-                      "const": "local"
-                    },
-                    {
-                      "const": "politics"
-                    },
-                    {
-                      "const": "security"
-                    },
-                    {
-                      "const": "welfare"
-                    }
-                  ]
-                },
-                "name": {
-                  "type": "string"
-                },
-                "count": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "code",
-                "name",
-                "count"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "asOf",
-          "period",
-          "sampleStatus",
-          "minimumSampleSize",
-          "issueCount",
-          "likedIssueCount",
-          "categoryCounts"
-        ],
-        "type": "object"
-      },
-      "LikedIssuesResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "issueId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "title": {
-                  "type": "string"
-                },
-                "category": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "code": {
-                      "oneOf": [
-                        {
-                          "const": "climate"
-                        },
-                        {
-                          "const": "education"
-                        },
-                        {
-                          "const": "finance"
-                        },
-                        {
-                          "const": "health"
-                        },
-                        {
-                          "const": "housing"
-                        },
-                        {
-                          "const": "labor"
-                        },
-                        {
-                          "const": "local"
-                        },
-                        {
-                          "const": "politics"
-                        },
-                        {
-                          "const": "security"
-                        },
-                        {
-                          "const": "welfare"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "name"
-                  ],
-                  "type": "object"
-                },
-                "likedAt": {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                "thumbnailUrl": {
-                  "type": "null"
-                }
-              },
-              "required": [
-                "issueId",
-                "title",
-                "category",
-                "likedAt",
-                "thumbnailUrl"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "totalCount": {
-            "type": "number"
-          },
-          "nextCursor": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "totalCount",
-          "nextCursor"
-        ],
-        "type": "object"
-      },
-      "LikedIssuesQuery": {
-        "additionalProperties": false,
-        "properties": {
-          "categoryCode": {
-            "oneOf": [
-              {
-                "const": "climate"
-              },
-              {
-                "const": "education"
-              },
-              {
-                "const": "finance"
-              },
-              {
-                "const": "health"
-              },
-              {
-                "const": "housing"
-              },
-              {
-                "const": "labor"
-              },
-              {
-                "const": "local"
-              },
-              {
-                "const": "politics"
-              },
-              {
-                "const": "security"
-              },
-              {
-                "const": "welfare"
-              }
-            ]
-          },
-          "cursor": {
-            "maxLength": 512,
-            "minLength": 1,
-            "type": "string"
-          },
-          "limit": {
-            "maximum": 50,
-            "minimum": 1,
-            "type": "integer"
           }
         },
         "required": [],
@@ -2362,6 +2545,550 @@
         "x-samchon-controller": "OnboardingController"
       }
     },
+    "/me/interest-analysis": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterestAnalysisResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "interest_analysis",
+          "getAnalysis"
+        ],
+        "x-samchon-controller": "InterestController"
+      }
+    },
+    "/me/liked-issues": {
+      "get": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "categoryCode",
+            "in": "query",
+            "schema": {
+              "oneOf": [
+                {
+                  "const": "climate"
+                },
+                {
+                  "const": "education"
+                },
+                {
+                  "const": "finance"
+                },
+                {
+                  "const": "health"
+                },
+                {
+                  "const": "housing"
+                },
+                {
+                  "const": "labor"
+                },
+                {
+                  "const": "local"
+                },
+                {
+                  "const": "politics"
+                },
+                {
+                  "const": "security"
+                },
+                {
+                  "const": "welfare"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LikedIssuesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "liked_issues",
+          "getLikedIssues"
+        ],
+        "x-samchon-controller": "InterestController"
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "const": "ok",
+                      "title": null,
+                      "description": null
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "health",
+          "getHealth"
+        ],
+        "x-samchon-controller": "HealthController"
+      }
+    },
+    "/issues/{issueId}/interactions": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "issueId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueInteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueInteractionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The service is temporarily unavailable.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "issues",
+          "interactions",
+          "recordInteraction"
+        ],
+        "x-samchon-controller": "IssueActionController"
+      }
+    },
+    "/issues/{issueId}/detail-views/{viewId}": {
+      "put": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "issueId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "viewId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetailViewStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The detail view already existed and the request was replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetailViewStartResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetailViewStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The service is temporarily unavailable.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "issues",
+          "detail_views",
+          "startDetailView"
+        ],
+        "x-samchon-controller": "IssueActionController"
+      }
+    },
+    "/issues/{issueId}/detail-views/{viewId}/progress": {
+      "put": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "issueId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          },
+          {
+            "name": "viewId",
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetailViewProgressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetailViewProgressResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The requested resource is no longer available.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The service is temporarily unavailable.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "issues",
+          "detail_views",
+          "progress",
+          "updateDetailView"
+        ],
+        "x-samchon-controller": "IssueActionController"
+      }
+    },
     "/issues/search": {
       "post": {
         "tags": [],
@@ -2603,214 +3330,6 @@
           "getFeed"
         ],
         "x-samchon-controller": "FeedController"
-      }
-    },
-    "/me/interest-analysis": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InterestAnalysisResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "interest_analysis",
-          "getAnalysis"
-        ],
-        "x-samchon-controller": "InterestController"
-      }
-    },
-    "/me/liked-issues": {
-      "get": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "categoryCode",
-            "in": "query",
-            "schema": {
-              "oneOf": [
-                {
-                  "const": "climate"
-                },
-                {
-                  "const": "education"
-                },
-                {
-                  "const": "finance"
-                },
-                {
-                  "const": "health"
-                },
-                {
-                  "const": "housing"
-                },
-                {
-                  "const": "labor"
-                },
-                {
-                  "const": "local"
-                },
-                {
-                  "const": "politics"
-                },
-                {
-                  "const": "security"
-                },
-                {
-                  "const": "welfare"
-                }
-              ]
-            },
-            "required": false
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "number"
-            },
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LikedIssuesResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "liked_issues",
-          "getLikedIssues"
-        ],
-        "x-samchon-controller": "InterestController"
-      }
-    },
-    "/health": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "status": {
-                      "const": "ok",
-                      "title": null,
-                      "description": null
-                    }
-                  },
-                  "required": [
-                    "status"
-                  ],
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "health",
-          "getHealth"
-        ],
-        "x-samchon-controller": "HealthController"
       }
     },
     "/auth/signup": {

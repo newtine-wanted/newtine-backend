@@ -12,6 +12,7 @@ export const OPENAPI_OUTPUT = join(ROOT, 'generated/openapi.json');
 export const PROBLEM_DETAILS_REF = '#/components/schemas/ProblemDetails';
 
 const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace']);
+const DYNAMIC_SUCCESS_PATH = '/issues/{issueId}/detail-views/{viewId}';
 
 /**
  * Rewrites only directly declared ProblemDetails failure bodies. The function
@@ -23,16 +24,27 @@ export function normalizeOpenApiDocument(document) {
     throw new TypeError('OpenAPI document must be an object.');
   }
 
-  for (const pathItem of Object.values(document.paths ?? {})) {
+  for (const [path, pathItem] of Object.entries(document.paths ?? {})) {
     if (!isRecord(pathItem)) continue;
 
     for (const [method, operation] of Object.entries(pathItem)) {
       if (!HTTP_METHODS.has(method) || !isRecord(operation)) continue;
       normalizeResponses(operation.responses, `${method.toUpperCase()} operation`);
+      normalizeDynamicSuccessResponses(path, method, operation);
     }
   }
 
   return document;
+}
+
+function normalizeDynamicSuccessResponses(path, method, operation) {
+  if (path !== DYNAMIC_SUCCESS_PATH || method !== 'put' || !isRecord(operation.responses)) return;
+  if (operation.responses['201'] === undefined || operation.responses['200'] !== undefined) return;
+
+  operation.responses['200'] = {
+    ...operation.responses['201'],
+    description: 'The detail view already existed and the request was replayed.',
+  };
 }
 
 function normalizeResponses(responses, operationLabel) {

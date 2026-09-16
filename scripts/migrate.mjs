@@ -21,6 +21,7 @@ const REQUIRED_INTERACTION_COLUMNS = [
   ['event_type', 'text', 'NO'],
   ['dwell_time', 'int4', 'YES'],
   ['previous_action', 'text', 'YES'],
+  ['accepted_order', 'int8', 'NO'],
   ['created_at', 'timestamptz', 'NO'],
 ];
 
@@ -300,6 +301,11 @@ async function assertInteractionSchema(orm, transaction) {
   if (!hasInteractionIndex) {
     throw new Error(
       'Application schema verification failed for user_interaction_events; a valid non-partial btree index on (user_id, issue_id, created_at DESC, id DESC) is required',
+    );
+  }
+  if (!hasIndex(['user_id', 'issue_id', 'accepted_order', 'id'], [false, false, true, true])) {
+    throw new Error(
+      'Application schema verification failed for user_interaction_events; a valid non-partial btree index on (user_id, issue_id, accepted_order DESC, id DESC) is required',
     );
   }
   if (!hasIndex(['user_id', 'created_at'], [false, true])) {
