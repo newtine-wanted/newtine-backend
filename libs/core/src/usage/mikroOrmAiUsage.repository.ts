@@ -57,15 +57,14 @@ export class MikroOrmAiUsageRepository implements AiUsageRepository {
     await executeReportSql(
       this.entityManager,
       `update ai_usage_records
-          set status = $2, model = coalesce($3, model), provider_request_id = $4,
-              input_tokens = $5, output_tokens = $6, actual_cost = $7,
-              error_code = $8, finished_at = $9
+          set status = $2, model = coalesce($3, model),
+              input_tokens = $4, output_tokens = $5, actual_cost = $6,
+              error_code = $7, finished_at = $8
         where id = $1 and status in ('RUNNING', 'UNKNOWN')`,
       [
         id,
         result.status,
         result.model ?? null,
-        result.providerRequestId ?? null,
         result.inputTokens ?? null,
         result.outputTokens ?? null,
         result.actualCost ?? null,

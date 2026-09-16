@@ -116,7 +116,6 @@ export interface ReportUsageStart {
 export interface ReportUsageFinish {
   status: 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
   model?: string;
-  providerRequestId?: string;
   inputTokens?: number;
   outputTokens?: number;
   actualCost?: number;

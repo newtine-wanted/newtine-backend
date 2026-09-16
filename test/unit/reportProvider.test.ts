@@ -50,12 +50,11 @@ function input(): { input: ReportInput; candidates: ReportCandidates } {
 function response(value: unknown): Response {
   return new Response(
     JSON.stringify({
-      id: 'response-id',
       model: 'actual-report-model',
       output: [{ content: [{ type: 'output_text', text: JSON.stringify(value) }] }],
       usage: { input_tokens: 12, output_tokens: 7 },
     }),
-    { status: 200, headers: { 'content-type': 'application/json', 'x-request-id': 'header-id' } },
+    { status: 200, headers: { 'content-type': 'application/json' } },
   );
 }
 
@@ -79,9 +78,11 @@ test('report provider uses isolated strict JSON Responses payload and stores no 
     assert.ok('value' in result);
     assert.deepEqual(result.value, { connections: [], related: [] });
     assert.equal(result.usage?.model, 'actual-report-model');
-    assert.equal(result.usage?.providerRequestId, 'response-id');
-    assert.equal(result.usage?.inputTokens, 12);
-    assert.equal(result.usage?.outputTokens, 7);
+    assert.deepEqual(result.usage, {
+      model: 'actual-report-model',
+      inputTokens: 12,
+      outputTokens: 7,
+    });
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.store, false);
     assert.equal(requests[0]?.instructions, config.generationPrompt.instruction);
@@ -124,12 +125,12 @@ test('report provider turns malformed upstream JSON into a safe invalid-output e
   }
 });
 
-test('report provider preserves upstream request id on known provider failures', async () => {
+test('report provider preserves model metadata on known provider failures', async () => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ error: { message: 'rate limited' } }), {
       status: 429,
-      headers: { 'content-type': 'application/json', 'x-request-id': 'rate-limit-id' },
+      headers: { 'content-type': 'application/json' },
     })) as typeof fetch;
   try {
     const config = configuration();
@@ -141,8 +142,7 @@ test('report provider preserves upstream request id on known provider failures',
         error.code === 'UPSTREAM_ERROR' &&
         error.retryable &&
         error.resultUncertain &&
-        error.usage?.model === config.model &&
-        error.usage.providerRequestId === 'rate-limit-id',
+        error.usage?.model === config.model,
     );
   } finally {
     globalThis.fetch = previousFetch;

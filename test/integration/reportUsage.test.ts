@@ -63,7 +63,6 @@ dbTest(
         status: 'SUCCEEDED',
         inputTokens: 12,
         outputTokens: 7,
-        providerRequestId: 'late-response',
         finishedAt: now,
       });
       await ledger.finish(id, { status: 'UNKNOWN', finishedAt: now });

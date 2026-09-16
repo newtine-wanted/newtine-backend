@@ -77,14 +77,14 @@ export class ReportOpenAiResponsesClient {
       throw new ReportProviderException('UPSTREAM_ERROR', {
         retryable: response.status === 429 || response.status >= 500,
         resultUncertain: response.status === 429 || response.status >= 500,
-        usage: requestUsage(response, this.configuration.model),
+        usage: requestUsage(this.configuration.model),
       });
     }
-    const body = await readJsonBody(response, requestUsage(response, this.configuration.model));
+    const body = await readJsonBody(response, requestUsage(this.configuration.model));
     const text = extractOutputText(body);
     if (text === undefined) {
       throw new ReportProviderException('INVALID_OUTPUT', {
-        usage: requestUsage(response, this.configuration.model),
+        usage: requestUsage(this.configuration.model),
       });
     }
     let value: T;
@@ -92,13 +92,13 @@ export class ReportOpenAiResponsesClient {
       value = JSON.parse(text) as T;
     } catch (error: unknown) {
       throw new ReportProviderException('INVALID_OUTPUT', {
-        usage: requestUsage(response, this.configuration.model),
+        usage: requestUsage(this.configuration.model),
         cause: error,
       });
     }
     return {
       value,
-      usage: extractUsage(body, response, this.configuration.model),
+      usage: extractUsage(body, this.configuration.model),
     };
   }
 
@@ -279,18 +279,15 @@ function extractOutputText(value: unknown): string | undefined {
 
 function extractUsage(
   value: unknown,
-  response: Response,
   defaultModel: string,
-): { model?: string; providerRequestId?: string; inputTokens?: number; outputTokens?: number } {
+): { model?: string; inputTokens?: number; outputTokens?: number } {
   const record = isRecord(value) ? value : undefined;
   const usage = record !== undefined && isRecord(record.usage) ? record.usage : undefined;
   const model = stringValue(record?.model) ?? defaultModel;
-  const requestId = stringValue(record?.id) ?? response.headers.get('x-request-id') ?? undefined;
   const inputTokens = numberValue(usage?.input_tokens ?? usage?.prompt_tokens);
   const outputTokens = numberValue(usage?.output_tokens ?? usage?.completion_tokens);
   return {
     model,
-    ...(requestId === undefined ? {} : { providerRequestId: requestId }),
     ...(inputTokens === undefined ? {} : { inputTokens }),
     ...(outputTokens === undefined ? {} : { outputTokens }),
   };
@@ -314,12 +311,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function requestUsage(response: Response, model: string): ReportProviderUsage {
-  const providerRequestId = stringValue(response.headers.get('x-request-id'));
-  return {
-    model,
-    ...(providerRequestId === undefined ? {} : { providerRequestId }),
-  };
+function requestUsage(model: string): ReportProviderUsage {
+  return { model };
 }
 
 async function readJsonBody(response: Response, usage: ReportProviderUsage): Promise<unknown> {

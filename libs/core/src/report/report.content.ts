@@ -38,7 +38,6 @@ export interface ReportSemanticValidation {
 
 export interface ReportProviderUsage {
   model?: string;
-  providerRequestId?: string;
   inputTokens?: number;
   outputTokens?: number;
 }

@@ -287,7 +287,7 @@ test('worker records UNKNOWN usage when a provider result is uncertain', async (
   assert.equal(usage.finishes[0]?.status, 'UNKNOWN');
 });
 
-test('worker carries provider request metadata into a failed usage record', async () => {
+test('worker carries provider model metadata into a failed usage record', async () => {
   const { claim: reportClaim } = claim(5);
   const state = repositoryFor(reportClaim, candidates());
   const usage = usageRepository();
@@ -295,7 +295,7 @@ test('worker carries provider request metadata into a failed usage record', asyn
     generate: async () => {
       throw new ReportProviderException('UPSTREAM_ERROR', {
         retryable: false,
-        usage: { model: 'actual-report-model', providerRequestId: 'upstream-request-id' },
+        usage: { model: 'actual-report-model' },
       });
     },
     validate: async () => ({ status: 'PASS', reason: 'ok' }),
@@ -312,7 +312,6 @@ test('worker carries provider request metadata into a failed usage record', asyn
   assert.equal(state.failures[0]?.code, 'UPSTREAM_ERROR');
   assert.equal(usage.finishes[0]?.status, 'FAILED');
   assert.equal(usage.finishes[0]?.model, 'actual-report-model');
-  assert.equal(usage.finishes[0]?.providerRequestId, 'upstream-request-id');
 });
 
 test('worker discards a result when heartbeat loses the lease', async () => {

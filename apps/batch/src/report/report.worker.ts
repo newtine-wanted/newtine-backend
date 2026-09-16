@@ -294,9 +294,6 @@ export class ReportWorker implements OnModuleDestroy {
       await this.usageRepository.finish(usageId, {
         status,
         ...(usage?.model === undefined ? {} : { model: usage.model }),
-        ...(usage?.providerRequestId === undefined
-          ? {}
-          : { providerRequestId: usage.providerRequestId }),
         ...(usage?.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
         ...(usage?.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
         ...(errorCode === undefined ? {} : { errorCode }),
@@ -395,7 +392,7 @@ function isValidProviderUsage(value: unknown): boolean {
       return false;
     }
   }
-  for (const key of ['model', 'providerRequestId']) {
+  for (const key of ['model']) {
     const string = usage[key];
     if (string !== undefined && (typeof string !== 'string' || string.trim().length === 0)) {
       return false;
