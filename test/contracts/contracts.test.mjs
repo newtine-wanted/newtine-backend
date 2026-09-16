@@ -12,6 +12,9 @@ const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post
 const EXPECTED_FAILURE_STATUSES = {
   '/issues/search': ['400', '413', '500'],
   '/issues/{issueId}': ['400', '401', '404', '503'],
+  '/issues/{issueId}/interactions': ['400', '401', '404', '409', '503'],
+  '/issues/{issueId}/detail-views/{viewId}': ['400', '401', '404', '409', '503'],
+  '/issues/{issueId}/detail-views/{viewId}/progress': ['400', '401', '404', '409', '410', '503'],
   '/feed': ['400', '401', '404', '409', '410', '503'],
   '/health': ['500'],
   '/onboarding/options': ['500'],
@@ -35,6 +38,9 @@ const EXPECTED_FAILURE_STATUSES = {
   '/auth/logout': ['403', '500'],
 };
 const EXPECTED_SUCCESS_STATUSES = {
+  '/issues/{issueId}/interactions': '200',
+  '/issues/{issueId}/detail-views/{viewId}': ['200', '201'],
+  '/issues/{issueId}/detail-views/{viewId}/progress': '200',
   '/auth/signup': '201',
   '/auth/login': '200',
   '/auth/refresh': '200',
@@ -46,6 +52,12 @@ const requiredFiles = [
   'e2e/features/api/automated/test_api_health_getHealth.ts',
   'e2e/features/api/automated/test_api_auth_signup.ts',
   'e2e/features/api/automated/test_api_issues_search.ts',
+  'api/functional/issues/interactions/index.ts',
+  'api/functional/issues/detail_views/index.ts',
+  'api/functional/issues/detail_views/progress/index.ts',
+  'e2e/features/api/automated/test_api_issues_interactions_recordInteraction.ts',
+  'e2e/features/api/automated/test_api_issues_detail_views_startDetailView.ts',
+  'e2e/features/api/automated/test_api_issues_detail_views_progress_updateDetailView.ts',
   'api/functional/feed/index.ts',
   'e2e/features/api/automated/test_api_feed_getFeed.ts',
   'api/functional/me/index.ts',
@@ -179,9 +191,12 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
         /^2\d\d$/.test(status),
       );
       if (EXPECTED_SUCCESS_STATUSES[path] !== undefined) {
+        const expectedSuccessStatuses = Array.isArray(EXPECTED_SUCCESS_STATUSES[path])
+          ? EXPECTED_SUCCESS_STATUSES[path]
+          : [EXPECTED_SUCCESS_STATUSES[path]];
         assert.deepEqual(
-          successStatuses,
-          [EXPECTED_SUCCESS_STATUSES[path]],
+          successStatuses.sort(),
+          expectedSuccessStatuses.sort(),
           `${method.toUpperCase()} ${path} must declare its approved success status`,
         );
       }
@@ -230,6 +245,20 @@ test('OpenAPI normalizer preserves response metadata and is idempotent', () => {
           },
         },
       },
+      '/issues/{issueId}/detail-views/{viewId}': {
+        put: {
+          responses: {
+            201: {
+              description: 'Created',
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/DetailViewStartResponse' },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   };
 
@@ -243,6 +272,15 @@ test('OpenAPI normalizer preserves response metadata and is idempotent', () => {
   assert.equal(response.description, 'Invalid request');
   assert.deepEqual(response.headers, { 'x-request-id': { schema: { type: 'string' } } });
   assert.ok(document.paths['/fixture'].post.responses['200'].content['application/json']);
+  assert.equal(
+    document.paths['/issues/{issueId}/detail-views/{viewId}'].put.responses['200'].description,
+    'The detail view already existed and the request was replayed.',
+  );
+  assert.ok(
+    document.paths['/issues/{issueId}/detail-views/{viewId}'].put.responses['200'].content[
+      'application/json'
+    ],
+  );
 
   const normalized = JSON.stringify(document);
   normalizeOpenApiDocument(document);

@@ -42,4 +42,5 @@ export interface IssueDetailResponse {
   glossary: IssueDetailGlossary[];
   articles: IssueDetailArticle[];
   impacts: IssueDetailImpact[];
+  myAction: 'LIKE' | 'SKIP' | 'PASS' | null;
 }

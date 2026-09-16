@@ -23,6 +23,11 @@ const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionS
     [IssueExceptionCode.FeedSessionNotFound]: ApiException.NotFound,
     [IssueExceptionCode.FeedSessionExpired]: ApiException.Gone,
     [IssueExceptionCode.FeedBatchConflict]: ApiException.Conflict,
+    [IssueExceptionCode.InteractionConflict]: ApiException.Conflict,
+    [IssueExceptionCode.DetailViewConflict]: ApiException.Conflict,
+    [IssueExceptionCode.DetailViewInvalid]: ApiException.InvalidArgument,
+    [IssueExceptionCode.DetailViewNotFound]: ApiException.NotFound,
+    [IssueExceptionCode.DetailViewExpired]: ApiException.Gone,
   },
   pipeline: {
     [PipelineExceptionCode.InvalidInput]: ApiException.InvalidArgument,

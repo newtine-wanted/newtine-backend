@@ -25,6 +25,7 @@ import { USER_PERSISTENCE_ENTITIES } from '@newtine/core/user/persistence/user.p
 import { ISSUE_PERSISTENCE_ENTITIES } from '@newtine/core/issue/persistence/issue.persistence.entity.js';
 import { INTEREST_PERSISTENCE_ENTITIES } from '@newtine/core/interest/persistence/interest.persistence.entity.js';
 import { Migration20260915000000InterestPersistence } from '@newtine/core/interest/migrations/Migration20260915000000InterestPersistence.js';
+import { Migration20260916000000IssueCardActions } from '@newtine/core/interest/migrations/Migration20260916000000IssueCardActions.js';
 
 test('database options never enable automatic database creation', () => {
   const options = createDatabaseOptions({ NODE_ENV: 'test' });
@@ -59,6 +60,7 @@ test('database options never enable automatic database creation', () => {
     Migration20260915000003IssueCardQueryHardening,
     Migration20260915000004FeedAlgorithmSnapshot,
     Migration20260916000000DiagnosticReport,
+    Migration20260916000000IssueCardActions,
   ]);
   assert.equal(options.registerRequestContext, true);
 });

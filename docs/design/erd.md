@@ -1,6 +1,6 @@
-# ERD · v1.2
+# ERD · v1.4
 
-상단 Notion 컬럼 명세 기준 19개 테이블이다. article_discoveries는 도입 검토 중인 선택 테이블이다. 이 문서는 DDL이 아니며 DB에 제약을 생성하지 않는다.
+상단 Notion 컬럼 명세 기준 21개 테이블이다. article_discoveries는 도입 검토 중인 선택 테이블이다. 이 문서는 DDL이 아니며 DB에 제약을 생성하지 않는다.
 
 > **파이프라인 구현 오버레이(v1.3)**: 이 문서의 19개 테이블 설명은 원본 ERD 기록으로 보존한다. 현재 이슈·기사 콘텐츠 생성 파이프라인의 실행 기준은 [MikroORM migration](../../libs/core/src/pipeline/migrations/)과 [구현 제어 문서](issue-content-pipeline-implementation.html)다. `npm run db:migrate`가 온보딩·파이프라인 migration을 등록 순서대로 적용한다. 해당 범위에서는 `issue_categories.code` 참조, `issue_seed_articles`, `pipeline_runs`, `issue_content_jobs`, `ai_usage_records`의 run 귀속, `issue_embeddings vector(1536)`, 공개 후 보완을 위한 `issue_embedding_tasks`를 사용하며 기사 본문·프롬프트·원시 응답은 저장하지 않는다. `articles.article_url` 원문은 유지하고 애플리케이션 비교 단계에서만 URL을 정규화한다. 전체 ERD를 갱신할 때 이 오버레이를 본문 표로 승격한다.
 
@@ -215,7 +215,7 @@ Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 
 
 ## 16. user_interaction_events
 
-불변 행동 이벤트. 재전송은 같은 id 사용. previous_action은 서버가 확인한 직전 행동, 최초 NULL. created_at은 서버 수용 시각 및 주간 집계 기준.
+불변 행동 이벤트. 재전송은 같은 id 사용. previous_action은 서버가 확인한 직전 행동, 최초 NULL. accepted_order는 서버 수용 순서, created_at은 수용 시각 및 주간 집계 기준.
 
 | 컬럼 | 타입 | 키 | NULL | 기본값 | 허용값·참조·비고 |
 | --- | --- | --- | --- | --- | --- |
@@ -226,9 +226,39 @@ Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 
 | event_type | text | — | 불가 | — | LIKE / SKIP / PASS |
 | dwell_time | int | — | 허용 | — | 밀리초(ms), 0 이상, 미측정 NULL |
 | previous_action | text | — | 허용 | — | LIKE / SKIP / PASS 또는 NULL |
+| accepted_order | bigint | — | 불가 | sequence | 서버 수용 순서. 최신 행동 선택 기준 |
 | created_at | timestamptz | — | 불가 | now() | — |
 
-## 17. weekly_reports
+## 17. user_issue_contributions
+
+회원·이슈별 현재 기여 원장. 명시 행동 점수와 모든 상세 열람의 누적 체류 점수를 한 행에 보관하며, 좋아요 목록을 대체하지 않는다.
+
+| 컬럼 | 타입 | 키 | NULL | 기본값 | 허용값·참조·비고 |
+| --- | --- | --- | --- | --- | --- |
+| user_id | uuid | PK,FK | 불가 | — | users.id, 사용자 삭제 cascade |
+| issue_id | uuid | PK,FK | 불가 | — | issues.id, 이슈 삭제 restrict |
+| category_code | text | FK | 불가 | — | issue_categories.code |
+| action_score | numeric | — | 불가 | 0 | -3 / 0 / 2 |
+| credited_dwell_ms | int | — | 불가 | 0 | 0..30000, view별 증가분 합계 |
+| dwell_score | numeric | — | 불가 | 0 | 0 / 0.5 / 1 |
+| last_action_event_id | uuid | FK | 허용 | — | user_interaction_events.id, 삭제 시 NULL |
+| updated_at | timestamptz | — | 불가 | clock_timestamp() | — |
+
+## 18. issue_detail_views
+
+상세 열람 세션 원장. view_id는 멱등 키이며 소유자와 이슈는 생성 후 바뀌지 않는다. active_ms는 해당 view 안에서만 단조 증가하고, 기여 원장은 모든 view의 증가분을 합산한다.
+
+| 컬럼 | 타입 | 키 | NULL | 기본값 | 허용값·참조·비고 |
+| --- | --- | --- | --- | --- | --- |
+| view_id | uuid | PK | 불가 | — | 재시도 멱등 키 |
+| user_id | uuid | FK | 불가 | — | users.id, 사용자 삭제 cascade |
+| issue_id | uuid | FK | 불가 | — | issues.id, 이슈 삭제 restrict |
+| session_id | uuid | — | 불가 | — | refresh session FK 아님 |
+| started_at | timestamptz | — | 불가 | clock_timestamp() | 서버 시작 시각 |
+| expires_at | timestamptz | — | 불가 | — | started_at 이후, 만료 시각 |
+| active_ms | int | — | 불가 | 0 | 0..1800000, view별 단조 증가 |
+
+## 19. weekly_reports
 
 상태와 현재 결과. 복합 UNIQUE(user_id, period_start) 추가. period_end=period_start+7일. SUCCEEDED이면 content 필수. 최초 성공 결과 고정.
 
@@ -247,7 +277,7 @@ Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 
 
 진단보고서 구현 확장(2026-09-16): input_snapshot/input hash와 후보 스냅샷, 누적 attempt_count, lease_token/lease_expires_at/heartbeat_at, next_attempt_at, last_error_code/retryable, requested_at/started_at/completed_at을 추가한다. 정확한 DDL과 DB CHECK는 `Migration20260916000000DiagnosticReport`가 기준이다. API 신청으로만 생성하며 성공 결과는 고정한다. AI ledger의 nullable weekly_report_id는 보고서 삭제 시 NULL로 유지하고 개인 입력은 보고서와 함께 삭제한다.
 
-## 18. issue_content_jobs
+## 20. issue_content_jobs
 
 이슈 내용 생성 작업. 단계별 이력 없이 현재 stage/status 저장. started_at 최초 실행, finished_at 최종 종료. 이슈별 QUEUED/RUNNING 활성 작업은 하나만 허용.
 
@@ -263,7 +293,7 @@ Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 
 | last_error | text | — | 허용 | — | — |
 | created_at | timestamptz | — | 불가 | now() | — |
 
-## 19. ai_usage_records
+## 21. ai_usage_records
 
 외부 호출 시도당 한 행. 이슈 작업 외 호출은 job FK가 NULL. 실제 재호출은 새 id, 동일 기록 저장 재시도는 기존 id 사용.
 
@@ -317,6 +347,12 @@ erDiagram
  entities ||--o{ user_entity_preferences : entity
  users ||--o{ user_interaction_events : actions
  issues ||--o{ user_interaction_events : target
+ users ||--o{ user_issue_contributions : contributes
+ issues ||--o{ user_issue_contributions : contribution
+ issue_categories ||--o{ user_issue_contributions : category
+ user_interaction_events ||--o| user_issue_contributions : last_action
+ users ||--o{ issue_detail_views : views
+ issues ||--o{ issue_detail_views : viewed
  users ||--o{ weekly_reports : reports
 ```
 
@@ -328,6 +364,9 @@ erDiagram
 
 ## 추가할 제약과 구현 경계
 
+- user_interaction_events: accepted_order는 서버 sequence의 NOT NULL 값이며 `(user_id, issue_id, accepted_order DESC, id DESC)` 최신 선택 인덱스를 둔다. id 재사용은 동일 payload만 허용하고 충돌은 409다.
+- user_issue_contributions: 복합 PK(user_id, issue_id), action_score ∈ {-3,0,2}, credited_dwell_ms ∈ [0,30000], dwell_score ∈ {0,0.5,1}. category와 last_action_event FK 및 사용자 cascade·이슈 restrict를 적용한다.
+- issue_detail_views: view_id PK, active_ms ∈ [0,1800000], expires_at > started_at. 사용자·이슈 FK와 `(user_id, issue_id)`, `expires_at` 조회 인덱스를 둔다. 동시 동일 view_id 충돌은 payload·소유자 비교 후 409다.
 - issue_content_jobs: `UNIQUE(issue_id) WHERE status IN ('QUEUED', 'RUNNING')`에 해당하는 부분 유일 인덱스. 성공한 초기 생성의 재등록 방지는 별도 서비스 검사.
 - weekly_reports: SUCCEEDED이면 content 필수, period_end는 period_start+7일.
 - costs/tokens/dwell_time: NULL이 아니면 0 이상.

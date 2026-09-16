@@ -12,6 +12,9 @@ import type { IssueDetailResponse } from "../../../../apps/api/src/issue/type/is
 import type { IssueSearchRequest } from "../../../../apps/api/src/issue/type/issueSearch.request";
 import type { IssueSearchResponse } from "../../../../apps/api/src/issue/type/issueSearch.response";
 
+export * as interactions from "./interactions/index";
+export * as detail_views from "./detail_views/index";
+
 /**
  * @throws 400 The request is invalid.
  * @throws 413 The request body exceeds the size limit.
