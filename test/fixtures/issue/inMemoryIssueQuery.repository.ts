@@ -17,8 +17,17 @@ import {
 export interface InMemoryIssueQuerySeed {
   issues?: readonly IssueRecord[];
   contexts?: readonly UserRecommendationContext[];
-  interactions?: readonly UserInteractionRecord[];
+  interactions?: readonly InMemoryIssueInteractionSeed[];
   relations?: readonly IssueRelationRecord[];
+}
+
+/**
+ * The production projection keeps accepted_order inside the persistence
+ * boundary. The fixture carries it as optional metadata so latest-state tests
+ * can reproduce server acceptance order without widening the public query port.
+ */
+export interface InMemoryIssueInteractionSeed extends UserInteractionRecord {
+  acceptedOrder?: number;
 }
 
 /**
@@ -28,7 +37,7 @@ export interface InMemoryIssueQuerySeed {
 export class InMemoryIssueQueryRepository implements IssueQueryRepository {
   private readonly issues: IssueRecord[];
   private readonly contexts = new Map<string, UserRecommendationContext>();
-  private readonly interactions: UserInteractionRecord[];
+  private readonly interactions: InMemoryIssueInteractionSeed[];
   private readonly relations: IssueRelationRecord[];
   private readonly sessions = new Map<string, FeedSessionRecord>();
   private readonly batches = new Map<string, FeedBatchRecord>();
@@ -38,7 +47,7 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     for (const context of seed.contexts ?? []) {
       this.contexts.set(context.userId, cloneContext(context));
     }
-    this.interactions = (seed.interactions ?? []).map(cloneInteraction);
+    this.interactions = (seed.interactions ?? []).map(cloneInteractionSeed);
     this.relations = (seed.relations ?? []).map(cloneRelation);
   }
 
@@ -213,7 +222,7 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     if (seed.issues !== undefined) this.issues.push(...seed.issues.map(cloneIssue));
     for (const context of seed.contexts ?? [])
       this.contexts.set(context.userId, cloneContext(context));
-    this.interactions.push(...(seed.interactions ?? []).map(cloneInteraction));
+    this.interactions.push(...(seed.interactions ?? []).map(cloneInteractionSeed));
     this.relations.push(...(seed.relations ?? []).map(cloneRelation));
   }
 
@@ -238,7 +247,15 @@ function sameOwner(left: FeedOwner, right: FeedOwner): boolean {
   return false;
 }
 
-function compareInteraction(left: UserInteractionRecord, right: UserInteractionRecord): number {
+function compareInteraction(
+  left: InMemoryIssueInteractionSeed,
+  right: InMemoryIssueInteractionSeed,
+): number {
+  if (left.acceptedOrder !== undefined || right.acceptedOrder !== undefined) {
+    const leftOrder = left.acceptedOrder ?? Number.NEGATIVE_INFINITY;
+    const rightOrder = right.acceptedOrder ?? Number.NEGATIVE_INFINITY;
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  }
   const byTime = left.createdAt.getTime() - right.createdAt.getTime();
   return byTime === 0 ? left.id.localeCompare(right.id) : byTime;
 }
@@ -410,7 +427,19 @@ function cloneContext(context: UserRecommendationContext): UserRecommendationCon
   };
 }
 
-function cloneInteraction(interaction: UserInteractionRecord): UserInteractionRecord {
+function cloneInteraction(interaction: InMemoryIssueInteractionSeed): UserInteractionRecord {
+  return {
+    id: interaction.id,
+    userId: interaction.userId,
+    issueId: interaction.issueId,
+    eventType: interaction.eventType,
+    createdAt: new Date(interaction.createdAt),
+  };
+}
+
+function cloneInteractionSeed(
+  interaction: InMemoryIssueInteractionSeed,
+): InMemoryIssueInteractionSeed {
   return { ...interaction, createdAt: new Date(interaction.createdAt) };
 }
 

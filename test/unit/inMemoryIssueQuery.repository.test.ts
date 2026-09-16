@@ -131,6 +131,43 @@ test('public candidate filtering rejects malformed summaries and scores before s
   );
 });
 
+test('latest interactions in the fixture follow server acceptance order', async () => {
+  const userId = '00000000-0000-7000-8000-000000000001';
+  const issueId = '00000000-0000-7000-8000-000000000002';
+  const repository = new InMemoryIssueQueryRepository({
+    interactions: [
+      {
+        id: '00000000-0000-7000-8000-000000000003',
+        userId,
+        issueId,
+        eventType: 'SKIP',
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+        acceptedOrder: 1,
+      },
+      {
+        id: '00000000-0000-7000-8000-000000000004',
+        userId,
+        issueId,
+        eventType: 'LIKE',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        acceptedOrder: 2,
+      },
+    ],
+  });
+
+  const latest = await repository.findLatestInteractions(userId);
+
+  assert.deepEqual(latest, [
+    {
+      id: '00000000-0000-7000-8000-000000000004',
+      userId,
+      issueId,
+      eventType: 'LIKE',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    },
+  ]);
+});
+
 function issue(index: number, overrides: Partial<IssueRecord> = {}): IssueRecord {
   return {
     id: `00000000-0000-7000-8000-${String(index).padStart(12, '0')}`,
