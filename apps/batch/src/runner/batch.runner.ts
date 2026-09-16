@@ -1,3 +1,4 @@
+import { ReportBatchJob } from '@newtine/batch/report/report.batch.job.js';
 import { Injectable, Optional } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 
@@ -6,6 +7,7 @@ import { DatabaseCheckJob } from '@newtine/batch/job/databaseCheck/databaseCheck
 import { PipelineBatchJob } from '@newtine/batch/pipeline/pipeline.batch.job.js';
 import { PipelineEmbeddingRepairJob } from '@newtine/batch/pipeline/pipeline.embeddingRepair.job.js';
 
+const REPORT_WORKER_JOB = 'reportWorker';
 const DATABASE_CHECK_JOB = 'databaseCheck';
 const PIPELINE_WORKER_JOB = 'pipelineWorker';
 const PIPELINE_EMBEDDING_REPAIR_JOB = 'pipelineEmbeddingRepair';
@@ -17,6 +19,7 @@ export class BatchRunner {
     private readonly logger: PinoLogger,
     @Optional() private readonly pipelineBatchJob?: PipelineBatchJob,
     @Optional() private readonly pipelineEmbeddingRepairJob?: PipelineEmbeddingRepairJob,
+    @Optional() private readonly reportBatchJob?: ReportBatchJob,
   ) {
     this.logger.setContext(BatchRunner.name);
   }
@@ -39,6 +42,9 @@ export class BatchRunner {
     signal?: AbortSignal,
   ): Promise<number> {
     if (jobName !== DATABASE_CHECK_JOB) {
+      if (jobName === REPORT_WORKER_JOB && this.reportBatchJob !== undefined) {
+        return this.runReportWorker(processExecutionId, signal);
+      }
       if (jobName === PIPELINE_WORKER_JOB && this.pipelineBatchJob !== undefined) {
         return this.runPipelineWorker(processExecutionId, signal);
       }
@@ -70,6 +76,29 @@ export class BatchRunner {
           diagnostic: exceptionDiagnostic(exception),
         },
         'Batch job failed',
+      );
+      return 1;
+    }
+  }
+
+  private async runReportWorker(processExecutionId: UuidV7, signal?: AbortSignal): Promise<number> {
+    const startedAt = process.hrtime.bigint();
+    this.logger.info({ event: 'batch.report_worker.started' }, 'Report worker started');
+    try {
+      await this.reportBatchJob!.run(processExecutionId, signal);
+      this.logger.info(
+        { event: 'batch.report_worker.completed', durationMs: elapsedMilliseconds(startedAt) },
+        'Report worker completed',
+      );
+      return 0;
+    } catch (exception: unknown) {
+      this.logger.error(
+        {
+          event: 'batch.report_worker.failed',
+          durationMs: elapsedMilliseconds(startedAt),
+          diagnostic: exceptionDiagnostic(exception),
+        },
+        'Report worker failed',
       );
       return 1;
     }
