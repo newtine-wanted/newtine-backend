@@ -412,7 +412,7 @@ docker compose --profile reports up -d api report-worker
 REPORT_TEST_DATABASE_URL=postgresql://report_test:report_test_local_only@127.0.0.1:55439/report_test npm run test:jest -- test/integration/reportLifecycle.test.ts test/integration/reportHttp.test.ts
 ```
 
-먼저 같은 DB에 마이그레이션을 적용해야 합니다. 테스트는 자기 fixture만 정리하며 운영 DB URL을 사용하지 마세요. 기준 브랜치에는 관심 이벤트 쓰기 API가 없어 ACT-01 작업 통합이 실제 사용자 데이터 연결의 선행 조건입니다. 실 공급자 응답의 품질·비용과 운영 배포는 로컬 fixture 테스트로 보장하지 않습니다.
+먼저 같은 DB에 마이그레이션을 적용해야 합니다. 테스트는 자기 fixture만 정리하며 운영 DB URL을 사용하지 마세요. 최신 기준 브랜치에는 회원 전용 관심 이벤트·상세 열람 쓰기 API가 포함되어 있으므로, 실제 사용자 데이터 연결은 해당 endpoint와 보고서 입력 스냅샷을 함께 검증해야 합니다. 실 공급자 응답의 품질·비용과 운영 배포는 로컬 fixture 테스트로 보장하지 않습니다.
 
 [승인 설계](docs/design/diagnostic-report-design.html) · [구현/검증 기록](docs/design/diagnostic-report-implementation.html)
 
