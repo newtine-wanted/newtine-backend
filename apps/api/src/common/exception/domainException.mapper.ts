@@ -9,6 +9,15 @@ import {
 } from '@newtine/api/common/exception/api.exception.js';
 
 const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionSpec>> = {
+  report: {
+    INVALID_PERIOD: ApiException.InvalidArgument,
+    NOT_FOUND: ApiException.NotFound,
+    RETRY_NOT_ALLOWED: ApiException.Conflict,
+    RATE_LIMITED: ApiException.RateLimited,
+    INPUT_LIMIT_EXCEEDED: ApiException.ReportInputLimit,
+    STALE_CLAIM: ApiException.Conflict,
+    SOURCE_UNAVAILABLE: ApiException.Conflict,
+  },
   issue: {
     [IssueExceptionCode.NotFound]: ApiException.NotFound,
     [IssueExceptionCode.FeedSessionNotFound]: ApiException.NotFound,

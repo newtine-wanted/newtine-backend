@@ -1,3 +1,5 @@
+import { REPORT_PERSISTENCE_ENTITIES } from '../../report/persistence/report.persistence.entity.js';
+import { Migration20260916000000DiagnosticReport } from '../../report/migrations/Migration20260916000000DiagnosticReport.js';
 import type { MikroOrmModuleOptions } from '@mikro-orm/nestjs';
 import { Migrator } from '@mikro-orm/migrations';
 import { PostgreSqlDriver } from '@mikro-orm/postgresql';
@@ -30,6 +32,7 @@ const PERSISTENCE_ENTITIES = [
   AiUsageRecordEntity,
   ...INTEREST_PERSISTENCE_ENTITIES,
   ...AUTH_PERSISTENCE_ENTITIES,
+  ...REPORT_PERSISTENCE_ENTITIES,
 ] as const;
 
 export function createDatabaseOptions(
@@ -79,6 +82,7 @@ export function createDatabaseOptions(
         Migration20260915000002GuestFeed,
         Migration20260915000003IssueCardQueryHardening,
         Migration20260915000004FeedAlgorithmSnapshot,
+        Migration20260916000000DiagnosticReport,
       ],
       transactional: true,
       allOrNothing: true,

@@ -1,3 +1,6 @@
+import { MikroOrmAiUsageRepository } from './usage/mikroOrmAiUsage.repository.js';
+import { AI_USAGE_REPOSITORY, REPORT_REPOSITORY } from './report/report.model.js';
+import { MikroOrmReportRepository } from './report/mikroOrmReport.repository.js';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { Module } from '@nestjs/common';
 
@@ -20,6 +23,8 @@ import { MikroOrmInterestRepository } from '@newtine/core/interest/mikroOrmInter
     MikroOrmTransactionManager,
     MikroOrmPipelineRepository,
     PipelineRunService,
+    { provide: AI_USAGE_REPOSITORY, useClass: MikroOrmAiUsageRepository },
+    { provide: REPORT_REPOSITORY, useClass: MikroOrmReportRepository },
     {
       provide: TRANSACTION_MANAGER,
       useExisting: MikroOrmTransactionManager,
@@ -42,6 +47,8 @@ import { MikroOrmInterestRepository } from '@newtine/core/interest/mikroOrmInter
     },
   ],
   exports: [
+    AI_USAGE_REPOSITORY,
+    REPORT_REPOSITORY,
     MikroOrmTransactionManager,
     TRANSACTION_MANAGER,
     ONBOARDING_REPOSITORY,

@@ -28,23 +28,100 @@
       }
     },
     "schemas": {
-      "PipelineRunAcceptedResponse": {
+      "ReportListResponse": {
         "additionalProperties": false,
         "properties": {
-          "runId": {
-            "type": "string",
-            "format": "uuid"
+          "eligiblePeriod": {
+            "$ref": "#/components/schemas/ReportPeriodResponse"
+          },
+          "nextEligibleAt": {
+            "type": "string"
+          },
+          "periods": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "period": {
+                  "$ref": "#/components/schemas/ReportPeriodResponse"
+                },
+                "report": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ReportSummaryResponse"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "period",
+                "report"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "latestSucceeded": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportSummaryResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "eligiblePeriod",
+          "nextEligibleAt",
+          "periods",
+          "latestSucceeded"
+        ],
+        "type": "object"
+      },
+      "ReportPeriodResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "startAt": {
+            "type": "string"
+          },
+          "endAt": {
+            "type": "string"
+          },
+          "timeZone": {
+            "const": "Asia/Seoul",
+            "title": null,
+            "description": null
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "startAt",
+          "endAt",
+          "timeZone"
+        ],
+        "type": "object"
+      },
+      "ReportSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string"
           },
           "status": {
             "oneOf": [
               {
-                "const": "CANCELLED"
-              },
-              {
                 "const": "FAILED"
-              },
-              {
-                "const": "PARTIALLY_SUCCEEDED"
               },
               {
                 "const": "QUEUED"
@@ -56,25 +133,67 @@
                 "const": "SUCCEEDED"
               }
             ]
-          }
-        },
-        "required": [
-          "runId",
-          "status"
-        ],
-        "type": "object"
-      },
-      "PipelineRunCreateRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "query": {
-            "maxLength": 100,
-            "minLength": 1,
+          },
+          "period": {
+            "$ref": "#/components/schemas/ReportPeriodResponse"
+          },
+          "requestedAt": {
             "type": "string"
+          },
+          "startedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "completedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "nextRetryAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "failureCode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
           }
         },
         "required": [
-          "query"
+          "reportId",
+          "status",
+          "period",
+          "requestedAt",
+          "startedAt",
+          "completedAt",
+          "retryable",
+          "nextRetryAt",
+          "failureCode"
         ],
         "type": "object"
       },
@@ -102,309 +221,365 @@
         ],
         "type": "object"
       },
-      "PipelineJobResponse": {
+      "ReportRequest": {
         "additionalProperties": false,
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "issueId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "oneOf": [
-              {
-                "const": "CANCELLED"
-              },
-              {
-                "const": "FAILED"
-              },
-              {
-                "const": "QUEUED"
-              },
-              {
-                "const": "RUNNING"
-              },
-              {
-                "const": "SUCCEEDED"
-              }
-            ]
-          },
-          "stage": {
-            "oneOf": [
-              {
-                "const": "FETCH"
-              },
-              {
-                "const": "GENERATE"
-              },
-              {
-                "const": "SEARCH"
-              },
-              {
-                "const": "VALIDATE"
-              }
-            ]
-          },
-          "attempt": {
-            "type": "number"
-          },
-          "failureKind": {
-            "type": "string"
-          },
-          "lastError": {
+          "periodStart": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "type": "string"
           }
         },
         "required": [
-          "id",
-          "issueId",
-          "status",
-          "stage",
-          "attempt"
+          "periodStart"
         ],
         "type": "object"
       },
-      "PipelineRunResponse": {
+      "ReportContentResponse": {
         "additionalProperties": false,
         "properties": {
-          "runId": {
-            "type": "string",
-            "format": "uuid"
+          "schemaVersion": {
+            "const": 1,
+            "title": null,
+            "description": null
           },
-          "status": {
+          "analysisStatus": {
             "oneOf": [
               {
-                "const": "CANCELLED"
+                "const": "INSUFFICIENT_DATA"
               },
               {
-                "const": "FAILED"
+                "const": "NO_CONNECTION"
               },
               {
-                "const": "PARTIALLY_SUCCEEDED"
-              },
-              {
-                "const": "QUEUED"
-              },
-              {
-                "const": "RUNNING"
-              },
-              {
-                "const": "SUCCEEDED"
+                "const": "READY"
               }
             ]
           },
-          "attempt": {
+          "issueCount": {
             "type": "number"
           },
-          "executionId": {
-            "type": "string",
-            "format": "uuid"
+          "minimumIssueCount": {
+            "const": 5,
+            "title": null,
+            "description": null
           },
-          "currentStage": {
-            "oneOf": [
-              {
-                "const": "FETCH"
-              },
-              {
-                "const": "GENERATE"
-              },
-              {
-                "const": "SEARCH"
-              },
-              {
-                "const": "VALIDATE"
-              }
-            ]
-          },
-          "candidateCounts": {
-            "additionalProperties": false,
-            "properties": {
-              "discovered": {
-                "type": "number"
-              },
-              "duplicate": {
-                "type": "number"
-              },
-              "uncertain": {
-                "type": "number"
-              },
-              "created": {
-                "type": "number"
-              },
-              "skippedByLimit": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "discovered",
-              "duplicate",
-              "uncertain",
-              "created",
-              "skippedByLimit"
-            ],
-            "type": "object"
-          },
-          "jobs": {
+          "categoryCounts": {
             "items": {
-              "$ref": "#/components/schemas/PipelineJobResponse"
+              "additionalProperties": false,
+              "properties": {
+                "categoryCode": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "categoryCode",
+                "displayName",
+                "count"
+              ],
+              "type": "object"
             },
             "type": "array"
           },
-          "embeddingPendingCount": {
-            "type": "number"
+          "connections": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "issueIds": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "label",
+                "title",
+                "description",
+                "issueIds"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
-          "usageSummary": {
-            "$ref": "#/components/schemas/PipelineUsageSummaryResponse"
+          "evidenceIssues": {
+            "items": {
+              "$ref": "#/components/schemas/ReportIssueResponse"
+            },
+            "type": "array"
           },
-          "lastError": {
+          "relatedIssues": {
+            "items": {
+              "$ref": "#/components/schemas/ReportIssueResponse__type"
+            },
+            "type": "array"
+          },
+          "majorIssues": {
+            "items": {
+              "$ref": "#/components/schemas/ReportIssueResponse"
+            },
+            "type": "array"
+          },
+          "majorIssueCategoryCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "majorIssuesStatus": {
+            "oneOf": [
+              {
+                "const": "NO_CANDIDATES"
+              },
+              {
+                "const": "NO_INTEREST"
+              },
+              {
+                "const": "READY"
+              }
+            ]
+          },
+          "recommendationsStatus": {
+            "oneOf": [
+              {
+                "const": "PARTIAL"
+              },
+              {
+                "const": "READY"
+              }
+            ]
+          },
+          "recommendationCapturedAt": {
             "type": "string"
-          },
-          "startedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "finishedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
           }
         },
         "required": [
-          "runId",
-          "status",
-          "attempt",
-          "candidateCounts",
-          "jobs",
-          "embeddingPendingCount",
-          "usageSummary",
-          "createdAt",
-          "updatedAt"
+          "schemaVersion",
+          "analysisStatus",
+          "issueCount",
+          "minimumIssueCount",
+          "categoryCounts",
+          "connections",
+          "evidenceIssues",
+          "relatedIssues",
+          "majorIssues",
+          "majorIssueCategoryCodes",
+          "majorIssuesStatus",
+          "recommendationsStatus",
+          "recommendationCapturedAt"
         ],
         "type": "object"
       },
-      "PipelineUsageSummaryResponse": {
+      "ReportIssueResponse": {
         "additionalProperties": false,
         "properties": {
-          "calls": {
+          "issueId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "categoryCode": {
+            "type": "string"
+          },
+          "categoryName": {
+            "type": "string"
+          },
+          "categoryOrder": {
             "type": "number"
           },
-          "succeededCalls": {
+          "summary": {
+            "type": "string"
+          },
+          "summaryLines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "issueId",
+          "title",
+          "categoryCode",
+          "categoryName",
+          "categoryOrder",
+          "summary",
+          "summaryLines"
+        ],
+        "type": "object"
+      },
+      "ReportIssueResponse__type": {
+        "additionalProperties": false,
+        "properties": {
+          "issueId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "categoryCode": {
+            "type": "string"
+          },
+          "categoryName": {
+            "type": "string"
+          },
+          "categoryOrder": {
             "type": "number"
           },
-          "failedCalls": {
-            "type": "number"
+          "summary": {
+            "type": "string"
           },
-          "unknownCalls": {
-            "type": "number"
+          "summaryLines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
-          "inputTokens": {
-            "type": "number"
+          "sourceIssueId": {
+            "type": "string"
           },
-          "outputTokens": {
-            "type": "number"
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issueId",
+          "title",
+          "categoryCode",
+          "categoryName",
+          "categoryOrder",
+          "summary",
+          "summaryLines",
+          "sourceIssueId",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ReportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string"
           },
-          "actualCost": {
+          "status": {
+            "oneOf": [
+              {
+                "const": "FAILED"
+              },
+              {
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
+              }
+            ]
+          },
+          "period": {
+            "$ref": "#/components/schemas/ReportPeriodResponse"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "startedAt": {
             "oneOf": [
               {
                 "type": "null"
               },
               {
-                "type": "number"
+                "type": "string"
+              }
+            ]
+          },
+          "completedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "nextRetryAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "failureCode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportContentResponse"
+              }
+            ]
+          },
+          "contentAvailability": {
+            "oneOf": [
+              {
+                "const": "AVAILABLE"
+              },
+              {
+                "const": "PARTIAL"
+              },
+              {
+                "const": "PENDING"
+              },
+              {
+                "const": "UNAVAILABLE"
               }
             ]
           }
         },
         "required": [
-          "calls",
-          "succeededCalls",
-          "failedCalls",
-          "unknownCalls",
-          "inputTokens",
-          "outputTokens",
-          "actualCost"
-        ],
-        "type": "object"
-      },
-      "PipelineRunRetryRequestBase__type": {
-        "additionalProperties": false,
-        "properties": {
-          "expectedAttempt": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "scope": {
-            "const": "DISCOVERY",
-            "title": null,
-            "description": null
-          },
-          "failedJobIds": {
-            "items": {
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-              "type": "string"
-            },
-            "minItems": 1,
-            "type": "array"
-          }
-        },
-        "required": [
-          "expectedAttempt",
-          "scope"
-        ],
-        "type": "object"
-      },
-      "PipelineRunRetryRequestBase__type-o1": {
-        "additionalProperties": false,
-        "properties": {
-          "expectedAttempt": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "scope": {
-            "const": "CONTENT",
-            "title": null,
-            "description": null
-          },
-          "failedJobIds": {
-            "items": {
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-              "type": "string"
-            },
-            "minItems": 1,
-            "type": "array"
-          }
-        },
-        "required": [
-          "expectedAttempt",
-          "scope",
-          "failedJobIds"
-        ],
-        "type": "object"
-      },
-      "PipelineRunInterruptRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "expectedAttempt": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "executionId": {
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "expectedAttempt",
-          "executionId"
+          "reportId",
+          "status",
+          "period",
+          "requestedAt",
+          "startedAt",
+          "completedAt",
+          "retryable",
+          "nextRetryAt",
+          "failureCode",
+          "content",
+          "contentAvailability"
         ],
         "type": "object"
       },
@@ -815,6 +990,362 @@
           "entityIds",
           "ageGroup",
           "regionCodes"
+        ],
+        "type": "object"
+      },
+      "PipelineRunAcceptedResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "const": "CANCELLED"
+              },
+              {
+                "const": "FAILED"
+              },
+              {
+                "const": "PARTIALLY_SUCCEEDED"
+              },
+              {
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
+              }
+            ]
+          }
+        },
+        "required": [
+          "runId",
+          "status"
+        ],
+        "type": "object"
+      },
+      "PipelineRunCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "PipelineJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "const": "CANCELLED"
+              },
+              {
+                "const": "FAILED"
+              },
+              {
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
+              }
+            ]
+          },
+          "stage": {
+            "oneOf": [
+              {
+                "const": "FETCH"
+              },
+              {
+                "const": "GENERATE"
+              },
+              {
+                "const": "SEARCH"
+              },
+              {
+                "const": "VALIDATE"
+              }
+            ]
+          },
+          "attempt": {
+            "type": "number"
+          },
+          "failureKind": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "issueId",
+          "status",
+          "stage",
+          "attempt"
+        ],
+        "type": "object"
+      },
+      "PipelineRunResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "const": "CANCELLED"
+              },
+              {
+                "const": "FAILED"
+              },
+              {
+                "const": "PARTIALLY_SUCCEEDED"
+              },
+              {
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
+              }
+            ]
+          },
+          "attempt": {
+            "type": "number"
+          },
+          "executionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currentStage": {
+            "oneOf": [
+              {
+                "const": "FETCH"
+              },
+              {
+                "const": "GENERATE"
+              },
+              {
+                "const": "SEARCH"
+              },
+              {
+                "const": "VALIDATE"
+              }
+            ]
+          },
+          "candidateCounts": {
+            "additionalProperties": false,
+            "properties": {
+              "discovered": {
+                "type": "number"
+              },
+              "duplicate": {
+                "type": "number"
+              },
+              "uncertain": {
+                "type": "number"
+              },
+              "created": {
+                "type": "number"
+              },
+              "skippedByLimit": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "discovered",
+              "duplicate",
+              "uncertain",
+              "created",
+              "skippedByLimit"
+            ],
+            "type": "object"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineJobResponse"
+            },
+            "type": "array"
+          },
+          "embeddingPendingCount": {
+            "type": "number"
+          },
+          "usageSummary": {
+            "$ref": "#/components/schemas/PipelineUsageSummaryResponse"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "runId",
+          "status",
+          "attempt",
+          "candidateCounts",
+          "jobs",
+          "embeddingPendingCount",
+          "usageSummary",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "PipelineUsageSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "type": "number"
+          },
+          "succeededCalls": {
+            "type": "number"
+          },
+          "failedCalls": {
+            "type": "number"
+          },
+          "unknownCalls": {
+            "type": "number"
+          },
+          "inputTokens": {
+            "type": "number"
+          },
+          "outputTokens": {
+            "type": "number"
+          },
+          "actualCost": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "required": [
+          "calls",
+          "succeededCalls",
+          "failedCalls",
+          "unknownCalls",
+          "inputTokens",
+          "outputTokens",
+          "actualCost"
+        ],
+        "type": "object"
+      },
+      "PipelineRunRetryRequestBase__type": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedAttempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "const": "DISCOVERY",
+            "title": null,
+            "description": null
+          },
+          "failedJobIds": {
+            "items": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "expectedAttempt",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "PipelineRunRetryRequestBase__type-o1": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedAttempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "const": "CONTENT",
+            "title": null,
+            "description": null
+          },
+          "failedJobIds": {
+            "items": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "expectedAttempt",
+          "scope",
+          "failedJobIds"
+        ],
+        "type": "object"
+      },
+      "PipelineRunInterruptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedAttempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "executionId": {
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedAttempt",
+          "executionId"
         ],
         "type": "object"
       },
@@ -1655,6 +2186,598 @@
     }
   },
   "paths": {
+    "/me/reports": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "list"
+        ],
+        "x-samchon-controller": "ReportController"
+      },
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Existing completed or failed report; no new work enqueued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Report input exceeds the configured limit.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "request"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
+    "/me/reports/{reportId}": {
+      "get": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "get"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
+    "/me/reports/{reportId}/retry": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Retry cooldown is active.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "retry"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
+    "/onboarding/options": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingOptions"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "onboarding",
+          "options",
+          "getOptions"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/onboarding/entities": {
+      "get": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "oneOf": [
+                {
+                  "const": "INSTITUTION"
+                },
+                {
+                  "const": "PARTY"
+                },
+                {
+                  "const": "POLITICIAN"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingEntitySearchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "onboarding",
+          "entities",
+          "searchEntities"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/me/onboarding": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "getMyOnboarding"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/me/onboarding/complete": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteOnboardingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "complete"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/me/onboarding/skip": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "skip"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
     "/pipeline/runs": {
       "post": {
         "tags": [],
@@ -2072,294 +3195,6 @@
           "interrupt"
         ],
         "x-samchon-controller": "PipelineController"
-      }
-    },
-    "/onboarding/options": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingOptions"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "onboarding",
-          "options",
-          "getOptions"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/onboarding/entities": {
-      "get": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          },
-          {
-            "name": "type",
-            "in": "query",
-            "schema": {
-              "oneOf": [
-                {
-                  "const": "INSTITUTION"
-                },
-                {
-                  "const": "PARTY"
-                },
-                {
-                  "const": "POLITICIAN"
-                }
-              ]
-            },
-            "required": false
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "number"
-            },
-            "required": false
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "schema": {
-              "type": "number"
-            },
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingEntitySearchResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "onboarding",
-          "entities",
-          "searchEntities"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/me/onboarding": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "onboarding",
-          "getMyOnboarding"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/me/onboarding/complete": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CompleteOnboardingRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "onboarding",
-          "complete"
-        ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/me/onboarding/skip": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "onboarding",
-          "skip"
-        ],
-        "x-samchon-controller": "OnboardingController"
       }
     },
     "/issues/search": {
