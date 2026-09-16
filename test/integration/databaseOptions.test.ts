@@ -1,3 +1,5 @@
+import { REPORT_PERSISTENCE_ENTITIES } from '@newtine/core/report/persistence/report.persistence.entity.js';
+import { Migration20260916000000DiagnosticReport } from '@newtine/core/report/migrations/Migration20260916000000DiagnosticReport.js';
 import assert from 'node:assert/strict';
 import { test } from '@jest/globals';
 
@@ -35,6 +37,7 @@ test('database options never enable automatic database creation', () => {
     AiUsageRecordEntity,
     ...INTEREST_PERSISTENCE_ENTITIES,
     ...AUTH_PERSISTENCE_ENTITIES,
+    ...REPORT_PERSISTENCE_ENTITIES,
     ...ISSUE_QUERY_PERSISTENCE_ENTITIES,
   ]);
   assert.ok(options.extensions?.length);
@@ -55,6 +58,7 @@ test('database options never enable automatic database creation', () => {
     Migration20260915000002GuestFeed,
     Migration20260915000003IssueCardQueryHardening,
     Migration20260915000004FeedAlgorithmSnapshot,
+    Migration20260916000000DiagnosticReport,
   ]);
   assert.equal(options.registerRequestContext, true);
 });
