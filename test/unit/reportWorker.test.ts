@@ -287,6 +287,54 @@ test('worker records UNKNOWN usage when a provider result is uncertain', async (
   assert.equal(usage.finishes[0]?.status, 'UNKNOWN');
 });
 
+test('worker retries malformed provider output', async () => {
+  const { claim: reportClaim } = claim(5);
+  const state = repositoryFor(reportClaim, candidates());
+  const usage = usageRepository();
+  const provider: ReportContentProvider = {
+    generate: async () => {
+      throw new ReportProviderException('INVALID_OUTPUT');
+    },
+    validate: async () => ({ status: 'PASS', reason: 'ok' }),
+  };
+  const worker = new ReportWorker(
+    state.repository,
+    provider,
+    usage.repository,
+    logger(),
+    configuration(),
+  );
+
+  assert.equal(await worker.runOnce(), true);
+  assert.deepEqual(state.failures[0], { code: 'INVALID_OUTPUT', retryable: true });
+  assert.equal(usage.finishes[0]?.status, 'FAILED');
+  assert.equal(usage.finishes[0]?.errorCode, 'INVALID_OUTPUT');
+});
+
+test('worker treats a provider input limit as a permanent failure', async () => {
+  const { claim: reportClaim } = claim(5);
+  const state = repositoryFor(reportClaim, candidates());
+  const usage = usageRepository();
+  const provider: ReportContentProvider = {
+    generate: async () => {
+      throw new ReportProviderException('INPUT_LIMIT_EXCEEDED');
+    },
+    validate: async () => ({ status: 'PASS', reason: 'ok' }),
+  };
+  const worker = new ReportWorker(
+    state.repository,
+    provider,
+    usage.repository,
+    logger(),
+    configuration(),
+  );
+
+  assert.equal(await worker.runOnce(), true);
+  assert.deepEqual(state.failures[0], { code: 'INPUT_LIMIT_EXCEEDED', retryable: false });
+  assert.equal(usage.finishes[0]?.status, 'FAILED');
+  assert.equal(usage.finishes[0]?.errorCode, 'INPUT_LIMIT_EXCEEDED');
+});
+
 test('worker carries provider model metadata into a failed usage record', async () => {
   const { claim: reportClaim } = claim(5);
   const state = repositoryFor(reportClaim, candidates());

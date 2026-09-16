@@ -52,8 +52,9 @@ export namespace list {
 
 /**
  * @security bearerAuth
- * @throws 400 Report input exceeds the configured limit.
+ * @throws 400 The request is invalid.
  * @throws 401 Authentication is required.
+ * @throws 429 Report input exceeds the configured limit.
  * @throws 500 The server could not complete the request.
  * @controller ReportController.request
  * @path POST /me/reports

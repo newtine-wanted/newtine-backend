@@ -18,7 +18,10 @@ export type ReportProviderErrorCode =
   | 'MISSING_CREDENTIALS'
   | 'UPSTREAM_ERROR'
   | 'TIMEOUT'
-  | 'INVALID_OUTPUT';
+  | 'INVALID_OUTPUT'
+  | 'INPUT_LIMIT_EXCEEDED';
+
+export const REPORT_PROVIDER_INPUT_LIMIT_BYTES = 100_000;
 
 export class ReportProviderException extends Error {
   readonly code: ReportProviderErrorCode;
@@ -38,7 +41,7 @@ export class ReportProviderException extends Error {
     super(code, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = 'ReportProviderException';
     this.code = code;
-    this.retryable = options.retryable ?? false;
+    this.retryable = options.retryable ?? code === 'INVALID_OUTPUT';
     this.resultUncertain = options.resultUncertain ?? false;
     this.usage = options.usage;
   }
@@ -84,6 +87,7 @@ export class ReportOpenAiResponsesClient {
     const text = extractOutputText(body);
     if (text === undefined) {
       throw new ReportProviderException('INVALID_OUTPUT', {
+        retryable: true,
         usage: requestUsage(this.configuration.model),
       });
     }
@@ -92,6 +96,7 @@ export class ReportOpenAiResponsesClient {
       value = JSON.parse(text) as T;
     } catch (error: unknown) {
       throw new ReportProviderException('INVALID_OUTPUT', {
+        retryable: true,
         usage: requestUsage(this.configuration.model),
         cause: error,
       });
@@ -302,8 +307,8 @@ function numberValue(value: unknown): number | undefined {
 }
 
 function assertPromptSize(prompt: string): void {
-  if (Buffer.byteLength(prompt, 'utf8') > 100_000) {
-    throw new ReportProviderException('INVALID_OUTPUT');
+  if (Buffer.byteLength(prompt, 'utf8') > REPORT_PROVIDER_INPUT_LIMIT_BYTES) {
+    throw new ReportProviderException('INPUT_LIMIT_EXCEEDED');
   }
 }
 
@@ -330,6 +335,10 @@ async function readJsonBody(response: Response, usage: ReportProviderUsage): Pro
   try {
     return JSON.parse(text) as unknown;
   } catch (error: unknown) {
-    throw new ReportProviderException('INVALID_OUTPUT', { usage, cause: error });
+    throw new ReportProviderException('INVALID_OUTPUT', {
+      retryable: true,
+      usage,
+      cause: error,
+    });
   }
 }

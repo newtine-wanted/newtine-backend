@@ -20,7 +20,7 @@ const EXPECTED_FAILURE_STATUSES = {
   '/me/interest-analysis': ['401', '500'],
   '/me/liked-issues': ['400', '401', '500'],
   'get /me/reports': ['401', '500'],
-  'post /me/reports': ['400', '401', '500'],
+  'post /me/reports': ['400', '401', '429', '500'],
   '/me/reports/{reportId}': ['400', '401', '404', '500'],
   '/me/reports/{reportId}/retry': ['400', '401', '404', '409', '429', '500'],
   '/me/onboarding/complete': ['400', '401', '500'],

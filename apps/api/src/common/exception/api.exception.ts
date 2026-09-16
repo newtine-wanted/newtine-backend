@@ -60,8 +60,8 @@ export const ApiException = {
   },
   ReportInputLimit: {
     code: 'INPUT_LIMIT_EXCEEDED',
-    status: HttpStatus.BAD_REQUEST,
-    title: 'Bad Request',
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    title: 'Too Many Requests',
     description: 'Report input exceeds the configured limit.',
   },
   InternalError: {

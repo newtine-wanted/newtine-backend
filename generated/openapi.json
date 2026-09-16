@@ -2269,7 +2269,7 @@
             }
           },
           "400": {
-            "description": "Report input exceeds the configured limit.",
+            "description": "The request is invalid.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2280,6 +2280,16 @@
           },
           "401": {
             "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Report input exceeds the configured limit.",
             "content": {
               "application/problem+json": {
                 "schema": {

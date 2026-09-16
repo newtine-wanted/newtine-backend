@@ -8,6 +8,7 @@ import {
   ReportOpenAiProvider,
   ReportOpenAiResponsesClient,
   ReportProviderException,
+  REPORT_PROVIDER_INPUT_LIMIT_BYTES,
 } from '@newtine/batch/report/report.provider.js';
 
 function configuration(): ReportAiConfiguration {
@@ -118,8 +119,40 @@ test('report provider turns malformed upstream JSON into a safe invalid-output e
     await assert.rejects(
       client.json('generation', '{}', { type: 'object' }),
       (error: unknown) =>
-        error instanceof ReportProviderException && error.code === 'INVALID_OUTPUT',
+        error instanceof ReportProviderException &&
+        error.code === 'INVALID_OUTPUT' &&
+        error.retryable,
     );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('report provider marks a prompt over the provider limit as a permanent input error', async () => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return response({ connections: [], related: [] });
+  }) as typeof fetch;
+  try {
+    const config = configuration();
+    const provider = new ReportOpenAiProvider(new ReportOpenAiResponsesClient(config), config);
+    const values = input();
+    values.input.issues[0]!.summary = 'x'.repeat(REPORT_PROVIDER_INPUT_LIMIT_BYTES);
+
+    await assert.rejects(
+      provider.generate({
+        input: values.input,
+        candidates: values.candidates,
+        allowConnections: false,
+      }),
+      (error: unknown) =>
+        error instanceof ReportProviderException &&
+        error.code === 'INPUT_LIMIT_EXCEEDED' &&
+        !error.retryable,
+    );
+    assert.equal(calls, 0);
   } finally {
     globalThis.fetch = previousFetch;
   }
