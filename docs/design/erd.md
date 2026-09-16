@@ -245,6 +245,8 @@ Embedding task는 공개 당시의 `run_execution_id`를 별도로 보존하고 
 | created_at | timestamptz | — | 불가 | now() | — |
 | updated_at | timestamptz | — | 불가 | — | — |
 
+진단보고서 구현 확장(2026-09-16): input_snapshot/input hash와 후보 스냅샷, 누적 attempt_count, lease_token/lease_expires_at/heartbeat_at, next_attempt_at, last_error_code/retryable, requested_at/started_at/completed_at을 추가한다. 정확한 DDL과 DB CHECK는 `Migration20260916000000DiagnosticReport`가 기준이다. API 신청으로만 생성하며 성공 결과는 고정한다. AI ledger의 nullable weekly_report_id는 보고서 삭제 시 NULL로 유지하고 개인 입력은 보고서와 함께 삭제한다.
+
 ## 18. issue_content_jobs
 
 이슈 내용 생성 작업. 단계별 이력 없이 현재 stage/status 저장. started_at 최초 실행, finished_at 최종 종료. 이슈별 QUEUED/RUNNING 활성 작업은 하나만 허용.

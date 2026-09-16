@@ -353,3 +353,48 @@ category master의 PK는 `issue_categories.code`이며 이슈·분류 선호도�
 | [의사결정 기록](docs/decisions/README.md)      | 선택의 근거와 확정·미확정 상태            |
 | [정책과 계약](docs/policies/README.md)         | 요구사항과 외부 데이터·API 계약           |
 | [보안 리뷰](docs/reviews/security.review.html) | 확인된 보안 항목과 잔여 운영 과제         |
+
+## 신청형 주간 진단보고서
+
+- `GET /me/reports`: 최근 완료 4주 슬롯과 신청 가능 기간. 조회는 생성하지 않습니다.
+- `POST /me/reports`: `{ "periodStart": "YYYY-MM-DD" }`. 지난주 월요일(KST)만 신규 신청 가능. 대기/진행은 202, 기존 성공/실패 재조회는 200입니다.
+- `GET /me/reports/:reportId`: 소유한 보고서의 상태·완료 결과. 미완료 `content: null`입니다.
+- `POST /me/reports/:reportId/retry`: 재시도 가능한 실패만, 최근 완료 4주·60초 cooldown·총 5시도 제한. 성공 결과는 재생성하지 않습니다.
+
+모든 경로는 Bearer JWT가 필요합니다. 사용자별/주차별 하나만 저장하며 입력은 접수 시 고정합니다. API 프로세스가 재시작해도 DB 대기 작업은 남습니다. 주요 이슈는 지난주 최다 관심 분야를 기준으로 하며 공동 1위는 함께 사용하고 후보가 없으면 다른 분야로 대체하지 않습니다.
+
+### 워커 실행
+
+마이그레이션 적용 뒤 API와 별도 프로세스로 실행합니다.
+
+```sh
+npm run build
+npm run db:migrate
+npm run start:batch -- reportWorker
+```
+
+`OPENAI_API_KEY`, `REPORT_AI_MODEL`을 반드시 설정합니다. 모델 이름은 사용하는 계정에서 Structured Outputs를 지원하는 모델로 명시합니다. `REPORT_WORKER_ONCE=1`은 한 작업만 처리하는 점검 모드이며 상시 운영에서는 사용하지 않습니다. 일반 DB 점검/기존 pipeline 작업에는 보고서 AI 설정을 요구하지 않습니다.
+
+Compose에서는 `reports` 프로필의 `report-worker`가 별도 프로세스입니다. API 및 migrate와 같은 DB 설정을 사용하고 migrate 성공 뒤 시작합니다.
+
+```sh
+docker compose --profile reports up -d api report-worker
+```
+
+기본 제한: 동시 1건/프로세스, polling 1초, 외부 호출 60초, lease 180초, heartbeat 30초, 전체 실행 5분. 자동 시도는 3회이며 수동 재시도도 누적 총 5회를 넘지 않습니다. 여러 워커는 DB 선점과 토큰 조건부 저장으로 결과를 보호합니다. 공급자 timeout은 외부 과금 여부를 모를 수 있으며 사용량을 UNKNOWN으로 기록합니다.
+
+입력/보고서/프롬프트 원문은 로그에 남기지 않습니다. 주간 입력 200건·1MiB 상한을 초과하면 접수를 거절하며 부분 입력을 전체인 것처럼 분석하지 않습니다. 회원 삭제 시 스냅샷은 함께 삭제하고 사용량 기록의 보고서 FK는 NULL로 남습니다.
+
+### 검증과 선행 의존성
+
+보고서용 단위 테스트는 일반 `npm test`에 포함됩니다. 실제 DB 테스트는 별도 폐기 가능한 DB만 받습니다.
+
+```sh
+REPORT_TEST_DATABASE_URL=postgresql://report_test:report_test_local_only@127.0.0.1:55439/report_test npm run test:jest -- test/integration/reportLifecycle.test.ts test/integration/reportHttp.test.ts
+```
+
+먼저 같은 DB에 마이그레이션을 적용해야 합니다. 테스트는 자기 fixture만 정리하며 운영 DB URL을 사용하지 마세요. 기준 브랜치에는 관심 이벤트 쓰기 API가 없어 ACT-01 작업 통합이 실제 사용자 데이터 연결의 선행 조건입니다. 실 공급자 응답의 품질·비용과 운영 배포는 로컬 fixture 테스트로 보장하지 않습니다.
+
+[승인 설계](docs/design/diagnostic-report-design.html) · [구현/검증 기록](docs/design/diagnostic-report-implementation.html)
+
+진단보고서 HTTP 통합 테스트는 Nestia 변환이 적용된 `dist`를 사용하므로 `npm run build` 후 실행합니다. `REPORT_TEST_DATABASE_URL`은 로컬 일회용 `report_test` DB만 허용합니다.
