@@ -1,6 +1,6 @@
 # 데이터·응답 계약
 
-아래 JSON 형태와 처리 순서는 ERD v1.2의 설계 기본안이다. 실제 OpenAPI/JSON Schema나 실행 코드는 아니다. URL 경로·페이지네이션·오류 응답은 구현 전에 확정한다.
+아래 JSON 형태와 처리 순서는 ERD v1.4의 설계 기본안이다. 실제 OpenAPI/JSON Schema나 실행 코드는 아니다. URL 경로·페이지네이션·오류 응답은 구현 전에 확정한다.
 
 ## 상세 JSON
 
@@ -28,9 +28,11 @@
 - 서버는 인증된 user_id를 사용한다. 기존 id와 대상·행동이 다른 요청은 충돌로 거절한다.
 - 설계 기본안: 사용자 행 잠금 안에서 중복 id와 직전 행동을 확인하고, 이벤트 저장과 선호 반영을 한 트랜잭션으로 처리한다.
 - previous_action은 서버가 확인한 값이며 최초 NULL이다. 클라이언트가 보내는 직전 값으로 현재 상태를 덮어쓰지 않는다.
-- 최신 행동은 서버 created_at 순서다. 같은 사용자·이슈의 서로 다른 이벤트가 같은 시각이 되지 않도록 잠금 안에서 직전 시각보다 큰 시각을 부여하는 기본안이다. 시각 정밀도·동률 처리 계약은 구현 전에 확인한다.
+- 최신 행동은 서버가 발급한 `accepted_order` 순서다. `created_at`은 수용 시각과 기간 집계에만 사용하고, 시계 정밀도·역행이 최신 판정을 바꾸지 않는다.
 - 클라이언트 발생 순서 복원은 보장하지 않는다. 네트워크 순서가 바뀌면 서버 수용 순서를 따른다.
 - 동일 id 재전송은 점수를 다시 적용하지 않는다. 다른 id로 반복하는 동일 행동·전환의 가중치 정책은 추천 계약에서 확정한다.
+
+상세 열람은 `view_id`별 `active_ms`를 단조 증가시키고, 각 요청에서 현재 view의 증가분만 회원·이슈별 `credited_dwell_ms`에 더한다. 모든 view의 합계는 30,000ms에서 포화하며 점수는 10,000ms부터 0.5, 30,000ms부터 1이다. 이미 수용한 값 이하의 재전송은 원장과 점수를 다시 변경하지 않는다. `view_id`·`event_id`의 동시 충돌도 payload와 소유자를 비교해 409로 처리한다.
 
 현재 관심 목록은 사용자·이슈별 최신 행동이 LIKE인 이슈다. SKIP/PASS로 변경되면 제외된다. GET /feed만으로 이벤트를 생성하지 않는다. 무행동 열람까지는 현재 모델로 알 수 없다.
 
@@ -90,8 +92,8 @@
 | 분류별 조회 | issues(category_code, published_at) |
 | 기사에서 이슈 역조회 | issue_articles(article_id, issue_id) |
 | 이전 이슈 조회 | issue_relations(to_issue_id) |
-| 최신 행동 | user_interaction_events(user_id, issue_id, created_at) |
-| 주간 행동 | user_interaction_events(user_id, created_at) |
+| 최신 행동 | user_interaction_events(user_id, issue_id, accepted_order, id) |
+| 주간 행동 | user_interaction_events(user_id, created_at, accepted_order) |
 | 보고서 | weekly_reports(user_id, period_start) 복합 UNIQUE 활용 |
 | job 선점 | issue_content_jobs(status, created_at, id), 활성 job 부분 UNIQUE |
 | 호출 집계 | ai_usage_records(created_at), (issue_content_job_id, started_at) |
