@@ -22,6 +22,10 @@ const EXPECTED_FAILURE_STATUSES = {
   '/me/onboarding': ['401', '500'],
   '/me/interest-analysis': ['401', '500'],
   '/me/liked-issues': ['400', '401', '500'],
+  'get /me/reports': ['401', '500'],
+  'post /me/reports': ['400', '401', '429', '500'],
+  '/me/reports/{reportId}': ['400', '401', '404', '500'],
+  '/me/reports/{reportId}/retry': ['400', '401', '404', '409', '429', '500'],
   '/me/onboarding/complete': ['400', '401', '500'],
   '/me/onboarding/skip': ['401', '500'],
   '/pipeline/runs': ['400', '401', '403', '409', '500'],
@@ -175,7 +179,11 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
       );
       assert.deepEqual(
         failureStatuses.sort(),
-        [...(EXPECTED_FAILURE_STATUSES[path] ?? [])].sort(),
+        [
+          ...(EXPECTED_FAILURE_STATUSES[`${method} ${path}`] ??
+            EXPECTED_FAILURE_STATUSES[path] ??
+            []),
+        ].sort(),
         `${method.toUpperCase()} ${path} must declare only its supported failure statuses`,
       );
 
@@ -193,7 +201,9 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
         );
       }
 
-      for (const status of EXPECTED_FAILURE_STATUSES[path] ?? []) {
+      for (const status of EXPECTED_FAILURE_STATUSES[`${method} ${path}`] ??
+        EXPECTED_FAILURE_STATUSES[path] ??
+        []) {
         const response = operation.responses?.[status];
         const content = response?.content?.['application/problem+json'];
         assert.equal(
@@ -300,5 +310,33 @@ test('OpenAPI normalizer rejects conflicting ProblemDetails media objects', () =
         },
       }),
     /conflicting application\/json and application\/problem\+json/,
+  );
+});
+
+test('report contracts expose async request/replay and never worker-private data', async () => {
+  const document = JSON.parse(await readFile(join(generatedRoot, 'openapi.json'), 'utf8'));
+  for (const [path, methods] of Object.entries({
+    '/me/reports': ['get', 'post'],
+    '/me/reports/{reportId}': ['get'],
+    '/me/reports/{reportId}/retry': ['post'],
+  })) {
+    for (const method of methods)
+      assert.deepEqual(document.paths[path][method].security, [{ bearerAuth: [] }]);
+  }
+  assert.ok(document.paths['/me/reports'].post.responses['200']);
+  assert.ok(document.paths['/me/reports'].post.responses['202']);
+  for (const schema of ['ReportResponse', 'ReportSummaryResponse']) {
+    const properties = document.components.schemas[schema].properties;
+    for (const key of ['userId', 'input', 'candidates', 'attempt', 'leaseToken', 'leaseExpiresAt'])
+      assert.equal(properties[key], undefined);
+  }
+  assert.deepEqual(Object.keys(document.components.schemas.ReportRequest.properties), [
+    'periodStart',
+  ]);
+  assert.equal(
+    document.paths['/me/reports/{reportId}/retry'].post.responses['429'].content[
+      'application/problem+json'
+    ].schema.$ref,
+    PROBLEM_DETAILS_REF,
   );
 });

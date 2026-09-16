@@ -83,3 +83,24 @@ test('BatchRunner forwards the shutdown signal to embedding repair', async () =>
   assert.equal(await runner.run('pipelineEmbeddingRepair', controller.signal), 0);
   assert.equal(receivedSignal, controller.signal);
 });
+
+test('BatchRunner forwards the process owner and shutdown signal to report worker', async () => {
+  let owner: string | undefined;
+  let receivedSignal: AbortSignal | undefined;
+  const controller = new AbortController();
+  const runner = new BatchRunner(
+    { run: async () => undefined } as never,
+    createLogger(),
+    undefined,
+    undefined,
+    {
+      run: async (value: string, signal?: AbortSignal) => {
+        owner = value;
+        receivedSignal = signal;
+      },
+    } as never,
+  );
+  assert.equal(await runner.run('reportWorker', controller.signal), 0);
+  assert.ok(owner && isUuidV7(owner));
+  assert.equal(receivedSignal, controller.signal);
+});

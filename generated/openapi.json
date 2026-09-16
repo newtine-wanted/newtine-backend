@@ -818,6 +818,537 @@
         ],
         "type": "object"
       },
+      "ReportListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "eligiblePeriod": {
+            "$ref": "#/components/schemas/ReportPeriodResponse"
+          },
+          "nextEligibleAt": {
+            "type": "string"
+          },
+          "periods": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "period": {
+                  "$ref": "#/components/schemas/ReportPeriodResponse"
+                },
+                "report": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ReportSummaryResponse"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "period",
+                "report"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "latestSucceeded": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportSummaryResponse"
+              }
+            ]
+          }
+        },
+        "required": [
+          "eligiblePeriod",
+          "nextEligibleAt",
+          "periods",
+          "latestSucceeded"
+        ],
+        "type": "object"
+      },
+      "ReportPeriodResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "startAt": {
+            "type": "string"
+          },
+          "endAt": {
+            "type": "string"
+          },
+          "timeZone": {
+            "const": "Asia/Seoul",
+            "title": null,
+            "description": null
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "startAt",
+          "endAt",
+          "timeZone"
+        ],
+        "type": "object"
+      },
+      "ReportSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "const": "FAILED"
+              },
+              {
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
+              }
+            ]
+          },
+          "period": {
+            "$ref": "#/components/schemas/ReportPeriodResponse"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "completedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "nextRetryAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "failureCode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reportId",
+          "status",
+          "period",
+          "requestedAt",
+          "startedAt",
+          "completedAt",
+          "retryable",
+          "nextRetryAt",
+          "failureCode"
+        ],
+        "type": "object"
+      },
+      "ReportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "periodStart": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodStart"
+        ],
+        "type": "object"
+      },
+      "ReportContentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "schemaVersion": {
+            "const": 1,
+            "title": null,
+            "description": null
+          },
+          "analysisStatus": {
+            "oneOf": [
+              {
+                "const": "INSUFFICIENT_DATA"
+              },
+              {
+                "const": "NO_CONNECTION"
+              },
+              {
+                "const": "READY"
+              }
+            ]
+          },
+          "issueCount": {
+            "type": "number"
+          },
+          "minimumIssueCount": {
+            "const": 5,
+            "title": null,
+            "description": null
+          },
+          "categoryCounts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "categoryCode": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "categoryCode",
+                "displayName",
+                "count"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "connections": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "issueIds": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "label",
+                "title",
+                "description",
+                "issueIds"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "evidenceIssues": {
+            "items": {
+              "$ref": "#/components/schemas/ReportIssueResponse"
+            },
+            "type": "array"
+          },
+          "relatedIssues": {
+            "items": {
+              "$ref": "#/components/schemas/ReportIssueResponse__type"
+            },
+            "type": "array"
+          },
+          "majorIssues": {
+            "items": {
+              "$ref": "#/components/schemas/ReportIssueResponse"
+            },
+            "type": "array"
+          },
+          "majorIssueCategoryCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "majorIssuesStatus": {
+            "oneOf": [
+              {
+                "const": "NO_CANDIDATES"
+              },
+              {
+                "const": "NO_INTEREST"
+              },
+              {
+                "const": "READY"
+              }
+            ]
+          },
+          "recommendationsStatus": {
+            "oneOf": [
+              {
+                "const": "PARTIAL"
+              },
+              {
+                "const": "READY"
+              }
+            ]
+          },
+          "recommendationCapturedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "analysisStatus",
+          "issueCount",
+          "minimumIssueCount",
+          "categoryCounts",
+          "connections",
+          "evidenceIssues",
+          "relatedIssues",
+          "majorIssues",
+          "majorIssueCategoryCodes",
+          "majorIssuesStatus",
+          "recommendationsStatus",
+          "recommendationCapturedAt"
+        ],
+        "type": "object"
+      },
+      "ReportIssueResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "issueId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "categoryCode": {
+            "type": "string"
+          },
+          "categoryName": {
+            "type": "string"
+          },
+          "categoryOrder": {
+            "type": "number"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "summaryLines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "issueId",
+          "title",
+          "categoryCode",
+          "categoryName",
+          "categoryOrder",
+          "summary",
+          "summaryLines"
+        ],
+        "type": "object"
+      },
+      "ReportIssueResponse__type": {
+        "additionalProperties": false,
+        "properties": {
+          "issueId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "categoryCode": {
+            "type": "string"
+          },
+          "categoryName": {
+            "type": "string"
+          },
+          "categoryOrder": {
+            "type": "number"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "summaryLines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sourceIssueId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issueId",
+          "title",
+          "categoryCode",
+          "categoryName",
+          "categoryOrder",
+          "summary",
+          "summaryLines",
+          "sourceIssueId",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ReportResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "reportId": {
+            "type": "string"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "const": "FAILED"
+              },
+              {
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
+              }
+            ]
+          },
+          "period": {
+            "$ref": "#/components/schemas/ReportPeriodResponse"
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "completedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "nextRetryAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "failureCode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "content": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportContentResponse"
+              }
+            ]
+          },
+          "contentAvailability": {
+            "oneOf": [
+              {
+                "const": "AVAILABLE"
+              },
+              {
+                "const": "PARTIAL"
+              },
+              {
+                "const": "PENDING"
+              },
+              {
+                "const": "UNAVAILABLE"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reportId",
+          "status",
+          "period",
+          "requestedAt",
+          "startedAt",
+          "completedAt",
+          "retryable",
+          "nextRetryAt",
+          "failureCode",
+          "content",
+          "contentAvailability"
+        ],
+        "type": "object"
+      },
       "InterestAnalysisResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1097,6 +1628,76 @@
           }
         },
         "required": [],
+        "type": "object"
+      },
+      "AuthSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "tokenType": {
+            "const": "Bearer",
+            "title": null,
+            "description": null
+          },
+          "expiresIn": {
+            "type": "number"
+          },
+          "user": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "role": {
+                "oneOf": [
+                  {
+                    "const": "ADMIN"
+                  },
+                  {
+                    "const": "USER"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "email",
+              "role"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "accessToken",
+          "tokenType",
+          "expiresIn",
+          "user"
+        ],
+        "type": "object"
+      },
+      "AuthCredentialsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "minLength": 1,
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 12,
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
         "type": "object"
       },
       "IssueInteractionResponse": {
@@ -1763,76 +2364,6 @@
           }
         },
         "required": [],
-        "type": "object"
-      },
-      "AuthSessionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "accessToken": {
-            "type": "string"
-          },
-          "tokenType": {
-            "const": "Bearer",
-            "title": null,
-            "description": null
-          },
-          "expiresIn": {
-            "type": "number"
-          },
-          "user": {
-            "additionalProperties": false,
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "email": {
-                "type": "string"
-              },
-              "role": {
-                "oneOf": [
-                  {
-                    "const": "ADMIN"
-                  },
-                  {
-                    "const": "USER"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "email",
-              "role"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "accessToken",
-          "tokenType",
-          "expiresIn",
-          "user"
-        ],
-        "type": "object"
-      },
-      "AuthCredentialsRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "email": {
-            "maxLength": 254,
-            "minLength": 1,
-            "type": "string"
-          },
-          "password": {
-            "maxLength": 128,
-            "minLength": 12,
-            "type": "string"
-          }
-        },
-        "required": [
-          "email",
-          "password"
-        ],
         "type": "object"
       }
     }
@@ -2545,6 +3076,364 @@
         "x-samchon-controller": "OnboardingController"
       }
     },
+    "/me/reports": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "list"
+        ],
+        "x-samchon-controller": "ReportController"
+      },
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Existing completed or failed report; no new work enqueued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Report input exceeds the configured limit.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "request"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
+    "/me/reports/{reportId}": {
+      "get": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "get"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
+    "/me/reports/{reportId}/retry": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Retry cooldown is active.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "retry"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "const": "ok",
+                      "title": null,
+                      "description": null
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "health",
+          "getHealth"
+        ],
+        "x-samchon-controller": "HealthController"
+      }
+    },
     "/me/interest-analysis": {
       "get": {
         "tags": [],
@@ -2709,28 +3598,47 @@
         "x-samchon-controller": "InterestController"
       }
     },
-    "/health": {
-      "get": {
+    "/auth/signup": {
+      "post": {
         "tags": [],
         "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "status": {
-                      "const": "ok",
-                      "title": null,
-                      "description": null
-                    }
-                  },
-                  "required": [
-                    "status"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -2747,10 +3655,162 @@
           }
         },
         "x-samchon-accessor": [
-          "health",
-          "getHealth"
+          "auth",
+          "signup"
         ],
-        "x-samchon-controller": "HealthController"
+        "x-samchon-controller": "AuthController"
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "auth",
+          "login"
+        ],
+        "x-samchon-controller": "AuthController"
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal is not allowed to perform this action.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "auth",
+          "refresh"
+        ],
+        "x-samchon-controller": "AuthController"
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "The authenticated principal is not allowed to perform this action.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "auth",
+          "logout"
+        ],
+        "x-samchon-controller": "AuthController"
       }
     },
     "/issues/{issueId}/interactions": {
@@ -3330,221 +4390,6 @@
           "getFeed"
         ],
         "x-samchon-controller": "FeedController"
-      }
-    },
-    "/auth/signup": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AuthCredentialsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthSessionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request conflicts with the current resource state.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "auth",
-          "signup"
-        ],
-        "x-samchon-controller": "AuthController"
-      }
-    },
-    "/auth/login": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AuthCredentialsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthSessionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "auth",
-          "login"
-        ],
-        "x-samchon-controller": "AuthController"
-      }
-    },
-    "/auth/refresh": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthSessionResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The authenticated principal is not allowed to perform this action.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "auth",
-          "refresh"
-        ],
-        "x-samchon-controller": "AuthController"
-      }
-    },
-    "/auth/logout": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "403": {
-            "description": "The authenticated principal is not allowed to perform this action.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "auth",
-          "logout"
-        ],
-        "x-samchon-controller": "AuthController"
       }
     }
   },

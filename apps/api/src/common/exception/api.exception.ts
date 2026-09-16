@@ -52,6 +52,18 @@ export const ApiException = {
     title: 'Payload Too Large',
     description: 'The request body exceeds the size limit.',
   },
+  RateLimited: {
+    code: 'RATE_LIMITED',
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    title: 'Too Many Requests',
+    description: 'Retry cooldown is active.',
+  },
+  ReportInputLimit: {
+    code: 'INPUT_LIMIT_EXCEEDED',
+    status: HttpStatus.TOO_MANY_REQUESTS,
+    title: 'Too Many Requests',
+    description: 'Report input exceeds the configured limit.',
+  },
   InternalError: {
     code: ErrorCode.InternalError,
     status: HttpStatus.INTERNAL_SERVER_ERROR,

@@ -1,3 +1,4 @@
+import { ReportBatchModule } from './report/report.batch.module.js';
 import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 
@@ -30,7 +31,11 @@ import {
 } from '@newtine/core';
 
 @Module({
-  imports: [LoggerModule.forRoot(createLoggerOptions('batch')), CoreModule],
+  imports: [
+    LoggerModule.forRoot(createLoggerOptions('batch')),
+    CoreModule,
+    ...(process.argv[2] === 'reportWorker' ? [ReportBatchModule] : []),
+  ],
   providers: [
     DatabaseCheckJob,
     BatchRunner,

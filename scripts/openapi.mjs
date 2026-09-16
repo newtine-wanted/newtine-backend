@@ -1,4 +1,4 @@
-/* global console, process */
+/* global console, process, structuredClone */
 
 import { spawn } from 'node:child_process';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
@@ -34,6 +34,14 @@ export function normalizeOpenApiDocument(document) {
     }
   }
 
+  // One report per week: replay of a terminal result returns 200; queued/running returns 202.
+  const reportRequest = document.paths?.['/me/reports']?.post;
+  if (isRecord(reportRequest?.responses?.['202'])) {
+    reportRequest.responses['200'] = {
+      ...structuredClone(reportRequest.responses['202']),
+      description: 'Existing completed or failed report; no new work enqueued.',
+    };
+  }
   return document;
 }
 

@@ -92,5 +92,34 @@ services:
         condition: service_healthy
     restart: "no"
 
+  report-worker:
+    profiles:
+      - reports
+    build:
+      context: .
+    command: ["node", "dist/apps/batch/src/main.js", "reportWorker"]
+    environment:
+      NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-newtine}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      REPORT_AI_MODEL: ${REPORT_AI_MODEL:-}
+      REPORT_AI_TIMEOUT_MS: ${REPORT_AI_TIMEOUT_MS:-60000}
+      REPORT_WORKER_POLL_MS: ${REPORT_WORKER_POLL_MS:-1000}
+      REPORT_WORKER_LEASE_MS: ${REPORT_WORKER_LEASE_MS:-180000}
+      REPORT_WORKER_HEARTBEAT_MS: ${REPORT_WORKER_HEARTBEAT_MS:-30000}
+      REPORT_WORKER_EXECUTION_TIMEOUT_MS: ${REPORT_WORKER_EXECUTION_TIMEOUT_MS:-300000}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 75s
+
 volumes:
   postgres-data:

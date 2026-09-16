@@ -5,6 +5,7 @@ import type { UuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
 export interface AiUsageRecordEntity {
   id: UuidV7;
   pipelineRunId: UuidV7 | null;
+  weeklyReportId?: UuidV7 | null;
   issueContentJobId: UuidV7 | null;
   runAttempt: number;
   operation: string;
@@ -43,6 +44,12 @@ export const AiUsageRecordEntity = new EntitySchema<AiUsageRecordEntity>({
       type: String,
       columnType: 'uuid',
       fieldName: 'issue_content_job_id',
+      nullable: true,
+    },
+    weeklyReportId: {
+      type: String,
+      columnType: 'uuid',
+      fieldName: 'weekly_report_id',
       nullable: true,
     },
     runAttempt: { type: Number },

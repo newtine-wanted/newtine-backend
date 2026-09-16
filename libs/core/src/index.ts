@@ -217,3 +217,7 @@ export type { AuthRepository } from './auth/repository/auth.repository.js';
 export { AuthException, AuthExceptionCode } from './auth/domain/auth.exception.js';
 export type { AuthExceptionCodeValue } from './auth/domain/auth.exception.js';
 export { PostgresAuthRepository } from './auth/postgresAuth.repository.js';
+
+export * from './report/report.model.js';
+export * from './report/report.period.js';
+export * from './report/report.exception.js';
