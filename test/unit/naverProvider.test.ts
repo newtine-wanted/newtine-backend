@@ -7,7 +7,7 @@ import {
 } from '@newtine/batch/pipeline/naverNews.provider.js';
 import { PipelineException, PipelineExceptionCode, generateUuidV7 } from '@newtine/core';
 
-test('Naver adapter translates missing credentials into a pipeline exception', async () => {
+test('네이버 어댑터는 자격증명이 없으면 파이프라인 예외를 반환한다', async () => {
   const previousClientId = process.env.NAVER_CLIENT_ID;
   const previousClientSecret = process.env.NAVER_CLIENT_SECRET;
   delete process.env.NAVER_CLIENT_ID;
@@ -30,7 +30,7 @@ test('Naver adapter translates missing credentials into a pipeline exception', a
   }
 });
 
-test('Naver search separates response body transport failures from malformed JSON', async () => {
+test('네이버 검색은 응답 본문 전송 실패와 잘못된 JSON을 구분한다', async () => {
   const previousClientId = process.env.NAVER_CLIENT_ID;
   const previousClientSecret = process.env.NAVER_CLIENT_SECRET;
   const previousFetch = globalThis.fetch;
@@ -78,7 +78,7 @@ test('Naver search separates response body transport failures from malformed JSO
   }
 });
 
-test('Naver article adapter rejects redirects outside the Naver allowlist', async () => {
+test('네이버 기사 어댑터는 허용 목록 밖으로 리디렉션되면 거부한다', async () => {
   const previousFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => {
@@ -110,7 +110,7 @@ test('Naver article adapter rejects redirects outside the Naver allowlist', asyn
   }
 });
 
-test('Naver article adapter follows only validated Naver redirects and caps the body', async () => {
+test('네이버 기사 어댑터는 검증된 네이버 리디렉션만 따르고 본문 크기를 제한한다', async () => {
   const previousFetch = globalThis.fetch;
   const requests: Array<{ url: string; redirect: RequestInit['redirect'] | undefined }> = [];
   const responses = [
@@ -149,7 +149,7 @@ test('Naver article adapter follows only validated Naver redirects and caps the 
   }
 });
 
-test('Naver article adapter rejects an HTML response over the byte cap', async () => {
+test('네이버 기사 어댑터는 크기 제한을 초과한 HTML 응답을 거부한다', async () => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async () =>
     new Response('x'.repeat(2 * 1024 * 1024 + 1), {
@@ -177,7 +177,7 @@ test('Naver article adapter rejects an HTML response over the byte cap', async (
   }
 });
 
-test('API HUB search sends the new contract and preserves article mapping and result limits', async () => {
+test('API HUB 검색은 새 계약을 전송하고 기사 매핑과 결과 제한을 유지한다', async () => {
   const previousFetch = globalThis.fetch;
   const previousId = process.env.NAVER_CLIENT_ID;
   const previousSecret = process.env.NAVER_CLIENT_SECRET;
@@ -240,7 +240,7 @@ test('API HUB search sends the new contract and preserves article mapping and re
   }
 });
 
-test('API HUB rejects missing or blank credentials before making any request', async () => {
+test('API HUB 검색은 요청 전에 없거나 공백인 자격증명을 거부한다', async () => {
   const previousFetch = globalThis.fetch;
   const previousId = process.env.NAVER_CLIENT_ID;
   const previousSecret = process.env.NAVER_CLIENT_SECRET;
@@ -275,7 +275,7 @@ test('API HUB rejects missing or blank credentials before making any request', a
   }
 });
 
-test('API HUB preserves HTTP failure classification without fallback requests', async () => {
+test('API HUB 검색은 fallback 요청 없이 HTTP 오류를 기존 기준으로 분류한다', async () => {
   const previousFetch = globalThis.fetch;
   const previousId = process.env.NAVER_CLIENT_ID;
   const previousSecret = process.env.NAVER_CLIENT_SECRET;
