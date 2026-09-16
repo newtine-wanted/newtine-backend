@@ -146,8 +146,12 @@ NODE_ENV=development DB_HOST=127.0.0.1 node --env-file=.env dist/apps/batch/src/
 
 Compose에서 `.env`는 interpolation 입력으로만 사용됩니다. `DB_NAME`, `DB_USER`, `DB_PASSWORD`와
 선택적인 `LOG_LEVEL`, `HTTP_SLOW_THRESHOLD_MS`는 각 서비스의 `environment`에 명시적으로
-전달되며 `.env` 파일 자체는 image에 복사되지 않습니다. `API_PORT`와 `DB_PORT`는 host에
-publish할 포트를 정하고, 컨테이너 내부 API·PostgreSQL 포트는 각각 `3000`·`5432`로 고정됩니다.
+전달되며 `.env` 파일 자체는 image에 복사되지 않습니다. API 컨테이너의 `NODE_ENV`는
+`production`, `AUTH_COOKIE_SECURE`는 `true`로 고정하여 `.env.example`의 호스트 개발 설정이
+production runtime에 잘못 전달되지 않게 합니다. 따라서 Docker API는 stdout JSON을 사용하고,
+호스트 Node 실행은 `node --env-file=.env ...`로 개발 설정을 사용할 수 있습니다. `API_PORT`와
+`DB_PORT`는 host에 publish할 포트를 정하고, 컨테이너 내부 API·PostgreSQL 포트는 각각
+`3000`·`5432`로 고정됩니다.
 호스트 Node 실행에서는 애플리케이션이 `.env`를 자동으로 읽지 않으므로 셸 환경변수나 Node
 `--env-file` 등으로 직접 주입해야 합니다.
 
