@@ -290,6 +290,56 @@ dbTest(
 );
 
 dbTest(
+  'report input selects the latest accepted action by accepted_order',
+  async () => {
+    const fixture = await createFixture();
+    try {
+      const issueId = await createIssue(fixture, {
+        categoryCode: 'housing',
+        title: '수용 순서 검증 이슈',
+      });
+      await sql(
+        `insert into user_interaction_events
+           (id, user_id, issue_id, session_id, event_type, dwell_time, previous_action,
+            accepted_order, created_at)
+         values (?, ?, ?, ?, 'SKIP', null, null, ?, ?)`,
+        [
+          generateUuidV7(),
+          fixture.userId,
+          issueId,
+          generateUuidV7(),
+          100,
+          new Date('2026-09-08T05:00:00.000Z'),
+        ],
+      );
+      await sql(
+        `insert into user_interaction_events
+           (id, user_id, issue_id, session_id, event_type, dwell_time, previous_action,
+            accepted_order, created_at)
+         values (?, ?, ?, ?, 'LIKE', null, null, ?, ?)`,
+        [
+          generateUuidV7(),
+          fixture.userId,
+          issueId,
+          generateUuidV7(),
+          200,
+          new Date('2026-09-08T04:00:00.000Z'),
+        ],
+      );
+
+      const report = await repository().request(fixture.userId, period, fixedNow);
+      assert.deepEqual(
+        report.input.issues.map((issue) => issue.issueId),
+        [issueId],
+      );
+    } finally {
+      await cleanup(fixture);
+    }
+  },
+  60_000,
+);
+
+dbTest(
   'expired attempt three becomes manual retryable FAILED and attempt five cannot get stuck queued',
   async () => {
     const fixture = await createFixture();

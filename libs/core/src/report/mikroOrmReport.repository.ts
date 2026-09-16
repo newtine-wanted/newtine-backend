@@ -89,11 +89,11 @@ export class MikroOrmReportRepository implements ReportRepository {
               em,
               `with latest_events as (
                  select distinct on (e.issue_id)
-                        e.issue_id, e.event_type, e.created_at, e.id
+                        e.issue_id, e.event_type, e.accepted_order, e.created_at, e.id
                    from user_interaction_events e
                   where e.user_id = $1
                     and e.created_at < $2::timestamptz
-                  order by e.issue_id, e.created_at desc, e.id desc
+                  order by e.issue_id, e.accepted_order desc, e.id desc
                )
                select count(*)::int as total_count
                  from latest_events
@@ -111,11 +111,11 @@ export class MikroOrmReportRepository implements ReportRepository {
               em,
               `with latest_events as (
                  select distinct on (e.issue_id)
-                        e.issue_id, e.event_type, e.created_at, e.id
+                        e.issue_id, e.event_type, e.accepted_order, e.created_at, e.id
                    from user_interaction_events e
                   where e.user_id = $1
                     and e.created_at < $2::timestamptz
-                  order by e.issue_id, e.created_at desc, e.id desc
+                  order by e.issue_id, e.accepted_order desc, e.id desc
                )
                select i.id as issue_id,
                       i.title,
