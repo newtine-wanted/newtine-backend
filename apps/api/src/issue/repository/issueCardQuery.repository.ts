@@ -332,10 +332,17 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
   async findLatestInteractions(userId: string): Promise<UserInteractionRecord[]> {
     const rows = await this.currentSqlEntityManager()
       .createQueryBuilder(IssueQueryInteractionEntity, 'event')
-      .select(['event.id', 'event.userId', 'event.issueId', 'event.eventType', 'event.createdAt'])
+      .select([
+        'event.id',
+        'event.userId',
+        'event.issueId',
+        'event.eventType',
+        'event.acceptedOrder',
+        'event.createdAt',
+      ])
       .where({ userId })
       .distinctOn('event.issueId')
-      .orderBy({ issueId: QueryOrder.ASC, createdAt: QueryOrder.DESC, id: QueryOrder.DESC })
+      .orderBy({ issueId: QueryOrder.ASC, acceptedOrder: QueryOrder.DESC, id: QueryOrder.DESC })
       .getResultList();
     return rows.map((row) => ({
       id: row.id,

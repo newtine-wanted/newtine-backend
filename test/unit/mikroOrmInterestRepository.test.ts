@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from '@jest/globals';
 
-import { generateUuidV7 } from '@newtine/core';
+import { generateUuidV7, IssueException, IssueExceptionCode } from '@newtine/core';
 import { IssueSchema } from '@newtine/core/issue/persistence/issue.persistence.entity.js';
 import { IssueCategorySchema } from '@newtine/core/onboarding/persistence/onboarding.persistence.entity.js';
 import { MikroOrmInterestRepository } from '@newtine/core/interest/mikroOrmInterest.repository.js';
@@ -53,6 +53,10 @@ function createRepository(
       calls.where = where;
       return this;
     },
+    andWhere(where: unknown) {
+      calls.where = { ...(calls.where as object), ...(where as object) };
+      return this;
+    },
     distinctOn(fields: string) {
       calls.distinctOn = fields;
       return this;
@@ -95,6 +99,28 @@ function createRepository(
       }
       return [];
     },
+  };
+  return {
+    calls,
+    repository: new MikroOrmInterestRepository(entityManager as never),
+  };
+}
+
+function createWriteRepository(queryResults: readonly unknown[]) {
+  let resultIndex = 0;
+  const calls: Array<{ readonly sql: string; readonly mode: string }> = [];
+  const connection = {
+    execute: async (sql: string, _params: readonly unknown[], mode: string) => {
+      calls.push({ sql, mode });
+      if (mode === 'get') return queryResults[resultIndex++];
+      return undefined;
+    },
+  };
+  const entityManager = {
+    getContext: () => entityManager,
+    getConnection: () => connection,
+    getTransactionContext: () => undefined,
+    isInTransaction: () => true,
   };
   return {
     calls,
@@ -164,11 +190,16 @@ test('interest analysis uses ORM query builder and derives period category count
     'event.id',
     'event.issueId',
     'event.eventType',
+    'event.acceptedOrder',
     'event.createdAt',
   ]);
   assert.deepEqual(calls.where, { userId, createdAt: { $lt: endAt } });
   assert.equal(calls.distinctOn, 'event.issueId');
-  assert.deepEqual(calls.orderBy, { issueId: 'ASC', createdAt: 'DESC', id: 'DESC' });
+  assert.deepEqual(calls.orderBy, {
+    issueId: 'ASC',
+    acceptedOrder: 'DESC',
+    id: 'DESC',
+  });
   assert.equal(calls.finds[0]?.entity, IssueSchema);
   assert.equal(calls.finds[1]?.entity, IssueCategorySchema);
 });
@@ -185,7 +216,7 @@ test('liked issue query preserves an empty page and uses ORM filters', async () 
   });
 
   assert.deepEqual(result, { items: [], totalCount: 0, nextCursor: null });
-  assert.deepEqual(calls.where, { userId, createdAt: { $lt: asOf } });
+  assert.deepEqual(calls.where, { userId });
   assert.equal(calls.finds.length, 0);
 });
 
@@ -254,4 +285,112 @@ test('current likes exclude non-LIKE actions and non-published issues', async ()
   assert.equal(result.issueCount, 1);
   assert.equal(result.likedIssueCount, 1);
   assert.equal(result.categoryCounts[0]?.count, 1);
+});
+
+test('interaction insert conflict rechecks the row and preserves idempotency', async () => {
+  const eventId = generateUuidV7();
+  const userId = generateUuidV7();
+  const issueId = generateUuidV7();
+  const sessionId = generateUuidV7();
+  const acceptedAt = new Date('2026-09-15T03:00:00.000Z');
+  const { calls, repository } = createWriteRepository([
+    { id: userId },
+    undefined,
+    { id: issueId, category_code: 'housing' },
+    undefined,
+    undefined,
+    undefined,
+    {
+      id: eventId,
+      user_id: userId,
+      issue_id: issueId,
+      session_id: sessionId,
+      event_type: 'LIKE',
+      created_at: acceptedAt,
+    },
+  ]);
+
+  const result = await repository.recordInteraction({
+    eventId,
+    userId,
+    issueId,
+    sessionId,
+    action: 'LIKE',
+  });
+
+  assert.equal(result.acceptedAt, acceptedAt);
+  assert.match(
+    calls.find(({ sql }) => sql.includes('INSERT INTO user_interaction_events'))?.sql ?? '',
+    /ON CONFLICT \(id\) DO NOTHING/,
+  );
+  assert.match(
+    calls.find(({ sql }) => sql.includes('INSERT INTO user_interaction_events'))?.sql ?? '',
+    /clock_timestamp\(\)/,
+  );
+});
+
+test('detail view insert conflict is returned as a domain conflict for another owner', async () => {
+  const viewId = generateUuidV7();
+  const userId = generateUuidV7();
+  const otherUserId = generateUuidV7();
+  const issueId = generateUuidV7();
+  const sessionId = generateUuidV7();
+  const { calls, repository } = createWriteRepository([
+    { id: userId },
+    undefined,
+    { id: issueId },
+    undefined,
+    {
+      view_id: viewId,
+      user_id: otherUserId,
+      issue_id: issueId,
+      session_id: sessionId,
+      started_at: new Date('2026-09-15T03:00:00.000Z'),
+      expires_at: new Date('2026-09-15T03:30:00.000Z'),
+    },
+  ]);
+
+  await assert.rejects(
+    repository.startDetailView({ viewId, userId, issueId, sessionId }),
+    (error: unknown) =>
+      error instanceof IssueException && error.code === IssueExceptionCode.DetailViewConflict,
+  );
+  assert.match(
+    calls.find(({ sql }) => sql.includes('INSERT INTO issue_detail_views'))?.sql ?? '',
+    /ON CONFLICT \(view_id\) DO NOTHING/,
+  );
+});
+
+test('detail progress guards the final write against expiry after lock waits', async () => {
+  const viewId = generateUuidV7();
+  const userId = generateUuidV7();
+  const issueId = generateUuidV7();
+  const { calls, repository } = createWriteRepository([
+    { id: userId },
+    {
+      view_id: viewId,
+      user_id: userId,
+      issue_id: issueId,
+      expires_at: new Date('2026-09-15T03:30:00.000Z'),
+      active_ms: 0,
+      expired: false,
+      server_elapsed_ms: 20_000,
+    },
+    undefined,
+    { id: issueId, category_code: 'housing' },
+    { view_id: viewId },
+  ]);
+
+  const result = await repository.updateDetailView({
+    viewId,
+    userId,
+    issueId,
+    activeMilliseconds: 10_000,
+  });
+
+  assert.equal(result.totalCreditedMilliseconds, 10_000);
+  assert.match(
+    calls.find(({ sql }) => sql.includes('UPDATE issue_detail_views'))?.sql ?? '',
+    /clock_timestamp\(\) < expires_at/,
+  );
 });

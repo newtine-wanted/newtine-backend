@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
 import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDetails.js';
 import { DomainException, type AuthPrincipal } from '@newtine/core';
 import { IssueDetailService } from './issueDetail.service.js';
+import { IssueActionService } from './issueAction.service.js';
 import { IssueSearchService } from './issueSearch.service.js';
 import { toIssueDetailResponse } from './type/issueDetail.mapper.js';
 import type { IssueDetailResponse } from './type/issueDetail.response.js';
@@ -29,6 +30,7 @@ export class IssueController {
   constructor(
     private readonly issueSearchService: IssueSearchService,
     private readonly issueDetailService: IssueDetailService,
+    private readonly issueActionService: IssueActionService,
   ) {}
 
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
@@ -65,9 +67,15 @@ export class IssueController {
   ): Promise<IssueDetailResponse> {
     response.setHeader('Cache-Control', 'private, no-store');
     try {
-      return toIssueDetailResponse(
-        await this.issueDetailService.get(issueId, principal?.userId ?? null),
-      );
+      const result = await this.issueDetailService.get(issueId, principal?.userId ?? null);
+      const myAction =
+        principal === undefined
+          ? null
+          : await this.issueActionService.findCurrentAction(
+              principal.userId,
+              issueId as AuthPrincipal['userId'],
+            );
+      return toIssueDetailResponse(result, myAction);
     } catch (error) {
       if (error instanceof HttpException || error instanceof DomainException) throw error;
       throw new ServiceUnavailableException(undefined, { cause: error });

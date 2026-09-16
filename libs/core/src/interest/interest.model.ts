@@ -3,6 +3,51 @@ import type { UuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
 
 export type InterestEventType = 'LIKE' | 'SKIP' | 'PASS';
 
+export interface RecordInteractionCommand {
+  readonly eventId: UuidV7;
+  readonly userId: UuidV7;
+  readonly issueId: UuidV7;
+  readonly sessionId: UuidV7;
+  readonly action: InterestEventType;
+}
+
+export interface InteractionAcceptance {
+  readonly eventId: UuidV7;
+  readonly issueId: UuidV7;
+  readonly acceptedAction: InterestEventType;
+  readonly acceptedAt: Date;
+}
+
+export interface StartDetailViewCommand {
+  readonly viewId: UuidV7;
+  readonly userId: UuidV7;
+  readonly issueId: UuidV7;
+  readonly sessionId: UuidV7;
+}
+
+export interface DetailViewStarted {
+  readonly viewId: UuidV7;
+  readonly issueId: UuidV7;
+  readonly startedAt: Date;
+  readonly expiresAt: Date;
+  readonly created: boolean;
+}
+
+export interface UpdateDetailViewCommand {
+  readonly viewId: UuidV7;
+  readonly userId: UuidV7;
+  readonly issueId: UuidV7;
+  readonly activeMilliseconds: number;
+}
+
+export interface DetailViewProgress {
+  readonly viewId: UuidV7;
+  readonly issueId: UuidV7;
+  readonly acceptedActiveMilliseconds: number;
+  readonly totalCreditedMilliseconds: number;
+  readonly dwellScore: 0 | 0.5 | 1;
+}
+
 export interface InterestAnalysisPeriod {
   readonly startAt: Date;
   readonly endAt: Date;
@@ -69,4 +114,12 @@ export interface InterestRepository {
   getLikedIssues(userId: UuidV7, query: LikedIssuesQuery): Promise<LikedIssuesResult>;
 }
 
+export interface InterestWriteRepository {
+  recordInteraction(command: RecordInteractionCommand): Promise<InteractionAcceptance>;
+  startDetailView(command: StartDetailViewCommand): Promise<DetailViewStarted>;
+  updateDetailView(command: UpdateDetailViewCommand): Promise<DetailViewProgress>;
+  findCurrentInteraction(userId: UuidV7, issueId: UuidV7): Promise<InterestEventType | null>;
+}
+
 export const INTEREST_REPOSITORY = Symbol('INTEREST_REPOSITORY');
+export const INTEREST_WRITE_REPOSITORY = Symbol('INTEREST_WRITE_REPOSITORY');

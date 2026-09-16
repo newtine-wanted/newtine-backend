@@ -344,6 +344,7 @@ test('latest interactions are selected by PostgreSQL query builder and follow-up
       userId: '00000000-0000-7000-8000-000000000041',
       issueId: ISSUE_ID,
       eventType: 'LIKE',
+      acceptedOrder: 2,
       createdAt: new Date('2026-01-02T00:00:00.000Z'),
     },
     {
@@ -351,6 +352,7 @@ test('latest interactions are selected by PostgreSQL query builder and follow-up
       userId: '00000000-0000-7000-8000-000000000041',
       issueId: ISSUE_ID,
       eventType: 'SKIP',
+      acceptedOrder: 1,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     },
   ];
@@ -416,13 +418,14 @@ test('latest interactions are selected by PostgreSQL query builder and follow-up
     'event.userId',
     'event.issueId',
     'event.eventType',
+    'event.acceptedOrder',
     'event.createdAt',
   ]);
   assert.deepEqual(queryCalls.where, { userId: interactionRows[0]!.userId });
   assert.equal(queryCalls.distinctOn, 'event.issueId');
   assert.deepEqual(queryCalls.orderBy, {
     issueId: QueryOrder.ASC,
-    createdAt: QueryOrder.DESC,
+    acceptedOrder: QueryOrder.DESC,
     id: QueryOrder.DESC,
   });
   assert.equal(calls.includes('find:IssueQueryInteraction'), false);

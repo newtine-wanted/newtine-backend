@@ -243,6 +243,8 @@ async function cleanup() {
     await execute(`DELETE FROM feed_sessions WHERE ${ownerClauses.join(' OR ')}`, ownerParams);
   }
   for (const issueId of issueIds) {
+    await execute('DELETE FROM issue_detail_views WHERE issue_id = ?', [issueId]);
+    await execute('DELETE FROM user_issue_contributions WHERE issue_id = ?', [issueId]);
     await execute('DELETE FROM user_interaction_events WHERE issue_id = ?', [issueId]);
     await execute('DELETE FROM issue_articles WHERE issue_id = ?', [issueId]);
     await execute('DELETE FROM issue_impacts WHERE issue_id = ?', [issueId]);

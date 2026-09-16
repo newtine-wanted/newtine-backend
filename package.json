@@ -25,6 +25,7 @@
     "test:smoke": "node scripts/smoke.mjs",
     "test:smoke:compose": "node scripts/compose-auth-smoke.mjs",
     "test:smoke:compose:data": "node scripts/compose-issue-data-smoke.mjs",
+    "test:smoke:compose:actions": "node scripts/compose-issue-action-smoke.mjs",
     "typecheck:generated": "tsc --noEmit -p tsconfig.generated.json",
     "contracts:clean": "node scripts/clean-generated.mjs",
     "contracts:sdk": "npm run contracts:clean && nestia sdk",

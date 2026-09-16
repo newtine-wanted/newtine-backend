@@ -162,7 +162,27 @@ erDiagram
   text event_type "NOT NULL"
   int dwell_time "NULL"
   text previous_action "NULL"
+  bigint accepted_order "NOT NULL"
   timestamptz created_at "NOT NULL"
+ }
+ user_issue_contributions {
+  uuid user_id PK,FK "NOT NULL"
+  uuid issue_id PK,FK "NOT NULL"
+  text category_code FK "NOT NULL"
+  numeric action_score "NOT NULL DEFAULT 0"
+  int credited_dwell_ms "NOT NULL DEFAULT 0"
+  numeric dwell_score "NOT NULL DEFAULT 0"
+  uuid last_action_event_id FK "NULL"
+  timestamptz updated_at "NOT NULL"
+ }
+ issue_detail_views {
+  uuid view_id PK "NOT NULL"
+  uuid user_id FK "NOT NULL"
+  uuid issue_id FK "NOT NULL"
+  uuid session_id "NOT NULL"
+  timestamptz started_at "NOT NULL"
+  timestamptz expires_at "NOT NULL"
+  int active_ms "NOT NULL DEFAULT 0"
  }
  weekly_reports {
   uuid id PK "NOT NULL"
