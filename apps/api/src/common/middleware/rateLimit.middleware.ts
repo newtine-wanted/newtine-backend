@@ -282,9 +282,11 @@ function routeKey(request: Request): string {
 }
 
 function requestPath(request: Request): string {
-  if (typeof request.path === 'string' && request.path.length > 0) return request.path;
-  const url = typeof request.url === 'string' ? request.url : '/';
-  return url.split('?', 1)[0] || '/';
+  const rawPath =
+    typeof request.path === 'string' && request.path.length > 0
+      ? request.path
+      : (typeof request.url === 'string' ? request.url : '/').split('?', 1)[0] || '/';
+  return rawPath.length > 1 ? rawPath.replace(/\/+$/, '') || '/' : rawPath;
 }
 
 function normalizeIp(value: string): string {

@@ -55,12 +55,12 @@
 
         <section id="current-implementation">
           <h2>현재 구현</h2>
-          <p><code>apps/api/src/common/middleware/rateLimit.middleware.ts</code>에 Cloud Run 인스턴스별 bounded process-local token bucket과 공통 Express middleware를 구현하고, <code>apps/api/src/main.ts</code>에서 request context 다음·body parser 전에 등록했다. body parser 뒤에는 login/signup의 canonical email SHA-256 account bucket을 추가했다. DB·Redis에는 rate limit 상태를 기록하지 않는다. 이번 구현은 승인된 G1-A·G2-B·G3-A에서 벗어나지 않는다.</p>
+          <p><code>apps/api/src/common/middleware/rateLimit.middleware.ts</code>에 Cloud Run 인스턴스별 bounded process-local token bucket과 공통 Express middleware를 구현하고, <code>apps/api/src/main.ts</code>에서 request context 다음·body parser 전에 등록했다. method와 canonical path(trailing slash 제거)로 endpoint override를 선택하며, body parser 뒤에는 login/signup의 canonical email SHA-256 account bucket을 추가했다. DB·Redis에는 rate limit 상태를 기록하지 않는다. 이번 구현은 승인된 G1-A·G2-B·G3-A 범위 안에서 확인된 경계 이슈를 보완했다.</p>
           <ul>
             <li>전역 기본값은 IP별 분당 120회이며, signup/login/logout 10회, refresh 20회, <code>GET /feed</code> 30회, <code>POST /issues/search</code> 60회로 더 엄격한 override를 둔다. 모든 수치는 환경 변수로 조정한다.</li>
             <li><code>/health</code>는 명시적으로 bypass한다. 제한 초과는 downstream parser·guard·controller·DB에 진입하지 않고 429 ProblemDetails, <code>Retry-After</code>, <code>RateLimit-*</code> 헤더를 반환한다.</li>
             <li>Express의 <code>request.ip</code>를 사용한다. 기본 <code>RATE_LIMIT_TRUST_PROXY_HOPS=0</code>에서는 직접 peer IP만 사용하고, 설정된 hop 수가 있을 때만 Express trust proxy 결과를 반영한다. raw forwarded header는 직접 파싱하지 않는다. bucket map은 <code>RATE_LIMIT_MAX_KEYS</code>와 idle TTL로 bounded하며 eviction·429를 민감정보 없이 구조화해 기록한다.</li>
-            <li><code>scripts/rate-limit-smoke.mjs</code>와 <code>test:smoke:rate-limit</code>로 실제 bootstrap의 parser 전 global/endpoint 429, forwarded-header 우회 방지, health bypass를 회귀 검증한다.</li>
+            <li><code>scripts/rate-limit-smoke.mjs</code>와 <code>test:smoke:rate-limit</code>로 실제 bootstrap의 parser 전 global/endpoint/account 429, trailing slash 경로, forwarded-header 우회 방지, health bypass를 회귀 검증한다.</li>
           </ul>
           <figure>
             <pre>request context → early rate limiter → body parser → Nest auth/route → service/DB
@@ -74,7 +74,7 @@
           <h2>영향 경계와 불변 조건</h2>
           <ul>
             <li>제한된 요청은 body parsing, Argon2, JWT DB 조회, guest <code>feed_sessions</code> insert 전에 종료한다.</li>
-            <li>인스턴스별로 Express가 계산한 정규화 IP를 key로 사용하며 raw forwarded header를 직접 신뢰하지 않는다.</li>
+            <li>인스턴스별로 Express가 계산한 정규화 IP를 key로 사용하며 raw forwarded header를 직접 신뢰하지 않는다. endpoint override는 trailing slash 변형에서도 동일하게 적용한다.</li>
             <li>bounded in-memory 상태는 key 수·idle TTL을 넘어서 무한히 증가하지 않는다.</li>
             <li><code>/health</code>는 liveness probe를 위해 제한하지 않는다.</li>
             <li>429는 <code>application/problem+json</code>, <code>RATE_LIMITED</code>, <code>Retry-After</code>를 제공하고 downstream side effect를 만들지 않는다.</li>
@@ -98,8 +98,8 @@
           <h2>검증 증거와 공백</h2>
           <dl>
             <dt>계획</dt><dd>token bucket 경계·설정 검증·TTL cleanup unit, parser 전 HTTP burst integration, 429 header/ProblemDetails contract, lint·typecheck·build·smoke.</dd>
-            <dt>현재 증거</dt><dd>rate-limit unit 6/6, 전체 unit 44 suites·223 tests passed, integration 2 suites passed·3 suites skipped·11 tests passed·8 skipped, contract 5/5 passed, format·lint·typecheck·API/전체 build passed. 기본 API smoke와 제한 설정을 낮춘 HTTP smoke도 passed.</dd>
-            <dt>핵심 HTTP 증거</dt><dd>malformed JSON 요청이 body parser 400보다 먼저 429가 되었고, 임의 <code>X-Forwarded-For</code>로 endpoint bucket을 우회하지 못했으며, global quota 소진 뒤에도 <code>GET /health</code>는 200이었다.</dd>
+            <dt>현재 증거</dt><dd>rate-limit unit 7/7, 전체 unit 44 suites·224 tests passed, integration 2 suites passed·3 suites skipped·11 tests passed·8 skipped, contract 5/5 passed, format·lint·typecheck·API/전체 build passed. 기본 API smoke와 제한 설정을 낮춘 HTTP smoke도 passed.</dd>
+            <dt>핵심 HTTP 증거</dt><dd>동일 email의 두 번째 auth 요청이 trailing slash 경로에서도 account 429가 되었고, malformed JSON 요청이 body parser 400보다 먼저 endpoint/global 429가 되었으며, 임의 <code>X-Forwarded-For</code>로 endpoint bucket을 우회하지 못했고, global quota 소진 뒤에도 <code>GET /health</code>는 200이었다.</dd>
             <dt>현재 공백</dt><dd>실제 운영 트래픽 기반 quota tuning, 다중 API 인스턴스의 shared quota, Cloud Run ingress의 실제 proxy hop 수 검증과 운영 설정, Prometheus 같은 별도 metrics collector는 이번 범위에서 검증·추가하지 않았다.</dd>
           </dl>
         </section>

@@ -12,6 +12,7 @@ const child = spawn(process.execPath, ['dist/apps/api/src/main.js'], {
     API_SMOKE_READY: '1',
     RATE_LIMIT_WINDOW_MS: '1000',
     RATE_LIMIT_MAX_REQUESTS: '2',
+    RATE_LIMIT_AUTH_ACCOUNT_MAX_REQUESTS: '1',
     RATE_LIMIT_SEARCH_MAX_REQUESTS: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -104,6 +105,27 @@ try {
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { status: 'ok' });
 
+  const firstAccountAttempt = await request('/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'rate-limit@example.com', password: 'not-a-real-password' }),
+  });
+  assert.notEqual(firstAccountAttempt.status, 429);
+  await firstAccountAttempt.text();
+
+  const accountRejected = await request('/auth/login/', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'rate-limit@example.com', password: 'not-a-real-password' }),
+  });
+  assertRateLimited(
+    accountRejected,
+    await accountRejected.json(),
+    'account quota must reject a repeated email before the controller',
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 1_200));
+
   const firstSearch = await request('/issues/search', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -111,7 +133,7 @@ try {
   });
   assert.equal(firstSearch.status, 200);
 
-  const endpointRejected = await request('/issues/search', {
+  const endpointRejected = await request('/issues/search/', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

@@ -106,8 +106,8 @@ test('global middleware bypasses health and applies an endpoint override', () =>
 
   let nextCalls = 0;
   const healthResponse = new TestResponse();
-  for (let index = 0; index < 3; index += 1) {
-    middleware(request('/health'), healthResponse as unknown as Response, () => {
+  for (const path of ['/health', '/health', '/health/']) {
+    middleware(request(path), healthResponse as unknown as Response, () => {
       nextCalls += 1;
     });
   }
@@ -146,6 +146,34 @@ test('global middleware bypasses health and applies an endpoint override', () =>
   assert.equal(rejections[0]?.method, 'POST');
   assert.equal(rejections[0]?.path, '/auth/login');
   assert.equal(Object.hasOwn(rejections[0] ?? {}, 'clientIp'), false);
+});
+
+test('endpoint overrides also match routes with a trailing slash', () => {
+  const authRule: RateLimitRule = { name: 'auth-ip', maxRequests: 1, windowMs: 1_000 };
+  const store = new InMemoryRateLimitStore(20, 10_000);
+  const middleware = createRateLimitMiddleware(
+    store,
+    options(new Map([['POST /auth/login', authRule]])),
+    () => 0,
+  );
+  let nextCalls = 0;
+
+  const first = new TestResponse();
+  middleware(request('/auth/login', '192.0.2.12', 'POST'), first as unknown as Response, () => {
+    nextCalls += 1;
+  });
+  assert.equal(first.statusCode, 200);
+
+  const trailingSlash = new TestResponse();
+  middleware(
+    request('/auth/login/', '192.0.2.12', 'POST'),
+    trailingSlash as unknown as Response,
+    () => {
+      nextCalls += 1;
+    },
+  );
+  assert.equal(trailingSlash.statusCode, 429);
+  assert.equal(nextCalls, 1);
 });
 
 test('account middleware uses the canonical email without storing its raw value', () => {

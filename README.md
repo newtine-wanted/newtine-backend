@@ -279,7 +279,7 @@ Client ID와 Client Secret을 직접 입력하세요. 예제에는 실제 값을
 | `npm test`                                                     | unit·integration 테스트                        |
 | `npm run test:contracts`                                       | 생성 계약 테스트                               |
 | `npm run test:smoke`                                           | 빌드된 API의 실제 HTTP 동작 확인               |
-| `npm run test:smoke:rate-limit`                               | parser 전 429·health bypass·forwarded header 우회 방지 확인 |
+| `npm run test:smoke:rate-limit`                               | parser 전 429·health bypass·account limit·trailing slash·forwarded header 우회 방지 확인 |
 | `npm run test:smoke:compose`                                  | fresh Compose 인증 smoke 확인                  |
 | `npm run test:smoke:compose:data`                             | disposable PostgreSQL 이슈 데이터·회원/비회원 cursor smoke |
 | `npm run contracts:all`                                        | SDK·e2e·OpenAPI 생성                           |
