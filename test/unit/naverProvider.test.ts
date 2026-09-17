@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
-import { test } from '@jest/globals';
+import { jest, test } from '@jest/globals';
 
 import {
+  buildPinnedArticleRequestOptions,
   NaverArticleBodyProvider,
   NaverNewsProvider,
+  naverArticleNetwork,
 } from '@newtine/batch/pipeline/naverNews.provider.js';
-import { PipelineException, PipelineExceptionCode, generateUuidV7 } from '@newtine/core';
+import {
+  PipelineException,
+  pipelineExternalException,
+  PipelineExceptionCode,
+  generateUuidV7,
+} from '@newtine/core';
+
+const EXTERNAL_ARTICLE_URL = 'https://8.8.8.8/news/1';
+const EXTERNAL_REDIRECT_URL = 'https://1.1.1.1/news/1';
 
 test('네이버 어댑터는 자격증명이 없으면 파이프라인 예외를 반환한다', async () => {
   const previousClientId = process.env.NAVER_CLIENT_ID;
@@ -78,14 +88,14 @@ test('네이버 검색은 응답 본문 전송 실패와 잘못된 JSON을 구�
   }
 });
 
-test('네이버 기사 어댑터는 허용 목록 밖으로 리디렉션되면 거부한다', async () => {
-  const previousFetch = globalThis.fetch;
+test('기사 어댑터는 사설 IP로 리디렉션되면 거부한다', async () => {
+  const previousRequest = naverArticleNetwork.request;
   let calls = 0;
-  globalThis.fetch = async () => {
+  naverArticleNetwork.request = async () => {
     calls += 1;
     return new Response(null, {
       status: 302,
-      headers: { location: 'https://example.com/private-resource' },
+      headers: { location: 'http://127.0.0.1/private-resource' },
     });
   };
 
@@ -96,7 +106,7 @@ test('네이버 기사 어댑터는 허용 목록 밖으로 리디렉션되면 �
           id: generateUuidV7(),
           title: '기사',
           description: '',
-          sourceUrl: 'https://news.naver.com/article/1',
+          sourceUrl: EXTERNAL_ARTICLE_URL,
           naverUrl: 'https://n.news.naver.com/article/1',
           publisherName: 'naver',
         }),
@@ -106,25 +116,25 @@ test('네이버 기사 어댑터는 허용 목록 밖으로 리디렉션되면 �
     );
     assert.equal(calls, 1);
   } finally {
-    globalThis.fetch = previousFetch;
+    naverArticleNetwork.request = previousRequest;
   }
 });
 
-test('네이버 기사 어댑터는 검증된 네이버 리디렉션만 따르고 본문 크기를 제한한다', async () => {
-  const previousFetch = globalThis.fetch;
+test('기사 어댑터는 공개 IP 리디렉션만 따르고 본문 크기를 제한한다', async () => {
+  const previousRequest = naverArticleNetwork.request;
   const requests: Array<{ url: string; redirect: RequestInit['redirect'] | undefined }> = [];
   const responses = [
     new Response(null, {
       status: 302,
-      headers: { location: 'https://news.naver.com/article/1?redirected=1' },
+      headers: { location: `${EXTERNAL_REDIRECT_URL}?redirected=1` },
     }),
     new Response('<article>' + '확인된 본문 '.repeat(80) + '</article>', {
       status: 200,
       headers: { 'content-type': 'text/html; charset=utf-8' },
     }),
   ];
-  globalThis.fetch = async (input, init) => {
-    requests.push({ url: String(input), redirect: init?.redirect });
+  naverArticleNetwork.request = async (url, init) => {
+    requests.push({ url: url.toString(), redirect: init.redirect });
     const response = responses.shift();
     if (response === undefined) throw new Error('unexpected fetch');
     return response;
@@ -135,9 +145,9 @@ test('네이버 기사 어댑터는 검증된 네이버 리디렉션만 따르�
       id: generateUuidV7(),
       title: '기사',
       description: '',
-      sourceUrl: 'https://news.naver.com/article/1',
-      naverUrl: 'https://n.news.naver.com/article/1',
-      publisherName: 'naver',
+      sourceUrl: EXTERNAL_ARTICLE_URL,
+      naverUrl: 'http://127.0.0.1/article/1',
+      publisherName: 'external-publisher.example',
     });
     assert.match(result.body, /확인된 본문/);
     assert.deepEqual(
@@ -145,13 +155,13 @@ test('네이버 기사 어댑터는 검증된 네이버 리디렉션만 따르�
       ['manual', 'manual'],
     );
   } finally {
-    globalThis.fetch = previousFetch;
+    naverArticleNetwork.request = previousRequest;
   }
 });
 
-test('네이버 기사 어댑터는 크기 제한을 초과한 HTML 응답을 거부한다', async () => {
-  const previousFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
+test('기사 어댑터는 크기 제한을 초과한 HTML 응답을 거부한다', async () => {
+  const previousRequest = naverArticleNetwork.request;
+  naverArticleNetwork.request = async () =>
     new Response('x'.repeat(2 * 1024 * 1024 + 1), {
       status: 200,
       headers: { 'content-type': 'text/html' },
@@ -164,7 +174,7 @@ test('네이버 기사 어댑터는 크기 제한을 초과한 HTML 응답을 �
           id: generateUuidV7(),
           title: '기사',
           description: '',
-          sourceUrl: 'https://news.naver.com/article/1',
+          sourceUrl: EXTERNAL_ARTICLE_URL,
           naverUrl: 'https://n.news.naver.com/article/1',
           publisherName: 'naver',
         }),
@@ -173,8 +183,242 @@ test('네이버 기사 어댑터는 크기 제한을 초과한 HTML 응답을 �
         error.code === PipelineExceptionCode.SourceUnavailable,
     );
   } finally {
-    globalThis.fetch = previousFetch;
+    naverArticleNetwork.request = previousRequest;
   }
+});
+
+test('기사 어댑터는 초기 사설 IP와 비표준 포트를 요청하지 않는다', async () => {
+  const previousRequest = naverArticleNetwork.request;
+  let calls = 0;
+  naverArticleNetwork.request = async () => {
+    calls += 1;
+    return new Response(null, { status: 500 });
+  };
+
+  try {
+    for (const sourceUrl of ['http://127.0.0.1/article/1', 'https://8.8.8.8:8443/article/1']) {
+      await assert.rejects(
+        () =>
+          new NaverArticleBodyProvider().fetch({
+            id: generateUuidV7(),
+            title: '기사',
+            description: '',
+            sourceUrl,
+            naverUrl: EXTERNAL_ARTICLE_URL,
+            publisherName: 'external-publisher.example',
+          }),
+        (error: unknown) =>
+          error instanceof PipelineException &&
+          error.code === PipelineExceptionCode.SourceUnavailable,
+      );
+    }
+    assert.equal(calls, 0);
+  } finally {
+    naverArticleNetwork.request = previousRequest;
+  }
+});
+
+test('기사 어댑터는 중첩된 정적 article 본문을 추출하고 주변 내비게이션을 제외한다', async () => {
+  const previousRequest = naverArticleNetwork.request;
+  naverArticleNetwork.request = async () =>
+    new Response(
+      `<html><body>
+        <nav>메뉴와 추천 기사</nav>
+        <article><div><p>첫 번째 문단입니다.</p><div><p>${'본문 근거 문장입니다. '.repeat(30)}</p></div></div></article>
+      </body></html>`,
+      { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } },
+    );
+
+  try {
+    const result = await new NaverArticleBodyProvider().fetch({
+      id: generateUuidV7(),
+      title: '기사',
+      description: '',
+      sourceUrl: EXTERNAL_ARTICLE_URL,
+      naverUrl: 'http://127.0.0.1/article/1',
+      publisherName: 'external-publisher.example',
+    });
+    assert.match(result.body, /첫 번째 문단입니다/);
+    assert.match(result.body, /본문 근거 문장입니다/);
+    assert.doesNotMatch(result.body, /메뉴와 추천 기사/);
+  } finally {
+    naverArticleNetwork.request = previousRequest;
+  }
+});
+
+test('기사 어댑터는 DNS에서 검증한 주소를 실제 transport에 전달한다', async () => {
+  const previousResolve = naverArticleNetwork.resolve;
+  const previousRequest = naverArticleNetwork.request;
+  let requestedAddress: { address: string; family: number } | undefined;
+  naverArticleNetwork.resolve = async () => [{ address: '93.184.216.34', family: 4 }];
+  naverArticleNetwork.request = async (_url, _init, address) => {
+    requestedAddress = address;
+    return new Response(`<article>${'검증된 본문입니다. '.repeat(30)}</article>`, {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+  };
+
+  try {
+    await new NaverArticleBodyProvider().fetch({
+      id: generateUuidV7(),
+      title: '기사',
+      description: '',
+      sourceUrl: 'https://publisher.example/news/1',
+      naverUrl: EXTERNAL_ARTICLE_URL,
+      publisherName: 'publisher.example',
+    });
+    assert.deepEqual(requestedAddress, { address: '93.184.216.34', family: 4 });
+  } finally {
+    naverArticleNetwork.resolve = previousResolve;
+    naverArticleNetwork.request = previousRequest;
+  }
+});
+
+test('기사 어댑터는 첫 public 주소 연결 실패 시 다음 주소를 시도한다', async () => {
+  const previousResolve = naverArticleNetwork.resolve;
+  const previousRequest = naverArticleNetwork.request;
+  const requestedAddresses: string[] = [];
+  naverArticleNetwork.resolve = async () => [
+    { address: '93.184.216.34', family: 4 },
+    { address: '93.184.216.35', family: 4 },
+  ];
+  naverArticleNetwork.request = async (_url, _init, address) => {
+    requestedAddresses.push(address.address);
+    if (address.address === '93.184.216.34') {
+      throw pipelineExternalException(PipelineExceptionCode.UpstreamError, {
+        retryable: true,
+        resultUncertain: true,
+      });
+    }
+    return new Response(`<article>${'두 번째 주소 본문입니다. '.repeat(30)}</article>`, {
+      status: 200,
+      headers: { 'content-type': 'text/html' },
+    });
+  };
+
+  try {
+    await new NaverArticleBodyProvider().fetch({
+      id: generateUuidV7(),
+      title: '기사',
+      description: '',
+      sourceUrl: 'https://publisher.example/news/1',
+      naverUrl: EXTERNAL_ARTICLE_URL,
+      publisherName: 'publisher.example',
+    });
+    assert.deepEqual(requestedAddresses, ['93.184.216.34', '93.184.216.35']);
+  } finally {
+    naverArticleNetwork.resolve = previousResolve;
+    naverArticleNetwork.request = previousRequest;
+  }
+});
+
+test('기사 어댑터는 DNS 결과에 private 주소가 섞이면 연결하지 않는다', async () => {
+  const previousResolve = naverArticleNetwork.resolve;
+  const previousRequest = naverArticleNetwork.request;
+  let calls = 0;
+  naverArticleNetwork.resolve = async () => [
+    { address: '93.184.216.34', family: 4 },
+    { address: '10.0.0.1', family: 4 },
+  ];
+  naverArticleNetwork.request = async () => {
+    calls += 1;
+    return new Response(null, { status: 500 });
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        new NaverArticleBodyProvider().fetch({
+          id: generateUuidV7(),
+          title: '기사',
+          description: '',
+          sourceUrl: 'https://publisher.example/news/1',
+          naverUrl: EXTERNAL_ARTICLE_URL,
+          publisherName: 'publisher.example',
+        }),
+      (error: unknown) =>
+        error instanceof PipelineException &&
+        error.code === PipelineExceptionCode.SourceUnavailable,
+    );
+    assert.equal(calls, 0);
+  } finally {
+    naverArticleNetwork.resolve = previousResolve;
+    naverArticleNetwork.request = previousRequest;
+  }
+});
+
+test('기사 어댑터는 IPv6 site-local과 benchmarking 대역을 거부한다', async () => {
+  const previousRequest = naverArticleNetwork.request;
+  let calls = 0;
+  naverArticleNetwork.request = async () => {
+    calls += 1;
+    return new Response(null, { status: 500 });
+  };
+
+  try {
+    for (const sourceUrl of ['https://[fec0::1]/article/1', 'https://[2001:2::1]/article/1']) {
+      await assert.rejects(
+        () =>
+          new NaverArticleBodyProvider().fetch({
+            id: generateUuidV7(),
+            title: '기사',
+            description: '',
+            sourceUrl,
+            naverUrl: EXTERNAL_ARTICLE_URL,
+            publisherName: 'external-publisher.example',
+          }),
+        (error: unknown) =>
+          error instanceof PipelineException &&
+          error.code === PipelineExceptionCode.SourceUnavailable,
+      );
+    }
+    assert.equal(calls, 0);
+  } finally {
+    naverArticleNetwork.request = previousRequest;
+  }
+});
+
+test('기사 어댑터는 DNS lookup timeout을 retryable upstream failure로 분류한다', async () => {
+  const previousResolve = naverArticleNetwork.resolve;
+  naverArticleNetwork.resolve = async () => new Promise<never>(() => undefined);
+  jest.useFakeTimers();
+
+  try {
+    const pending = assert.rejects(
+      () =>
+        new NaverArticleBodyProvider().fetch({
+          id: generateUuidV7(),
+          title: '기사',
+          description: '',
+          sourceUrl: 'https://publisher.example/news/1',
+          naverUrl: EXTERNAL_ARTICLE_URL,
+          publisherName: 'publisher.example',
+        }),
+      (error: unknown) =>
+        error instanceof PipelineException &&
+        error.code === PipelineExceptionCode.UpstreamError &&
+        error.retryable === true,
+    );
+    await jest.advanceTimersByTimeAsync(5_000);
+    await pending;
+  } finally {
+    jest.useRealTimers();
+    naverArticleNetwork.resolve = previousResolve;
+  }
+});
+
+test('pinned transport는 resolved IP와 원래 Host/SNI를 분리한다', () => {
+  const options = buildPinnedArticleRequestOptions(
+    new URL('https://publisher.test/article/1?from=naver'),
+    { headers: { accept: 'text/html' } },
+    { address: '93.184.216.34', family: 4 },
+  );
+
+  assert.equal(options.hostname, '93.184.216.34');
+  assert.equal(options.headers.host, 'publisher.test');
+  assert.equal(options.servername, 'publisher.test');
+  assert.equal(options.path, '/article/1?from=naver');
 });
 
 test('API HUB 검색은 새 계약을 전송하고 기사 매핑과 결과 제한을 유지한다', async () => {

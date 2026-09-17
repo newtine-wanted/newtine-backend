@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="Naver originallink 외부 원문 수집과 본문 기반 LLM 파이프라인 구현·검증 기록">
+  <meta name="audience" content="NEWTINE 백엔드 개발자와 파이프라인 운영자">
+  <meta name="problem" content="Naver 검색 메타데이터만으로 부족한 원문 근거를 외부 언론사 정적 HTML과 LLM 처리로 보완">
+  <meta name="core-flow" content="originallink 안전 fetch → 정적 본문 추출 → 요약·분류 맥락·세대별 영향 생성 → 독립 근거 검증 → 공개">
+  <title>Naver originallink 외부 원문 파이프라인 구현 기록</title>
+  <style>
+    :root { --ink:#172b42; --muted:#526476; --line:#ccd5dd; --paper:#fff; --wash:#f4f7fa; --accent:#145ba8; --ok:#e5f5e9; --warn:#fff4d6; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--wash); color:var(--ink); font:16px/1.7 system-ui,sans-serif; }
+    .shell { max-width:1050px; margin:0 auto; padding:28px 22px 64px; }
+    header, article, nav { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:24px; }
+    article { margin-top:16px; }
+    nav { margin:16px 0; padding:12px 16px; }
+    nav a { color:var(--accent); margin-right:14px; }
+    h1,h2,h3 { line-height:1.3; }
+    h1 { margin-top:0; }
+    h2 { border-top:1px solid var(--line); padding-top:20px; margin-top:28px; }
+    dt { font-weight:700; }
+    dd { margin:0 0 8px; color:var(--muted); }
+    code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    code { background:#eef2f6; padding:1px 4px; border-radius:4px; }
+    pre { overflow-x:auto; padding:14px; background:#101923; color:#edf4fb; border-radius:8px; }
+    .state { display:inline-block; padding:3px 9px; border-radius:999px; background:var(--ok); color:#17602b; font-weight:700; }
+    .state.warn { background:var(--warn); color:#8a5a00; }
+    .note { border-left:4px solid #cc8b00; background:var(--warn); padding:10px 14px; }
+    table { width:100%; border-collapse:collapse; margin:14px 0; }
+    caption { text-align:left; font-weight:700; margin-bottom:6px; }
+    th,td { border:1px solid var(--line); padding:9px; vertical-align:top; text-align:left; }
+    th { background:#eef2f6; }
+    fieldset { border:1px solid var(--line); border-radius:9px; margin:14px 0; padding:14px; }
+    button { padding:8px 12px; cursor:pointer; }
+    #self-check-result { border:1px solid var(--line); border-radius:9px; padding:14px; margin-top:14px; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <p><span class="state">구현 완료 · 리뷰 반영</span> · High-risk · <time datetime="2026-09-17">2026-09-17</time></p>
+    <h1>Naver originallink 외부 원문 파이프라인 구현 기록</h1>
+    <dl>
+      <dt>목적</dt><dd>Naver 검색 메타데이터의 <code>originallink</code> 외부 언론사 원문을 실제 본문 근거로 사용해 LLM 콘텐츠를 생성·검증·공개한다.</dd>
+      <dt>사용자</dt><dd>NEWTINE 백엔드 개발자와 파이프라인 운영자</dd>
+      <dt>문제</dt><dd>기존 본문 provider가 <code>naverUrl</code>과 Naver host만 허용해 외부 publisher 원문을 <code>SOURCE_UNAVAILABLE</code>로 거부했다.</dd>
+      <dt>핵심 흐름</dt><dd><code>originallink</code> 안전 fetch → 정적 HTML 본문 추출 → 기존 구조화 LLM 출력 → 독립 근거 검증 → PUBLISHED</dd>
+      <dt>승인 기준</dt><dd><a href="naver-api-hub-pipeline-design.html">외부 원문 기반 설계</a>의 G1-A / G2-A / G3-A / G4-A 및 사용자 구현 승인 “ㄱㄱ”</dd>
+    </dl>
+  </header>
+  <nav aria-label="구현 기록 탐색">
+    <a href="#changes">변경</a><a href="#safety">안전 경계</a><a href="#live">실행 검증</a><a href="#verification">게이트</a><a href="#review">리뷰</a><a href="#residual">잔여 위험</a><a href="#control">이해 점검</a>
+  </nav>
+  <main><article>
+    <section id="changes">
+      <h2>구현 변경</h2>
+      <table>
+        <caption>설계 baseline과 실제 반영</caption>
+        <thead><tr><th scope="col">영역</th><th scope="col">반영 내용</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">원문 선택</th><td><code>NaverArticleBodyProvider</code>가 <code>naverUrl</code>보다 <code>sourceUrl</code>(originallink 우선)을 사용한다.</td></tr>
+          <tr><th scope="row">URL fetch</th><td>HTTP/HTTPS·기본 port만 허용하고 DNS의 모든 결과에서 private, loopback, link-local, multicast, reserved, documentation IP를 거부한다. 검증된 주소를 실제 socket destination에 고정하고 원래 hostname은 Host/SNI에만 사용한다. redirect는 hop마다 재검증하고 최대 3회로 제한하며 resolver timeout과 public address fallback을 적용한다.</td></tr>
+          <tr><th scope="row">본문 추출</th><td>script/style/navigation 계열을 제거한 정적 HTML에서 중첩 <code>article</code>, 본문 class/id, main/section 후보 중 충분히 긴 텍스트를 선택한다. 200자 미만·JS-only·paywall·비HTML은 원문 불가로 처리한다.</td></tr>
+          <tr><th scope="row">LLM 계약</th><td>기존 summary, viewpoints, glossary, <code>AGE_GROUP impacts</code>, <code>articleIds</code>를 유지하고 prompt를 1.2.0으로 강화했다. 숫자 효용성 점수나 새 DB/API 필드는 추가하지 않았다.</td></tr>
+          <tr><th scope="row">운영 로그</th><td>구조/semantic validator의 안전한 실패 사유와 fetch article count만 남긴다. 원문 body, prompt, provider raw response는 로그·DB·usage·embedding에 남기지 않는다.</td></tr>
+        </tbody>
+      </table>
+      <p>변경 파일: <code>apps/batch/src/pipeline/naverNews.provider.ts</code>, <code>apps/batch/src/pipeline/pipeline.worker.ts</code>, <code>config/pipeline-ai.yml</code>, 관련 provider/OpenAI 단위 테스트.</p>
+    </section>
+
+    <section id="safety">
+      <h2>안전·실패 경계</h2>
+      <pre>originallink URL
+  → scheme/userinfo/port 검사
+  → DNS/IP public-address 검사
+  → redirect마다 같은 검사
+  → response content-type/2 MiB/timeout 검사
+  → 정적 본문 ≥ 200자
+  → LLM strict schema + articleIds
+  → semantic PASS + 겹치지 않는 독립 근거 2개 이상
+  → issue 저장·공개</pre>
+      <p class="note">검색 description은 본문 대체재가 아니다. 원문 확보 실패나 LLM 검증 실패는 해당 job만 실패시키며, 검증되지 않은 issue는 공개하지 않는다.</p>
+    </section>
+
+    <section id="live">
+      <h2>실제 실행 검증</h2>
+      <p>Docker PostgreSQL에 실제 pipeline run을 넣고 새 batch image의 <code>pipelineWorker</code>를 실행했다. 첫 실행은 외부 원문 fetch 8건 성공 후 LLM 결과 검증에서 실패했다. validator 실패 사유를 운영 로그로 남기고 독립 근거 그룹 조건을 prompt에 명시한 뒤 CONTENT 재시도를 수행했다.</p>
+      <table>
+        <caption>최종 live 결과</caption>
+        <thead><tr><th scope="col">항목</th><th scope="col">결과</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">run</th><td><code>01a0acd2-1c4c-73e8-aab7-a32a9cfc151e</code> / attempt 2 / <strong>SUCCEEDED</strong></td></tr>
+          <tr><th scope="row">jobs</th><td>3개 모두 <strong>SUCCEEDED</strong>, 3개 이슈 모두 <strong>PUBLISHED</strong></td></tr>
+          <tr><th scope="row">외부 source</th><td>news1.kr, ppss.kr, gukjenews.com, shinailbo.co.kr, yna.co.kr, biz.heraldcorp.com, widedaily.com 등 7개 원문 URL 연결</td></tr>
+          <tr><th scope="row">LLM 결과</th><td>각 이슈 3줄 요약 생성, 세대별 impact 총 9건 저장, evidence 2~3건 연결</td></tr>
+          <tr><th scope="row">보존 확인</th><td><code>articles</code>에 body 컬럼 없음, usage 테이블에 prompt/raw response/article body 컬럼 없음</td></tr>
+        </tbody>
+      </table>
+      <p>리뷰 후 재검증 run <code>01a0acf9-6870-7694-a770-fad0e2efd3b7</code>에서는 새 pinned transport로 외부 원문 fetch 9건이 모두 성공했다. run은 <code>PARTIALLY_SUCCEEDED</code>였고 3 jobs 중 1개만 semantic PASS, 2개는 LLM semantic validation 실패로 종료됐다. 따라서 이번 재검증의 pipeline 잔여 실패는 URL transport가 아니라 LLM 출력의 비결정성으로 분리한다.</p>
+    </section>
+
+    <section id="verification">
+      <h2>검증 게이트</h2>
+      <ul>
+        <li><code>npm run typecheck</code>: 통과</li>
+        <li><code>npm run lint</code>: 통과</li>
+        <li><code>npm run test:unit</code>: 43 suites / 217 tests 통과</li>
+        <li><code>npm test</code>: unit 43 suites / 217 tests, integration 2 suites / 11 tests 통과; DB 미설정 integration 8건은 기존 정책상 skip</li>
+        <li><code>npm run build</code> 및 Docker <code>batch</code> image build: 통과</li>
+        <li>provider 단위 테스트: 16건 통과. originallink 우선, private/mixed DNS·IPv6 특수 대역·resolver timeout·public address fallback·pinned Host/SNI 옵션·redirect·본문 추출·content-size를 검증한다.</li>
+        <li><code>git diff --check</code> 및 변경 파일 Prettier check: 통과</li>
+      </ul>
+    </section>
+
+    <section id="residual">
+      <h2>잔여 위험과 후속 범위</h2>
+      <ul>
+        <li>JS-only/paywall publisher는 정적 추출 baseline에서 의도적으로 실패한다. 실패율이 높으면 headless/browser 또는 extraction service를 별도 설계한다.</li>
+        <li>원문을 저장하지 않으므로 retry 시 재수집한다. publisher 콘텐츠 변경과 fetch 비용은 운영 지표로 관찰해야 한다.</li>
+        <li><code>categoryCode</code>는 승인된 G3-A 범위상 metadata 단계 분류를 유지한다. 본문 기반 category 재분류가 필요하면 별도 제품 계약으로 결정해야 한다.</li>
+        <li>실제 live 재검증에서는 원문 fetch는 성공했지만 LLM semantic validation 2건이 실패했다. prompt/validator 재시도율과 publisher별 본문 품질을 운영 지표로 관찰한다.</li>
+      </ul>
+    </section>
+
+    <section id="review">
+      <h2>구현 리뷰 (2026-09-17)</h2>
+      <p class="note"><strong>판정: 재검토 필요.</strong> 기능 경로와 live 결과는 확인됐지만, public internet URL을 적대적 입력으로 보는 G1-A 기준에서는 SSRF 방어와 재현 가능한 검증에 열린 항목이 있다. 아래 리뷰는 소스 구현을 수정하지 않은 read-only 판정이다.</p>
+      <table>
+        <caption>발견 사항</caption>
+        <thead><tr><th scope="col">ID / 심각도</th><th scope="col">근거와 영향</th><th scope="col">최소 후속 조치</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">SEC-001<br><strong>P1 · 해결됨</strong></th><td>DNS 결과를 검증한 뒤 resolved address를 <code>http/https.request</code>의 실제 destination으로 사용하고, hostname은 Host/SNI에만 사용하도록 수정했다. public address별 fallback도 추가했다.</td><td>pinned options 회귀 테스트와 권한 환경 localhost socket fixture를 통과했다.</td></tr>
+          <tr><th scope="row">SEC-002<br><strong>P1 · 해결됨</strong></th><td>IPv6를 global-unicast <code>2000::/3</code>로 제한하고 IETF 특수 대역·documentation·6to4를 차단했다. IPv4 AS112·benchmarking·documentation 대역도 보강했다.</td><td>site-local·benchmarking negative test와 mixed DNS negative test를 통과했다.</td></tr>
+          <tr><th scope="row">OPS-003<br><strong>P2 · 해결됨</strong></th><td>DNS resolver 단계에 5초 timeout을 추가하고 <code>ETIMEDOUT</code>을 retryable <code>UPSTREAM_ERROR</code>로 변환했다.</td><td>fake-timer timeout 회귀 테스트를 통과했다.</td></tr>
+          <tr><th scope="row">REQ-004<br><strong>논의 필요</strong></th><td>외부 본문은 content stage의 요약·viewpoints·glossary·AGE_GROUP impacts에 들어가지만, <code>categoryCode</code>는 candidate stage에서 Naver title/description metadata만 보고 생성된다. “본문으로 분류”가 요구사항이면 현재 구현은 그 범위를 충족하지 않는다.</td><td>metadata 기반 categoryCode를 승인된 범위로 확정하거나, 본문 확보 뒤 category를 재분류하고 공개 전 검증하는 계약을 별도 승인한다.</td></tr>
+          <tr><th scope="row">VERIFY-005<br><strong>P2 · 완화됨</strong></th><td>resolver/transport seam과 deterministic tests를 추가했고 실제 live에서 FETCH 9건이 성공했다. 전체 DNS provider·실제 HTTPS 인증서 조합은 외부 환경 의존성으로 계속 남는다.</td><td>publisher별 HTTPS 표본과 운영 실패율을 계속 관찰한다.</td></tr>
+          <tr><th scope="row">LOG-006<br><strong>P2 · 해결됨</strong></th><td><code>structure.reason</code>를 로그에 넣기 전 control character 제거와 200자 상한을 적용했다.</td><td>구조 검증 실패 로그가 원문 body/raw response를 포함하지 않는 기존 확인을 유지한다.</td></tr>
+          <tr><th scope="row">QUALITY-006<br><strong>Non-blocking risk</strong></th><td>본문 추출은 후보 중 가장 긴 텍스트를 선택한다. live에서 7개 publisher가 통과한 것은 긍정적이지만, 추천/관련기사까지 포함된 <code>main</code>/<code>section</code>이나 publisher별 markup 변형을 품질상 보장하지 않는다.</td><td>주요 publisher fixture와 추출 품질 metric(본문 길이·실패율·boilerplate 비율)을 추가하고, 실패율이 높은 publisher는 별도 extractor 범위로 분리한다.</td></tr>
+        </tbody>
+      </table>
+      <p><strong>확인된 통과 항목:</strong> 기존 live run에서 3 jobs/3 issues가 PUBLISHED 되었고 7개 외부 source, 9개 AGE_GROUP impact, 2~3개 evidence가 확인됐다. 이번 hardening 후 live run에서도 FETCH 9건이 성공했다. unit 217건, integration 11건, typecheck/lint/build/Docker build도 통과했으며 원문 body·prompt·raw response의 로그/DB 보존도 확인하지 못했다. 남은 핵심 위험은 LLM semantic validation 변동성과 metadata 기반 category 범위다.</p>
+    </section>
+
+    <section id="control">
+      <h2>구현 이해 점검</h2>
+      <p>비차단 self-check다. 구현 승인이나 live 결과를 대신하지 않으며, 결과는 이 문서 안에서만 표시된다.</p>
+      <form id="self-check">
+        <fieldset><legend>1. LLM의 정본 입력은?</legend><label><input required type="radio" name="q1" value="body"> originallink에서 추출한 실제 본문</label><br><label><input type="radio" name="q1" value="description"> Naver description</label></fieldset>
+        <fieldset><legend>2. 본문이 부족하거나 paywall이면?</legend><label><input required type="radio" name="q2" value="fail"> SOURCE_UNAVAILABLE로 job 실패</label><br><label><input type="radio" name="q2" value="fallback"> description으로 보완해 공개</label></fieldset>
+        <fieldset><legend>3. 공개 전 최소 근거 조건은?</legend><label><input required type="radio" name="q3" value="evidence"> 서로 겹치지 않는 독립 evidence group 2개 이상</label><br><label><input type="radio" name="q3" value="url"> URL 개수만 2개 이상</label></fieldset>
+        <fieldset><legend>4. 원문 보존은?</legend><label><input required type="radio" name="q4" value="none"> 메모리 처리 후 폐기</label><br><label><input type="radio" name="q4" value="snapshot"> 영구 snapshot 저장</label></fieldset>
+        <fieldset><legend>5. DNS 결과에 public과 private 주소가 함께 있으면?</legend><label><input required type="radio" name="q5" value="reject"> 연결하지 않고 SOURCE_UNAVAILABLE로 거부</label><br><label><input type="radio" name="q5" value="public"> public 주소만 골라 연결</label></fieldset>
+        <fieldset><legend>6. 검증된 첫 public 주소의 연결이 실패하면?</legend><label><input required type="radio" name="q6" value="next"> 같은 DNS 결과의 다음 검증 주소를 시도한 뒤 모두 실패하면 retryable upstream failure</label><br><label><input type="radio" name="q6" value="resolve"> hostname을 다시 resolve해 제한 없이 재시도</label></fieldset>
+        <button type="submit">점검 결과 보기</button>
+      </form>
+      <div id="self-check-result" hidden>
+        <p><strong>상태:</strong> <span data-field="status"></span></p>
+        <p><strong>설명:</strong> <span data-field="explanation"></span></p>
+        <p><strong>다음 단계:</strong> <span data-field="next"></span></p>
+      </div>
+      <script>
+        document.getElementById('self-check').addEventListener('submit', (event) => {
+          event.preventDefault();
+          const expected = { q1: 'body', q2: 'fail', q3: 'evidence', q4: 'none', q5: 'reject', q6: 'next' };
+          const form = new FormData(event.currentTarget);
+          const passed = Object.entries(expected).every(([name, value]) => form.get(name) === value);
+          const result = document.getElementById('self-check-result');
+          result.hidden = false;
+          result.querySelector('[data-field="status"]').textContent = passed ? '통과' : '재확인 필요';
+          result.querySelector('[data-field="explanation"]').textContent = passed
+            ? '외부 본문·근거 검증·공개 게이트·비보존·IP 고정 경계를 baseline과 일치하게 이해했다.'
+            : 'originallink 본문만 정본이며, mixed DNS는 거부하고 검증된 주소만 순서대로 시도한다.';
+          result.querySelector('[data-field="next"]').textContent = passed
+            ? '운영 시 publisher 실패율과 재수집 비용을 관찰한다.'
+            : '구현 기록의 안전·실패 경계를 다시 확인한다.';
+        });
+      </script>
+    </section>
+  </article></main>
+</div>
+</body>
+</html>

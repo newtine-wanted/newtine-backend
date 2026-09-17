@@ -341,7 +341,22 @@ export class PipelineWorker implements OnModuleDestroy {
         processExecutionId,
       );
       const structure = validateGeneratedContent(content, fetched);
-      if (!structure.ok) throw pipelineExternalException(PipelineExceptionCode.InvalidOutput);
+      if (!structure.ok) {
+        this.logger.warn(
+          {
+            event: 'pipeline.content.validation_failed',
+            runId: run.id,
+            runExecutionId: run.executionId,
+            jobId: job.id,
+            failureKind: 'INVALID_OUTPUT',
+            validationReason: safeValidationReason(structure.reason),
+            fetchedArticleCount: fetched.length,
+            ...(processExecutionId === undefined ? {} : { processExecutionId }),
+          },
+          'Generated content failed structural validation',
+        );
+        throw pipelineExternalException(PipelineExceptionCode.InvalidOutput);
+      }
 
       await this.repository.updateRunStage(run.id, run.attempt, run.executionId, 'VALIDATE');
       await this.repository.updateJobStage(job.id, run.attempt, run.executionId, 'VALIDATE');
@@ -356,6 +371,19 @@ export class PipelineWorker implements OnModuleDestroy {
       );
       const semantic = validateSemanticResult(validation, fetched);
       if (!semantic.ok) {
+        this.logger.warn(
+          {
+            event: 'pipeline.content.semantic_validation_failed',
+            runId: run.id,
+            runExecutionId: run.executionId,
+            jobId: job.id,
+            failureKind: 'INVALID_OUTPUT',
+            validationStatus: validation.status,
+            fetchedArticleCount: fetched.length,
+            ...(processExecutionId === undefined ? {} : { processExecutionId }),
+          },
+          'Generated content failed semantic validation',
+        );
         throw pipelineExternalException(PipelineExceptionCode.InvalidOutput);
       }
       const accepted = await this.repository.saveJobSuccess(
@@ -683,6 +711,15 @@ function safeFailureMessage(kind: PipelineFailureKind): string {
     default:
       return '외부 처리 중 오류가 발생했습니다.';
   }
+}
+
+function safeValidationReason(reason: string): string {
+  return Array.from(reason, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f || codePoint === 0x7f ? ' ' : character;
+  })
+    .join('')
+    .slice(0, 200);
 }
 
 function wait(milliseconds: number, signal?: AbortSignal): Promise<void> {

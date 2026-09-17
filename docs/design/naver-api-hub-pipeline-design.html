@@ -1,9 +1,226 @@
-<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>뉴스 API HUB 파이프라인 개정 설계</title><style>body{font-family:system-ui;max-width:960px;margin:40px auto;padding:0 24px;line-height:1.7;color:#172b42}section{border-top:1px solid #ccd5dd;padding:16px 0}dt{font-weight:bold}aside{background:#fff4d6;padding:16px}a{color:#145ba8}</style><header><h1>뉴스 API HUB 파이프라인 개정</h1><p>설계 승인됨 · Standard · <time datetime="2026-09-16">2026-09-16</time></p><dl><dt>목적 purpose</dt><dd>뉴스 공급자 조사 기획을 현재 이슈 생성 파이프라인에 반영</dd><dt>사용자 audience</dt><dd>백엔드 개발자와 파이프라인 운영자</dd><dt>문제 problem</dt><dd>구 네이버 검색 연동과 새 API HUB 계약 차이, 본문 수집 정책 충돌 해소</dd><dt>핵심 흐름 core-flow</dt><dd>검색 메타데이터 수집 → 후보 판정 → 근거 확보 방식 결정 → 요약 검증·공개</dd></dl><p>추적: codex/pipeline-planning · main 83120ea 기반. 기존 설계와 문제·흐름 동일성이 확정되지 않아 새 동료 문서를 생성함.</p></header><nav><a href="#goal">범위</a> · <a href="#system-model">현재 구조</a> · <a href="#grilling-state">의사결정</a> · <a href="#approval-state">승인</a></nav><main><article><section id="goal"><h2>목표와 범위</h2><p>API HUB 검색 계약 적용, 응답 정규화, 직접 입력할 빈 자격증명 설정과 운영 문서 준비. BIG KINDS·DeepSearch·RSS는 이번 공급자 추가에서 제외하고 열린국회정보는 후속 검토한다.</p><p>출처: <a href="https://app.notion.com/p/daniel2231/api-3dbaf089b9eb8088834ed1bad7d1c89a">뉴스 api 기획</a>, <a href="https://api.ncloud-docs.com/docs/naver-api-hub-search-news">NAVER API HUB 공식 명세</a>.</p></section><section id="system-model"><h2>확인된 구조</h2><figure><pre>검색(query, limit) → 제목·description 후보 추출 → 초안/job 등록
-→ 관련 기사 검색 → 네이버 HTML 본문 확보 → 생성 → 검증 → 공개</pre><figcaption>현재 파이프라인. 본문 2개 미만이면 생성 전 실패하며 검색 API의 description은 본문이 아니다.</figcaption></figure><p>apps/batch/src/pipeline/naverNews.provider.ts는 openapi.naver.com 및 X-Naver-Client-* 헤더를 사용한다. API HUB는 https://naverapihub.apigw.ntruss.com/search/v1/news 및 X-NCP-APIGW-API-KEY-ID / X-NCP-APIGW-API-KEY를 사용한다.</p><p>현재 검색은 단일 query, start=1, sort=date. 제목/description 태그 제거와 원문 URL 우선 선택이 이미 있다. 본문 HTML 다운로드·추출이 별도 존재한다.</p></section><section id="grilling-state"><h2>설계 의사결정 상태</h2><p>완료 · G1-A를 사용자가 선택함. 검색 연동만 교체하며 본문 수집·생성·검증을 유지한다. 이 답변은 설계 선택이며 구현 승인은 아니다.</p><p>현재 frontier 없음. 검색 공급자는 새 API HUB 하나로 전환한다. 기존 환경변수 이름을 유지하여 배포 설정 변경을 줄이고, 값은 API HUB에서 발급한 Client ID/Secret을 넣도록 문서화한다. 구 개발자센터 키 자동 fallback은 제공하지 않는다.</p><p>기각한 대안: description만으로 생성하는 방식은 기존 본문 근거 계약을 바꾸므로 이번 범위에서 제외. 복수 뉴스 공급자 및 열린국회정보 연동은 후속 검토.</p></section><section id="invariants"><h2>불변 조건과 외부 효과</h2><p>키/시크릿은 값 없이 설정 자리만 제공한다. 실제 API 호출·자격증명 발급·배포는 하지 않는다. description을 본문으로 위장하거나 기존 근거 검증을 묵시적으로 완화하지 않는다. 공개 원자성과 실행 중복 방지 유지가 기본 제약이다.</p></section><section id="failure-recovery"><h2>실패와 복구</h2><p>현재 오류 분류를 유지한다. 미설정/빈 키는 외부 호출 전에 실패한다. 429/5xx 및 네트워크 오류는 기존 파이프라인 재시도 정책을 따르고, 그 외 HTTP 실패는 SourceUnavailable로 분류한다. JSON 파싱·구조 오류는 InvalidOutput이다. 자동으로 구 API에 재요청하지 않는다.</p><p>본문 2개 미만이면 기존처럼 생성 전 실패한다. 실패는 기존 실행 조회와 오류 코드로 진단하고 설정 또는 공급자 문제를 해결한 후 기존 수동 재시도 절차를 따른다. 실제 키가 없으므로 인증 성공과 운영 쿼터는 실연동 검증에서 제외한다.</p></section><section id="verification-plan"><h2>실행 계약과 검증 계획</h2><dl><dt>변경 파일</dt><dd>apps/batch/src/pipeline/naverNews.provider.ts의 검색 경계, test/unit/naverProvider.test.ts, .env.example, README.md, 본 설계와 승인 후 구현 기록.</dd><dt>구현</dt><dd>검색 URL을 https://naverapihub.apigw.ntruss.com/search/v1/news로 변경. 인증은 X-NCP-APIGW-API-KEY-ID 및 X-NCP-APIGW-API-KEY. format=json 명시. query·display 제한(1~100)·start=1·sort=date 및 기존 응답 매핑 유지.</dd><dt>자격증명</dt><dd>NAVER_CLIENT_ID= / NAVER_CLIENT_SECRET=의 빈 자리 유지. README와 예제 주석에 API HUB 발급 값임을 명시. OPENAI_API_KEY도 빈 값 유지. 키를 로깅하지 않는다.</dd><dt>불변 조건</dt><dd>검색 응답의 원문 URL 우선 선택·태그 제거·발행 시각 정규화 유지. 본문 공급자·독립 근거 검증·공개 트랜잭션·DB 스키마·공개 API·스케줄링은 변경하지 않는다.</dd><dt>완료 기준</dt><dd>모의 요청에서 새 URL/헤더와 기존 쿼리·매핑 확인, 빈 키에서 네트워크 호출 없음, 401/403·429/5xx 및 잘못된 응답 분류, 기존 본문 보안 회귀 검증 통과.</dd><dt>정확한 검증 명령</dt><dd><pre><code>npm run test:jest -- test/unit/naverProvider.test.ts test/unit/pipelineWorker.test.ts
-npm run typecheck
-npx prettier --check apps/batch/src/pipeline/naverNews.provider.ts test/unit/naverProvider.test.ts
-npx eslint apps/batch/src/pipeline/naverNews.provider.ts test/unit/naverProvider.test.ts</code></pre></dd><dt>중단 조건</dt><dd>공식 계약과 응답이 충돌하거나 본문·상태·스키마 변경이 필요해지면 범위 재검토. 실제 자격증명이 필요한 검증은 미검증으로 보고.</dd></dl></section><section id="design-control-state"><h2>설계 이해·통제 점검</h2><p>미실시 · 비차단 자기점검. 선택 결과는 이 HTML 안에만 남고 Codex로 전송되지 않는다. 구현 승인과 별개다.</p><p id="progress" aria-live="polite"></p><div id="questions"><div class="question"><fieldset><legend>D1 · API HUB로 전환하면 요약의 근거는 무엇인가?</legend><p>커버리지: 범위·핵심 결정</p><label><input type="radio" name="q0" value="0">기존처럼 별도로 확보한 기사 본문</label><br><label><input type="radio" name="q0" value="1">검색 description만 사용</label><br></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div><div class="question"><fieldset><legend>D2 · 본문을 1개만 확보했을 때는?</legend><p>커버리지: 불변 조건·상태 경계</p><label><input type="radio" name="q1" value="0">description으로 부족한 본문을 채워 공개</label><br><label><input type="radio" name="q1" value="1">기존처럼 생성 전 실패</label><br></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div><div class="question"><fieldset><legend>D3 · NAVER_CLIENT_ID/SECRET에 넣을 값은?</legend><p>커버리지: 외부 효과·설정</p><label><input type="radio" name="q2" value="0">API HUB에서 발급한 Client ID/Secret</label><br><label><input type="radio" name="q2" value="1">구 개발자센터 키를 그대로 사용한다고 가정</label><br></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div><div class="question"><fieldset><legend>D4 · 새 검색 API가 401을 반환하면?</legend><p>커버리지: 실패·복구·운영</p><label><input type="radio" name="q3" value="0">키·서비스 설정을 확인하고 기존 절차로 재시도</label><br><label><input type="radio" name="q3" value="1">구 API에 자동 fallback</label><br></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div><div class="question"><fieldset><legend>D5 · 모의 테스트가 통과하면 실제 인증까지 검증된 것인가?</legend><p>커버리지: 검증·잔여 위험</p><label><input type="radio" name="q4" value="0">아니다. 실제 키를 넣은 운영 환경 확인은 별도다</label><br><label><input type="radio" name="q4" value="1">그렇다. API HUB 인증 성공이 보장된다</label><br></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div></div><button type="button" id="prev">이전</button> <button type="button" id="next">다음</button><output id="overall" aria-live="polite"></output><p>커버리지: 목표/범위·결정(D1), 불변 조건·상태 경계(D2), 권한/외부 효과(D3), 실패·복구·운영(D4), 검증·잔여 위험(D5). 모든 중요 축 포함. 별도 데이터 마이그레이션은 없으므로 해당 문항은 제외.</p></section><section id="approval-state"><h2>승인</h2><p>설계 승인됨. 승인 요청 범위는 API HUB 검색 연동·설정 설명·집중 테스트이며 본문 기반 요약은 유지한다. 사용자가 “구현 시작”으로 승인. 승인 기록: 2026-09-16T01:49:40.565295 · <a href="naver-api-hub-pipeline-implementation.html">구현 기록</a>.</p></section></article></main><script>
-const data=[{"answer": 0, "explanation": "검색 공급자만 교체한다. 본문 수집과 요약 근거는 기존 계약을 유지한다."}, {"answer": 1, "explanation": "본문 2개 미만이면 생성 전 실패한다. 공개·검증 조건을 낮추지 않는다."}, {"answer": 0, "explanation": "변수 이름은 유지하지만 새 API HUB의 발급 값이 필요하다. 값은 사용자가 직접 입력한다."}, {"answer": 0, "explanation": "401은 소스 불가로 분류한다. 구 API fallback은 없으며 잘못된 키를 자동 반복 호출해 해결하지 않는다."}, {"answer": 0, "explanation": "로컬 검증은 요청 계약과 오류 처리의 근거다. 실제 인증·쿼터는 키 입력 후 확인해야 한다."}];const cards=[...document.querySelectorAll('.question')];let current=0;const submitted=new Set();
-function render(){cards.forEach((c,i)=>c.hidden=i!==current);document.querySelector('#progress').textContent=`${current+1} / ${cards.length} · 선택 ${document.querySelectorAll('input:checked').length} / ${cards.length} · 제출 ${submitted.size} / ${cards.length}`;document.querySelector('#prev').disabled=current===0;document.querySelector('#next').disabled=current===cards.length-1;}
-cards.forEach((card,i)=>{card.addEventListener('change',render);card.querySelector('.submit').onclick=()=>{const checked=card.querySelector('input:checked');const ok=checked&&Number(checked.value)===data[i].answer;card.querySelector('.result').hidden=false;card.querySelector('.status').textContent='상태: '+(!checked?'미실시':ok?'확립':'보류');card.querySelector('.explanation').textContent='설명: '+(checked?data[i].explanation:'답변을 선택한 뒤 제출해 주세요.');card.querySelector('.next-action').textContent='다음 행동: '+(ok?'다음 문항으로 이동하세요.':'설계의 관련 항목을 확인하고 다시 선택하세요.');if(checked)submitted.add(i);document.querySelector('#overall').textContent='자기점검 결과는 구현 승인이 아닙니다.';render();};});document.querySelector('#prev').onclick=()=>{current--;render();};document.querySelector('#next').onclick=()=>{current++;render();};render();
-</script></html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="Naver 뉴스 메타데이터와 외부 언론사 원문을 근거로 이슈를 생성·검증·공개하는 파이프라인 설계">
+  <meta name="audience" content="NEWTINE 백엔드 개발자와 파이프라인 운영자">
+  <meta name="problem" content="Naver API HUB의 본문 부족을 originallink 외부 원문 수집과 LLM 기반 요약·분류·세대별 효용성 분석으로 보완">
+  <meta name="core-flow" content="검색 메타데이터 수집 → originallink 외부 본문 안전 수집 → 구조화 LLM 생성 → 독립 근거 검증 → 공개">
+  <title>Naver 외부 원문 기반 콘텐츠 파이프라인 설계</title>
+  <style>
+    :root { --ink:#172b42; --muted:#526476; --line:#ccd5dd; --paper:#fff; --wash:#f4f7fa; --accent:#145ba8; --warn:#fff4d6; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--wash); color:var(--ink); font:16px/1.7 system-ui,sans-serif; }
+    .shell { max-width:1050px; margin:0 auto; padding:28px 22px 64px; }
+    header, article, nav { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:24px; }
+    article { margin-top:16px; }
+    nav { margin:16px 0; padding:12px 16px; }
+    nav a { color:var(--accent); margin-right:14px; }
+    h1,h2,h3 { line-height:1.3; }
+    h1 { margin-top:0; }
+    h2 { border-top:1px solid var(--line); padding-top:20px; margin-top:28px; }
+    dt { font-weight:700; }
+    dd { margin:0 0 8px; color:var(--muted); }
+    code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    code { background:#eef2f6; padding:1px 4px; border-radius:4px; }
+    pre { overflow-x:auto; padding:14px; background:#101923; color:#edf4fb; border-radius:8px; }
+    .state { display:inline-block; padding:3px 9px; border-radius:999px; background:#fff0c2; color:#7a5400; font-weight:700; }
+    .issue { border-left:4px solid #cc8b00; background:var(--warn); padding:10px 14px; }
+    table { width:100%; border-collapse:collapse; margin:14px 0; }
+    caption { text-align:left; font-weight:700; margin-bottom:6px; }
+    th,td { border:1px solid var(--line); padding:9px; vertical-align:top; text-align:left; }
+    th { background:#eef2f6; }
+    .question { border:1px solid var(--line); border-radius:9px; padding:14px; margin:14px 0; }
+    .question h3 { margin-top:0; }
+    aside { background:var(--warn); border-left:4px solid #cc8b00; padding:12px 16px; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <p><span class="state">설계 승인 · 구현 완료</span> · High-risk · <time datetime="2026-09-17">2026-09-17</time></p>
+    <h1>Naver 외부 원문 기반 콘텐츠 파이프라인 설계</h1>
+    <dl>
+      <dt>목적 (purpose)</dt><dd>Naver 뉴스 검색 메타데이터와 외부 언론사 원문을 근거로 신뢰 가능한 이슈 상세를 생성·검증·공개한다.</dd>
+      <dt>사용자 (audience)</dt><dd>NEWTINE 백엔드 개발자와 파이프라인 운영자</dd>
+      <dt>문제 (problem)</dt><dd>Naver API HUB의 제목·description만으로는 본문 근거가 부족하므로 <code>originallink</code>의 외부 원문을 수집하고 LLM으로 요약·분류·세대별 효용성을 산출해야 한다.</dd>
+      <dt>핵심 흐름 (core-flow)</dt><dd>검색 메타데이터 수집 → <code>originallink</code> 외부 본문 안전 수집 → 구조화 LLM 생성 → 독립 근거 검증 → 공개</dd>
+      <dt>강도 (intensity)</dt><dd>High-risk: 외부 URL fetch, SSRF·리디렉션, 저작권·개인정보, LLM 비용과 공개 상태에 영향을 준다.</dd>
+      <dt>기준선</dt><dd><a href="naver-api-hub-pipeline-implementation.html">이전 API HUB 구현 기록</a>과 <a href="pipeline-api-runtime-contract-repair-implementation.html">현재 런타임 복구 구현 기록</a>. 외부 원문 설계는 승인·구현됐고 <a href="naver-external-originallink-pipeline-implementation.html">구현 검증 기록</a>에 결과를 남겼다.</dd>
+    </dl>
+  </header>
+  <nav aria-label="설계 탐색">
+    <a href="#goal">목표·범위</a><a href="#system-model">시스템 모델</a><a href="#verified-evidence">확인된 사실</a><a href="#invariants">불변 조건</a><a href="#grilling-state">설계 질문</a><a href="#failure-recovery">실패·복구</a><a href="#verification-plan">검증 계획</a><a href="#design-control-state">통제 점검</a><a href="#approval-state">승인</a>
+  </nav>
+  <main><article>
+    <section id="goal">
+      <h2>목표와 범위</h2>
+      <p>검색 API의 메타데이터는 후보 발견과 중복·신규 분류에 사용하고, 실제 요약·근거 검증·연령대별 영향 분석은 외부 언론사 원문 본문을 입력으로 사용한다.</p>
+      <dl>
+        <dt>포함</dt><dd><code>originallink</code> 우선 선택, 공개 인터넷 원문 fetch, HTML 본문 추출, 본문 기반 LLM 요약·분류·세대별 효용성/영향 구조화, 독립 근거 검증, 기존 issue 공개 경계 유지</dd>
+        <dt>유지</dt><dd>본문 2개 이상 확보 조건, 독립 evidence group 2개 조건, <code>articleIds</code> 근거 연결, 원자적 공개, 본문·prompt·provider raw response 비영구 저장</dd>
+        <dt>제외</dt><dd>검색 description만으로 생성, 임의 URL 전체 허용, SSRF 방어 우회, 본문 원문 DB 저장, 검증 전 공개, 세대별 정치 성향·민감 속성 추론</dd>
+      </dl>
+    </section>
+
+    <section id="system-model">
+      <h2>시스템 모델과 변경 경계</h2>
+      <figure>
+        <pre>Naver API HUB
+  └─ title/description/originallink/link
+       ↓ 후보 발견·category 분류
+  originallink 외부 언론사 URL
+       ↓ URL 정책·DNS/redirect·timeout·size·HTML 추출
+  FetchedArticle.body × 2+
+       ↓ OpenAI content generation
+  summary / viewpoints / glossary / AGE_GROUP impacts
+       ↓ semantic validation + independent evidence groups
+  issue_details + issue_impacts + issue_articles → PUBLISHED</pre>
+        <figcaption>텍스트 등가 설명: 검색 결과는 본문이 아니다. 외부 원문에서 추출한 본문만 생성·검증의 근거로 사용하며, 검증을 통과한 경우에만 공개한다.</figcaption>
+      </figure>
+      <p>현재 코드에는 이미 <code>FetchedArticle.body</code>, <code>OpenAiContentGenerator</code>, <code>GeneratedIssueContent.impacts</code>와 <code>AGE_19_34</code> 등 연령대 target이 있다. 변경의 중심은 <code>NaverArticleBodyProvider</code>가 Naver host만 허용하는 경계를 외부 원문 정책으로 바꾸는 것이다.</p>
+    </section>
+
+    <section id="verified-evidence">
+      <h2>확인된 사실과 현재 불일치</h2>
+      <table>
+        <caption>로컬 코드·실행에서 확인된 경계</caption>
+        <thead><tr><th scope="col">영역</th><th scope="col">확인된 사실</th><th scope="col">새 요구사항과의 관계</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Naver 매핑</th><td><code>sourceUrl</code>은 <code>originallink</code> 우선, <code>naverUrl</code>은 <code>link</code>로 저장된다.</td><td>본문 수집 대상은 Naver mirror가 아니라 원칙적으로 <code>originallink</code>다.</td></tr>
+          <tr><th scope="row">본문 provider</th><td><code>NaverArticleBodyProvider</code>는 현재 <code>news.naver.com</code> 계열 host만 허용하고 외부 host를 <code>SOURCE_UNAVAILABLE</code>로 거부한다.</td><td>사용자 요구와 직접 충돌하는 변경 지점이다.</td></tr>
+          <tr><th scope="row">LLM 생성</th><td>content stage가 본문 최대 18,000자를 OpenAI에 보내고 구조화 JSON을 받는다. summary, viewpoints, glossary, impacts를 생성한다.</td><td>원문 본문만 확보되면 기존 구조가 요약·분류·연령대별 영향 출력에 사용될 수 있다.</td></tr>
+          <tr><th scope="row">검증·공개</th><td>본문 2개 이상과 서로 겹치지 않는 독립 evidence group 2개를 요구한다.</td><td>외부 원문 허용 때문에 이 검증 조건을 낮추면 안 된다.</td></tr>
+          <tr><th scope="row">보존</th><td>migration 주석과 OpenAI <code>store:false</code> 경계상 body·prompt·raw response는 영구 저장하지 않는다.</td><td>외부 원문 활용이 저장 정책을 암묵적으로 바꾸지 않도록 유지한다.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="invariants">
+      <h2>불변 조건과 안전 경계</h2>
+      <ul>
+        <li><strong>근거:</strong> Naver description은 본문으로 승격하지 않는다. 생성·검증 입력은 실제 추출된 <code>FetchedArticle.body</code>뿐이다.</li>
+        <li><strong>URL 안전:</strong> <code>http/https</code> 외 scheme, 사용자정보, 비표준 port, private/link-local/loopback/reserved IP, 위험한 DNS 재해석, 허용되지 않은 redirect를 차단한다. 응답마다 content-type·최대 바이트·timeout을 검사한다.</li>
+        <li><strong>프롬프트 주입:</strong> 기사 본문 속 명령은 데이터로 취급하고 LLM 지시로 따르지 않는다. 출력은 strict schema와 서버 validator를 모두 통과해야 한다.</li>
+        <li><strong>공개:</strong> body 2개 미만, 독립 근거 부족, 구조·근거 검증 실패 시 생성·공개하지 않는다. 실패 job은 <code>SOURCE_UNAVAILABLE</code> 또는 <code>INVALID_OUTPUT</code>으로 남긴다.</li>
+        <li><strong>개인정보·저작권:</strong> body, prompt, provider raw response를 로그·DB·embedding 입력에 남기지 않는다. 외부 원문은 처리 목적과 보존 기간을 별도로 결정한다.</li>
+        <li><strong>분석 범위:</strong> 세대별 효용성은 입력 본문에 근거한 정책·영향 설명으로만 출력하며 개인의 정치 성향, 민감 속성, 성격을 추론하지 않는다.</li>
+      </ul>
+    </section>
+
+    <section id="grilling-state">
+      <h2>설계 의사결정 상태 (grilling)</h2>
+      <div class="issue"><p><strong>진행 상태:</strong> 완료</p><p>사용자가 모든 권고안을 선택했다. 아래 결정이 이번 구현의 승인된 설계 baseline이며, 선택하지 않은 branch는 별도 측정·승인 없이는 열지 않는다.</p></div>
+      <table>
+        <caption>확정된 결정과 보류된 확장</caption>
+        <thead><tr><th scope="col">결정</th><th scope="col">확정 baseline</th><th scope="col">보류·잔여 위험</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">G1 URL</th><td><strong>A</strong> — public internet의 <code>http/https</code> URL을 허용하되 scheme, userinfo, port, DNS/IP, redirect hop, timeout, response size, content-type을 매 단계 검증한다.</td><td>publisher allowlist나 extraction service는 도입하지 않는다. SSRF·DNS rebinding·redirect 차단과 운영 지표가 필수다.</td></tr>
+          <tr><th scope="row">G2 추출</th><td><strong>A</strong> — 정적 HTML 우선 추출. JS-only, paywall, robots 차단, 비HTML, 본문 부족은 <code>SOURCE_UNAVAILABLE</code>로 종료한다.</td><td>headless browser와 외부 extraction service는 실패 publisher 비율을 측정한 뒤 별도 설계한다.</td></tr>
+          <tr><th scope="row">G3 LLM</th><td><strong>A</strong> — 기존 <code>categoryCode</code>, summary, viewpoints, glossary, <code>AGE_GROUP impacts</code>와 <code>articleIds</code> 근거 계약을 재사용하고 prompt·validator를 강화한다. 이번 범위에는 숫자 효용성 점수·신뢰도 필드를 추가하지 않는다.</td><td>정량 점수나 confidence가 제품 요구가 되면 API/DB/UI 계약을 새로 설계한다.</td></tr>
+          <tr><th scope="row">G4 보존</th><td><strong>A</strong> — 원문·prompt·provider raw response는 메모리 처리 후 폐기하며 DB, 로그, usage, embedding에 남기지 않는다. 재시도는 재수집한다.</td><td>TTL cache와 영구 snapshot은 도입하지 않는다. 재수집 비용과 publisher 변동성이 운영 위험으로 남는다.</td></tr>
+        </tbody>
+      </table>
+      <p><strong>결정 기록:</strong> <code>G1-A / G2-A / G3-A / G4-A</code>. 이 변경은 단순 Naver allowlist 제거가 아니라 외부 효과·보안 경계·LLM 근거 계약을 함께 변경한다.</p>
+    </section>
+
+    <section id="failure-recovery">
+      <h2>실패·복구·운영 초안</h2>
+      <ol>
+        <li>URL parse·scheme·DNS/IP·redirect 검증 실패는 외부 원문 <code>SOURCE_UNAVAILABLE</code>로 기록하고 다음 후보로 진행한다.</li>
+        <li>429/5xx/network timeout은 기존 transient retry 한도 안에서 재시도하며, 결과 불명 호출은 usage에 실패/unknown으로 남긴다.</li>
+        <li>JS-only, paywall, robots 차단, 비HTML, 본문 길이 부족은 본문 확보 실패로 분류한다. description으로 보정하지 않는다.</li>
+        <li>LLM strict JSON·서버 shape·근거 reference·semantic validation 실패는 공개하지 않고 job 실패로 종료한다.</li>
+        <li>일부 후보만 성공하면 job별 결과와 run의 <code>PARTIALLY_SUCCEEDED</code>를 유지하되, 성공한 이슈만 공개한다.</li>
+      </ol>
+      <aside>외부 URL fetch를 추가하는 구현은 단순 allowlist 제거가 아니다. DNS 해석과 redirect를 매 hop 검증하고, 실제 publisher별 실패율·차단 사유·본문 길이·LLM 비용을 관찰할 수 있어야 한다.</aside>
+    </section>
+
+    <section id="verification-plan">
+      <h2>검증 계획</h2>
+      <ul>
+        <li><strong>provider unit:</strong> originallink 우선, naver link fallback, HTTPS/HTTP, private IP·localhost·userinfo·비표준 port·redirect chain·DNS failure·timeout·content-length/stream size·HTML content-type·본문 추출 실패를 검증한다.</li>
+        <li><strong>LLM contract:</strong> 외부 본문이 content prompt에 들어가고, summary/viewpoint/glossary/AGE_GROUP impacts가 article ID를 참조하며, 본문 속 prompt injection과 invalid output이 공개를 막는지 검증한다.</li>
+        <li><strong>pipeline integration:</strong> 실제 PostgreSQL에서 외부 URL 2개 이상 → OpenAI content/validation → issue_details, issue_impacts, issue_articles, embedding task와 terminal status를 확인한다.</li>
+        <li><strong>negative live:</strong> 외부 publisher 일부 차단·본문 부족·LLM 실패가 전체 run을 망가뜨리지 않고 job별 partial result로 남는지 확인한다.</li>
+        <li><strong>operational:</strong> body/prompt/raw response가 logs·DB·usage·embedding에 남지 않는지, fixture와 외부 호출 비용을 정리·확인한다.</li>
+      </ul>
+      <pre><code>npm run typecheck
+npm run lint
+npm run test:unit
+npm run test:integration
+npm run build
+npm run test:contracts</code></pre>
+    </section>
+
+    <section id="design-control-state">
+      <h2>설계 이해·통제 점검 (design-control)</h2>
+      <p><strong>상태:</strong> 점검 대기 · 구현 승인과 분리됨. 아래 self-check는 선택된 baseline의 목표, 데이터 경계, 안전 조건, 실패 복구, 운영 검증을 스스로 확인하기 위한 비차단 점검이다.</p>
+      <form id="design-self-check">
+        <fieldset>
+          <legend>1. LLM 입력의 정본은 무엇인가?</legend>
+          <label><input type="radio" name="q1" value="source" required> <code>originallink</code>에서 안전하게 추출한 실제 본문</label><br>
+          <label><input type="radio" name="q1" value="description"> Naver 검색 description</label>
+        </fieldset>
+        <fieldset>
+          <legend>2. 외부 URL 처리의 핵심 안전 조건은 무엇인가?</legend>
+          <label><input type="radio" name="q2" value="validate" required> scheme·DNS/IP·redirect·port·timeout·size를 매 단계 검증</label><br>
+          <label><input type="radio" name="q2" value="allow"> 모든 URL을 redirect가 끝날 때까지 허용</label>
+        </fieldset>
+        <fieldset>
+          <legend>3. 현재 세대별 효용성 출력은 어떻게 표현하는가?</legend>
+          <label><input type="radio" name="q3" value="impact" required> 기존 AGE_GROUP impact와 articleIds 근거로 설명</label><br>
+          <label><input type="radio" name="q3" value="score"> 새 숫자 점수와 confidence 필드를 즉시 추가</label>
+        </fieldset>
+        <fieldset>
+          <legend>4. 본문이 JS-only, paywall, 부족한 경우 어떻게 하는가?</legend>
+          <label><input type="radio" name="q4" value="fail" required> description으로 대체하지 않고 SOURCE_UNAVAILABLE 처리</label><br>
+          <label><input type="radio" name="q4" value="publish"> 부분 본문으로 생성해 우선 공개</label>
+        </fieldset>
+        <fieldset>
+          <legend>5. 원문과 prompt는 어디에 보존하는가?</legend>
+          <label><input type="radio" name="q5" value="memory" required> 메모리에서 처리 후 폐기하고 DB·로그·embedding에 남기지 않음</label><br>
+          <label><input type="radio" name="q5" value="snapshot"> 재시도를 위해 영구 snapshot 저장</label>
+        </fieldset>
+        <button type="submit">점검 결과 보기</button>
+      </form>
+      <div id="design-self-check-result" class="question" hidden>
+        <p><strong>상태:</strong> <span data-result="status"></span></p>
+        <p><strong>설명:</strong> <span data-result="explanation"></span></p>
+        <p><strong>다음 단계:</strong> <span data-result="next"></span></p>
+      </div>
+      <script>
+        document.getElementById('design-self-check').addEventListener('submit', function (event) {
+          event.preventDefault();
+          const expected = { q1: 'source', q2: 'validate', q3: 'impact', q4: 'fail', q5: 'memory' };
+          const answers = Object.keys(expected).reduce((result, name) => {
+            result[name] = new FormData(event.currentTarget).get(name);
+            return result;
+          }, {});
+          const passed = Object.keys(expected).every((name) => answers[name] === expected[name]);
+          const card = document.getElementById('design-self-check-result');
+          card.hidden = false;
+          card.querySelector('[data-result="status"]').textContent = passed ? '통과' : '재확인 필요';
+          card.querySelector('[data-result="explanation"]').textContent = passed
+            ? '외부 원문, LLM 근거, 공개 게이트, 원문 비보존 경계를 선택된 baseline과 일치하게 이해했다.'
+            : '정본 입력은 originallink 본문이며, 안전 검증·본문 충분성·근거 검증·원문 비보존이 서로 독립적인 조건이다.';
+          card.querySelector('[data-result="next"]').textContent = passed
+            ? '이 문서의 구현 승인 질문에 답한다.'
+            : '선택된 설계 baseline과 다른 답을 다시 확인한 뒤 구현 승인 여부를 판단한다.';
+        });
+      </script>
+    </section>
+
+    <section id="approval-state">
+      <h2>승인 상태</h2>
+      <p>이전 2026-09-16 승인 범위는 API HUB 검색 계약·메타데이터 후보 발견·기존 본문 정책 유지였다. 사용자는 2026-09-17에 외부 언론사 <code>originallink</code>를 실제 fetch하고 LLM 입력으로 사용하는 확정 설계의 구현을 승인했다.</p>
+      <p><strong>현재:</strong> 설계 승인 · baseline 유지. G1-A의 외부 URL 안전 경계와 G3-A의 본문 기반 content 출력·metadata 기반 category 범위를 유지하며, 실제 구현·검증 결과는 <a href="naver-external-originallink-pipeline-implementation.html">구현 검증 기록</a>에서 관리한다.</p>
+      <p><strong>확정 baseline:</strong> <code>G1-A / G2-A / G3-A / G4-A</code>. public internet을 엄격히 검증하고, 정적 HTML만 추출하며, 기존 구조화 출력과 AGE_GROUP 근거 계약을 재사용하고, 원문은 저장하지 않는다.</p>
+      <p><strong>결과:</strong> design-control self-check는 비차단 이해 확인으로 유지하고, 실제 구현·로컬 게이트·Docker live run 결과는 <a href="naver-external-originallink-pipeline-implementation.html">구현 검증 기록</a>으로 분리했다.</p>
+      <p><strong>잔여 운영 조건:</strong> 정적 HTML로 본문을 얻을 수 없는 JS-only/paywall publisher는 계속 <code>SOURCE_UNAVAILABLE</code>로 처리한다. headless browser나 원문 cache는 별도 설계 없이는 추가하지 않는다.</p>
+    </section>
+  </article></main>
+</div>
+</body>
+</html>

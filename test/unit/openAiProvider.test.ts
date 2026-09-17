@@ -36,7 +36,7 @@ test('OpenAI Responses payload uses the stage snapshot and records provider usag
 
     assert.deepEqual(result.value, { ok: true });
     assert.equal(result.usage?.model, 'actual-provider-model');
-    assert.equal(result.usage?.promptVersion, 'pipeline.content-generation@1.0.0');
+    assert.equal(result.usage?.promptVersion, 'pipeline.content-generation@1.2.0');
     assert.equal(result.usage?.promptHash, configuration.stage('content').prompt?.hash);
     assert.equal(result.usage?.requestId, 'response-id');
     assert.equal(result.usage?.inputTokens, 12);
