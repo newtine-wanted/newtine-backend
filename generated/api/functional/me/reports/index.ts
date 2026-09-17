@@ -54,8 +54,10 @@ export namespace list {
  * @security bearerAuth
  * @throws 400 The request is invalid.
  * @throws 401 Authentication is required.
+ * @throws 404 The requested resource was not found.
  * @throws 429 Report input exceeds the configured limit.
  * @throws 500 The server could not complete the request.
+ * @throws 503 The service is temporarily unavailable.
  * @controller ReportController.request
  * @path POST /me/reports
  * @accessor api.functional.me.reports.request

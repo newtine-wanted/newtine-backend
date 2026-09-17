@@ -41,8 +41,10 @@ dbTest(
       const claim = await repo.claim(now, 180000);
       assert.equal(claim?.id, report.id);
       const start = {
+        userId,
         reportId: report.id,
         attempt: 1,
+        leaseToken: claim!.leaseToken,
         purpose: 'report_generation',
         model: 'test-model',
         promptVersion: 'test@1',

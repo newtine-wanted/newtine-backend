@@ -10,6 +10,7 @@ import { LogoutUseCase } from './application/logout.usecase.js';
 import { RefreshUseCase } from './application/refresh.usecase.js';
 import { SessionIssuer } from './application/session-issuer.js';
 import { SignupUseCase } from './application/signup.usecase.js';
+import { WithdrawUseCase } from './application/withdraw.usecase.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { JwtTokenService } from './jwt-token.service.js';
 import { PasswordService } from './password.service.js';
@@ -29,6 +30,7 @@ import { RolesGuard } from './roles.guard.js';
     RefreshUseCase,
     SessionIssuer,
     SignupUseCase,
+    WithdrawUseCase,
     JwtTokenService,
     JwtAuthGuard,
     PasswordService,

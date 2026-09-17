@@ -12,6 +12,8 @@ import { Injectable } from '@nestjs/common';
 
 import {
   generateUuidV7,
+  AuthException,
+  AuthExceptionCode,
   IssueException,
   IssueExceptionCode,
   type FeedBatchRecord,
@@ -27,6 +29,7 @@ import {
   type UserInteractionRecord,
   type UserRecommendationContext,
 } from '@newtine/core';
+import { executePostgresSql } from '@newtine/core/common/database/postgresSql.js';
 import type { AgeGroup } from '@newtine/core/issue/repository/type/issueQuery.repository.js';
 import {
   FeedBatchEntity,
@@ -91,6 +94,19 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       entityRun: 0,
     };
     const manager = this.currentEntityManager();
+    if (owner.kind === 'MEMBER') {
+      if (!manager.isInTransaction()) {
+        throw new Error('member feed session creation requires a transaction');
+      }
+      const userRows = await executePostgresSql<{ id: string }[]>(
+        manager,
+        'SELECT id::text AS id FROM users WHERE id = $1::uuid FOR KEY SHARE',
+        [owner.userId],
+      );
+      if (userRows.length !== 1) {
+        throw new AuthException(AuthExceptionCode.InvalidCredentials, '인증이 필요합니다.');
+      }
+    }
     manager.persist(
       manager.create(FeedSessionEntity, {
         id: session.id,

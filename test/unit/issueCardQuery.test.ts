@@ -99,7 +99,7 @@ test('feed batch generation is owned by the supplied transaction manager', async
     batchNo: 0,
   });
 
-  assert.equal(transactionCalls, 1);
+  assert.equal(transactionCalls, 2);
 });
 
 test('guest feed uses an anonymous owner and skips member context reads', async () => {

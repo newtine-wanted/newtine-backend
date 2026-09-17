@@ -115,6 +115,7 @@ test('SignupUseCase가 이메일을 정규화하고 가입 계정을 항상 USER
         role: command.role,
       };
     },
+    deleteUser: async () => false,
     createRefreshSession: async (command) => {
       sessions.push(command);
     },
@@ -166,6 +167,7 @@ test('LoginUseCase가 canonical email을 조회하고 검증된 계정에 새 se
     },
     findUserById: async () => user,
     createUser: async () => user,
+    deleteUser: async () => false,
     createRefreshSession: async () => {
       createdSession = true;
     },
@@ -202,6 +204,7 @@ test('SignupUseCase가 canonical email 생성 경쟁을 충돌 오류로 변환�
       });
       throw error;
     },
+    deleteUser: async () => false,
     createRefreshSession: async () => undefined,
     rotateRefreshSession: async () => ({ status: 'invalid' }),
     revokeRefreshSession: async () => undefined,
@@ -233,6 +236,7 @@ test('RefreshUseCase가 opaque refresh token을 회전하고 access 응답에 �
     findUserByEmail: async () => undefined,
     findUserById: async () => user,
     createUser: async () => user,
+    deleteUser: async () => false,
     createRefreshSession: async () => undefined,
     rotateRefreshSession: async (command) => {
       rotationCommand = command;
@@ -266,6 +270,7 @@ test('RefreshUseCase가 refresh token 재사용을 일반화된 인증 실패 �
     createUser: async () => {
       throw new Error('not used');
     },
+    deleteUser: async () => false,
     createRefreshSession: async () => undefined,
     rotateRefreshSession: async () => ({ status: 'reused' }),
     revokeRefreshSession: async () => undefined,

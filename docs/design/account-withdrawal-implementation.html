@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="purpose"
+      content="승인된 회원 본인 탈퇴와 개인 데이터 삭제 API의 구현·검증·운영 통제 기록"
+    />
+    <meta name="audience" content="백엔드 구현자, 코드 리뷰어, 서비스 운영 담당자" />
+    <meta
+      name="problem"
+      content="즉시 물리 삭제·access token-only 탈퇴를 실제 API와 데이터 경계로 구현하고 누락·경합을 검증"
+    />
+    <meta
+      name="core-flow"
+      content="승인된 설계 → API·repository·migration 구현 → focused 검증 → PostgreSQL 경합·운영 증거 기록"
+    />
+    <title>회원탈퇴 API 구현 제어 · 운영 적용 보류</title>
+    <style>
+      :root {
+        font-family: system-ui, sans-serif;
+        color: #203043;
+        background: #f3f5f8;
+        line-height: 1.7;
+      }
+      body {
+        max-width: 1160px;
+        margin: auto;
+        padding: 24px;
+      }
+      header,
+      section {
+        background: white;
+        border: 1px solid #dce3eb;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      h1 {
+        font-size: 30px;
+      }
+      h2 {
+        font-size: 22px;
+      }
+      a {
+        color: #175caa;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        padding: 12px 0 24px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 12px;
+        border: 1px solid #dce3eb;
+      }
+      caption {
+        text-align: left;
+        font-weight: 650;
+        margin: 10px 0;
+      }
+      dt {
+        font-weight: 650;
+      }
+      dd {
+        margin: 0 0 12px;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      pre {
+        white-space: pre-wrap;
+        background: #f3f5f8;
+        padding: 16px;
+        border-radius: 8px;
+      }
+      aside {
+        padding: 14px;
+        border-left: 4px solid #d68720;
+        background: #fff8e8;
+        margin: 16px 0;
+      }
+      .status {
+        color: #925700;
+        font-weight: 650;
+      }
+      .check-result {
+        border: 1px solid #b9cde8;
+        border-radius: 8px;
+        background: #f4f8ff;
+        padding: 14px;
+        margin-top: 16px;
+      }
+      .check-result[hidden] {
+        display: none;
+      }
+      .flow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      .flow span {
+        background: #edf3fd;
+        padding: 12px;
+        border-radius: 8px;
+      }
+      figure {
+        margin: 16px 0;
+      }
+      figcaption {
+        margin-top: 12px;
+      }
+      @media (max-width: 700px) {
+        body {
+          padding: 12px;
+        }
+        header,
+        section {
+          padding: 16px;
+        }
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>구현 제어 문서 · 고위험 범위(개인 데이터 삭제·인증·동시성)</p>
+      <h1>회원탈퇴 API 구현 제어</h1>
+      <p class="status">
+        구현 완료(운영 적용 보류) · implementation-control-state: 구현 완료(운영 적용 보류) ·
+        developer-understanding-state: 미실시
+      </p>
+      <dl>
+        <dt>purpose</dt>
+        <dd>승인된 회원 본인 탈퇴와 개인 데이터 삭제 API의 구현·검증·운영 통제 기록</dd>
+        <dt>audience</dt>
+        <dd>백엔드 구현자, 코드 리뷰어, 서비스 운영 담당자</dd>
+        <dt>problem</dt>
+        <dd>
+          즉시 물리 삭제·access token-only 탈퇴를 실제 API와 데이터 경계로 구현하고 누락·경합을 검증
+        </dd>
+        <dt>core-flow</dt>
+        <dd>
+          승인된 설계 → API·repository·migration 구현 → focused 검증 → PostgreSQL 경합·운영 증거
+          기록
+        </dd>
+        <dt>baseline</dt>
+        <dd>
+          <a href="account-withdrawal-design.html">account-withdrawal-design.html</a> · 설계 승인됨
+          · 2026-09-17 · 브랜치 <code>codex/account-withdrawal</code>
+        </dd>
+        <dt>worktree</dt>
+        <dd>
+          <code>/Users/hyunseok/IdeaProjects/newtine-backend/.worktrees/account-withdrawal</code>
+        </dd>
+        <dt>approval</dt>
+        <dd>사용자의 “구현 ㄱ” · 즉시 물리 삭제·access token-only · 2026-09-17</dd>
+      </dl>
+    </header>
+    <nav aria-label="구현 제어 문서 탐색">
+      <a href="#baseline-reference">기준</a><a href="#current-implementation">구현</a
+      ><a href="#state-transitions">상태 전이</a><a href="#issue-register">이슈</a
+      ><a href="#review">리뷰</a><a href="#verification-evidence">검증</a
+      ><a href="#operational-understanding">운영 이해</a>
+    </nav>
+    <main>
+      <article>
+        <section id="baseline-reference">
+          <h2>승인 기준과 범위</h2>
+          <p>
+            이 문서는 승인된 설계의 구현 결과만 기록한다. 승인된 동작은
+            <code>POST /auth/withdraw</code>, JWT principal 본인 식별, 본문 없는 요청, 즉시 물리
+            삭제, 복구 없음, 개인 데이터와 모든 refresh session 삭제, 공유 콘텐츠 유지, 정상 응답
+            204다.
+          </p>
+          <p>
+            승인된 불변식은 회원 행 잠금 후 종속 데이터 처리, 삭제 후 access/refresh 인증 실패, 개인
+            보고서 결과 부활 금지, 외부 호출 중 DB 잠금 금지, 이미 허가된 외부 호출의 취소·과금 취소
+            미보장이다.
+          </p>
+          <p>
+            금지 범위는 유예·복구, 비밀번호 재확인, 관리자 강제 삭제, 운영 DB 실행, 외부 공급자
+            호출, PR·배포다. 구현 중 발견한 추가 개인 저장소나 계약 변경은 설계 문서 재승인 대상으로
+            전환한다.
+          </p>
+        </section>
+        <section id="current-implementation">
+          <h2>현재 구현</h2>
+          <p>
+            구현 완료. <code>codex/account-withdrawal</code> 워크트리의 단일 구현 lane에서 승인된
+            execution contract를 반영했다. <code>AuthController.withdraw</code>와
+            <code>WithdrawUseCase</code>는 principal.userId만 사용하고, users 행을 먼저 잠근 뒤
+            CASCADE 물리 삭제를 한 트랜잭션으로 수행한다.
+          </p>
+          <p>
+            <a href="../../apps/api/src/auth/auth.controller.ts">auth.controller.ts</a>의 새 route와
+            <a href="../../apps/api/src/auth/application/withdraw.usecase.ts">withdraw.usecase.ts</a
+            >,
+            <a href="../../libs/core/src/auth/postgresAuth.repository.ts"
+              >postgresAuth.repository.ts</a
+            >의 user-first delete,
+            <a
+              href="../../libs/core/src/pipeline/migrations/Migration20260917000000AccountWithdrawal.ts"
+              >account-withdrawal migration</a
+            >의 FK preflight·보완, report/usage/feed 경합 경계를 함께 반영했다. OpenAPI·SDK·E2E
+            생성물과 회귀 테스트도 갱신했다.
+          </p>
+          <aside>
+            운영 적용은 보류한다. 실제 격리 PostgreSQL에서 migration·삭제 범위·rollback·동시성 HTTP
+            검증을 아직 실행하지 않았고, migration을 운영 DB에 적용하지 않았다.
+          </aside>
+        </section>
+        <section id="state-transitions">
+          <h2>상태 전이와 경계</h2>
+          <figure>
+            <div class="flow">
+              <span>JWT guard</span><span>→ users FOR UPDATE</span><span>→ 개인 데이터 DELETE</span
+              ><span>→ commit</span><span>→ cookie 만료·204</span>
+            </div>
+            <figcaption>
+              승인된 탈퇴 처리의 상태 전이. commit 전 오류는 전체 rollback하고 commit 이후 응답을
+              작성한다.
+            </figcaption>
+          </figure>
+          <table>
+            <caption>
+              구현 검증 대상
+            </caption>
+            <thead>
+              <tr>
+                <th>축</th>
+                <th>완료 조건</th>
+                <th>증거</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>API·권한</td>
+                <td>principal.userId만 대상이며 token-only 요청과 실패 계약이 구현됨.</td>
+                <td>controller/use case, request boundary unit, generated contract</td>
+              </tr>
+              <tr>
+                <td>데이터</td>
+                <td>개인 행 삭제·보고서 사용량 연결 해제·공유 데이터 유지.</td>
+                <td>users FK migration preflight/CASCADE, ai_usage SET NULL SQL, static/unit</td>
+              </tr>
+              <tr>
+                <td>동시성</td>
+                <td>user-first 잠금 순서, login/refresh/report/feed와 deadlock·부활 없음.</td>
+                <td>lock-order 코드·unit 검증 완료; 실제 PostgreSQL 경합은 미실행</td>
+              </tr>
+              <tr>
+                <td>외부 효과</td>
+                <td>
+                  외부 호출 전 gate와 삭제 후 결과 저장 차단. 이미 허가된 호출의 한계가 문서화됨.
+                </td>
+                <td>usage gate·conditional complete 반영; provider race는 승인 설계 잔여 위험</td>
+              </tr>
+              <tr>
+                <td>검증·운영</td>
+                <td>unit·HTTP·격리 PostgreSQL·migration·계약 증거와 잔여 위험 기록.</td>
+                <td>unit/build/lint/format/contract PASS; HTTP·PostgreSQL·운영 적용 보류</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="issue-register">
+          <h2>이슈 등록부</h2>
+          <table>
+            <caption>
+              구현 이슈와 조치
+            </caption>
+            <thead>
+              <tr>
+                <th>상태</th>
+                <th>증상·영향</th>
+                <th>원인·조치</th>
+                <th>검증·잔여 위험</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>해결 · P0</td>
+                <td>
+                  탈퇴 트랜잭션의 두 SET LOCAL을 한 드라이버 호출로 보내면 PostgreSQL 다중 결과 해석
+                  오류로 500·rollback 가능.
+                </td>
+                <td>
+                  SET LOCAL lock_timeout과 statement_timeout을 단일 statement별 호출로 분리했다.
+                </td>
+                <td>PostgresAuthRepository 회귀 테스트 4개 호출 순서 확인; 실제 DB는 미실행.</td>
+              </tr>
+              <tr>
+                <td>해결 · P2 / 호환 명시</td>
+                <td>
+                  parser가 소비하지 않은 non-empty text/plain·chunked 본문이 undefined로 남아 탈퇴를
+                  우회할 수 있음. JSON <code>{}</code>는 승인 설계의 호환용 빈 객체다.
+                </td>
+                <td>
+                  positive content-length는 즉시 거절하고, chunked 요청은 실제 스트림 바이트를
+                  확인해 non-empty만 400으로 거절한다. 파싱된 빈 객체는 필드가 없을 때 호환
+                  허용하고, 필드가 있으면 400이다.
+                </td>
+                <td>
+                  request boundary unit에 non-empty text/plain·empty/non-empty chunked 경계를 추가;
+                  실제 HTTP는 미실행. strict zero-byte-only로 바꾸려면 설계 재승인이 필요하다.
+                </td>
+              </tr>
+              <tr>
+                <td>해결 · SCHEMA</td>
+                <td>외부 소유 base schema의 개인 FK가 다르면 users DELETE 범위가 불명확함.</td>
+                <td>
+                  전체 inbound users FK를 명시적 table/column/action allowlist와 대조하고, known
+                  member-owned tables의 validated ON DELETE CASCADE와 ai_usage weekly_report_id SET
+                  NULL을 preflight에서 확인한다. 불일치·예상 밖 FK·고아 데이터는 fail-closed한다.
+                </td>
+                <td>
+                  migration SQL static/unit 확인; 실제 운영 schema introspection은 배포 전 필수.
+                </td>
+              </tr>
+              <tr>
+                <td>열림 · ENV-001</td>
+                <td>
+                  격리 PostgreSQL lifecycle/HTTP/경합 suite를 실행할 REPORT_TEST_DATABASE_URL과 접근
+                  가능한 local PostgreSQL이 없음.
+                </td>
+                <td>
+                  unit·static·생성 계약 검증까지 수행하고, DB 검증은 운영 적용 전 gate로 남겼다.
+                </td>
+                <td>DB URL 제공 후 migration·withdrawal integration suite를 실행해야 한다.</td>
+              </tr>
+              <tr>
+                <td>열림 · OPS-001</td>
+                <td>탈퇴 commit과 이미 허가된 외부 AI 전송 사이 race, 로그·백업·provider 보존.</td>
+                <td>승인 설계의 비범위로 유지하고 운영·공급자별 별도 정책으로 분리했다.</td>
+                <td>204를 외부 사본 즉시 삭제·과금 취소로 설명하지 않는다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="review">
+          <h2>구현 리뷰</h2>
+          <dl>
+            <dt>리뷰 유형</dt>
+            <dd>자기 변경(self-change) 읽기 전용 구현 리뷰</dd>
+            <dt>작성자·리뷰어</dt>
+            <dd>Codex 구현 lane · Codex review lane</dd>
+            <dt>저장소·브랜치·범위</dt>
+            <dd>
+              <code>newtine-backend</code> · <code>codex/account-withdrawal</code> · 기준
+              <code>f4a0d05</code>와 현재 working tree diff, 관련 호출자·migration·생성 계약·테스트
+            </dd>
+            <dt>PR·이슈</dt>
+            <dd>없음 · 현재 작업 트리 리뷰</dd>
+            <dt>검토 시각</dt>
+            <dd><time datetime="2026-09-18">2026-09-18</time> · Asia/Seoul</dd>
+            <dt>리뷰 상태</dt>
+            <dd>검토 완료(운영 적용 보류)</dd>
+          </dl>
+          <p>
+            입력 → 인증 → 사용자 행 잠금 → FK cascade 삭제 → commit → cookie 만료·204의 수직
+            경로와, 삭제와 경쟁하는 login·refresh·onboarding·interest·feed·report·usage 흐름을
+            설계 기준 및 실제 diff와 대조했다. 공유 이슈·기사·대상·분류 보존과
+            <code>ai_usage_records.weekly_report_id SET NULL</code>도 함께 확인했다.
+          </p>
+          <table>
+            <caption>리뷰 finding 요약</caption>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">상태·심각도</th>
+                <th scope="col">판정</th>
+                <th scope="col">근거·후속</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">없음</th>
+                <td>해당 없음</td>
+                <td>설계 이탈·권한 위반·삭제 범위 오류·부활 경로의 구체적 결함을 확인하지 못했다.</td>
+                <td>부분 단위·정적 증거는 통과. 실제 PostgreSQL·HTTP·provider lifecycle은 ENV-001로 남아 있다.</td>
+              </tr>
+              <tr>
+                <th scope="row">ENV-001</th>
+                <td>open · non-blocking risk</td>
+                <td>코드 결함 판정이 아니라 고위험 동작의 실환경 검증 공백이다.</td>
+                <td>격리 DB URL을 연결한 migration·삭제 범위·rollback·양방향 경합·HTTP smoke 실행 전 운영 적용 금지.</td>
+              </tr>
+            </tbody>
+          </table>
+          <aside>
+            리뷰 판단: concrete finding 없음. 이는 완료·병합·배포 승인이나 실제 데이터 삭제 성공의
+            증명이 아니며, ENV-001과 외부 provider·백업 보존 경계가 해소된 뒤 별도 최종 판정을 해야 한다.
+          </aside>
+        </section>
+        <section id="verification-evidence">
+          <h2>검증 증거</h2>
+          <p>
+            실행한 검증과 실행하지 못한 검증을 구분해 기록한다. PASS는 해당 범위의 명령·관측이
+            통과했다는 뜻이며, 실제 PostgreSQL·HTTP가 필요한 수용 기준의 부분 통과를 전체 통과로
+            해석하지 않는다.
+          </p>
+          <table>
+            <caption>
+              설계 수용 기준 ledger
+            </caption>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>대상</th>
+                <th>상태</th>
+                <th>증거</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>V1</td>
+                <td>HTTP 본인 인증·응답·쿠키·rate limit</td>
+                <td>부분 통과</td>
+                <td>
+                  route·guard·204·cookie/header·rate limit·OpenAPI를 정적/생성 계약으로 확인. 실제
+                  HTTP smoke는 DB 환경 부재로 미실행.
+                </td>
+              </tr>
+              <tr>
+                <td>V2</td>
+                <td>개인 데이터 완전 삭제와 공유 데이터 보존</td>
+                <td>부분 통과</td>
+                <td>
+                  known FK cascade, report SET NULL, guest nullable 경계를 SQL/unit으로 확인. 실제
+                  fixture 삭제 검증은 미실행.
+                </td>
+              </tr>
+              <tr>
+                <td>V3</td>
+                <td>전체 세션 무효화와 재가입 분리</td>
+                <td>부분 통과</td>
+                <td>
+                  users 삭제·refresh FK cascade·DB-backed access principal을 코드/단위로 확인. 실제
+                  재가입·기존 token HTTP는 미실행.
+                </td>
+              </tr>
+              <tr>
+                <td>V4</td>
+                <td>transaction atomicity·rollback</td>
+                <td>부분 통과</td>
+                <td>
+                  top-level transaction owner와 transient error mapping을 구현·unit 확인. 실제
+                  constraint/timeout rollback은 PostgreSQL 미실행.
+                </td>
+              </tr>
+              <tr>
+                <td>V5</td>
+                <td>실제 PostgreSQL 경합</td>
+                <td>미실행(환경)</td>
+                <td>
+                  <code>REPORT_TEST_DATABASE_URL</code> 미설정, local
+                  <code>pg_isready</code> 무응답. report integration 3 suites는 skip되었고
+                  DB-independent integration 2 suites는 PASS.
+                </td>
+              </tr>
+              <tr>
+                <td>V6</td>
+                <td>report worker·usage 결과 부활 차단</td>
+                <td>부분 통과</td>
+                <td>
+                  user→report→usage gate, lease token, conditional complete, detached usage
+                  recovery를 코드로 확인. 실제 late-provider lifecycle은 미실행.
+                </td>
+              </tr>
+              <tr>
+                <td>V7</td>
+                <td>FK migration·고아 데이터 fail-closed</td>
+                <td>정적/단위 통과</td>
+                <td>
+                  migration query 등록·orphan guard·전체 inbound users FK allowlist·region FK 존재
+                  preflight·irreversible down 테스트 PASS. 실제 schema apply는 미실행.
+                </td>
+              </tr>
+              <tr>
+                <td>V8</td>
+                <td>오류·로그·부하·운영 증거</td>
+                <td>정적/단위 통과 · 운영 보류</td>
+                <td>
+                  lint, format, API/batch typecheck, build, generated contract 5 tests/typecheck,
+                  full unit 45 suites/228 tests PASS. 독립 최종 critical review에서 actionable
+                  P0/P1/P2 없음 확인. 실제 PostgreSQL·HTTP·provider 부하 증거는 미실행.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section id="verification-gaps">
+          <h2>검증 공백과 잔여 위험</h2>
+          <p>
+            남은 공백은 구현 실패가 아니라 환경·운영 gate다. REPORT_TEST_DATABASE_URL을 연결한 격리
+            PostgreSQL에서 migration up, users 삭제와 모든 개인 행/guest 행 보존, 실패 rollback,
+            login·refresh·feed·report·usage·worker 양방향 경합, late provider 결과를 실행해야 한다.
+            migration 적용 전에는 API를 배포하지 않는다. 호출 허가 commit과 provider 전송 사이 race,
+            이미 guard를 지난 요청, 기존 로그·백업·외부 provider 보존은 승인 설계의 잔여 위험이다.
+          </p>
+        </section>
+        <section id="operational-understanding">
+          <h2>구현 이해 점검</h2>
+          <p>
+            developer-understanding-state: 미실시. 아래 self-check는 실제 as-built 경로를 기준으로
+            탈퇴 장애의 첫 증거, 부분 삭제 rollback, 오래된 token, report gate 경합을 확인하기 위한
+            참고용 컨트롤이며 기술 검증·구현 승인을 대체하지 않는다.
+          </p>
+          <form id="implementation-understanding-check">
+            <fieldset>
+              <legend>1. 삭제와 동시 쓰기의 기준 잠금 순서는?</legend>
+              <label><input type="radio" name="q1" value="user-first" /> users → 종속 행</label>
+              <label><input type="radio" name="q1" value="child-first" /> 종속 행 → users</label>
+            </fieldset>
+            <fieldset>
+              <legend>2. 같은 access token으로 삭제를 다시 요청하면?</legend>
+              <label><input type="radio" name="q2" value="401" /> 401 Unauthorized</label>
+              <label><input type="radio" name="q2" value="204" /> 항상 204 No Content</label>
+            </fieldset>
+            <fieldset>
+              <legend>3. 탈퇴한 report의 AI 사용 원장은?</legend>
+              <label
+                ><input type="radio" name="q3" value="detach" /> report 연결만 NULL로 해제하고
+                보존</label
+              >
+              <label
+                ><input type="radio" name="q3" value="delete" /> 모든 usage 원장을 함께 삭제</label
+              >
+            </fieldset>
+            <fieldset>
+              <legend>4. DB lock/serialization timeout 응답은?</legend>
+              <label><input type="radio" name="q4" value="503" /> 503과 rollback</label>
+              <label><input type="radio" name="q4" value="204" /> 204를 먼저 반환</label>
+            </fieldset>
+            <button type="submit">점검 결과 보기</button>
+          </form>
+          <div
+            id="implementation-understanding-result"
+            class="check-result"
+            hidden
+            aria-live="polite"
+          >
+            <p data-status></p>
+            <p data-explanation></p>
+            <p data-next-action></p>
+          </div>
+        </section>
+        <section id="implementation-control-state">
+          <h2>구현 제어 상태</h2>
+          <dl>
+            <dt>implementation-control-state</dt>
+            <dd>구현 완료(운영 적용 보류)</dd>
+            <dt>issue-register</dt>
+            <dd>P0/P2/SCHEMA 해결 · ENV-001(격리 DB)·OPS-001(외부 보존/race) 열림</dd>
+            <dt>design-delta</dt>
+            <dd>
+              없음 · unparsed body guard와 단일 SET LOCAL 실행은 구현 hardening으로 승인 계약을 강화
+            </dd>
+            <dt>next action</dt>
+            <dd>
+              격리 PostgreSQL에서 migration·HTTP·삭제 범위·rollback·경합 suite를 실행하고, 결과가
+              통과한 뒤 staging preflight와 운영 적용 승인을 별도로 진행한다.
+            </dd>
+          </dl>
+        </section>
+      </article>
+    </main>
+    <script>
+      const checkForm = document.querySelector('#implementation-understanding-check');
+      const checkResult = document.querySelector('#implementation-understanding-result');
+      if (checkForm instanceof HTMLFormElement && checkResult instanceof HTMLElement) {
+        checkForm.addEventListener('submit', (event) => {
+          event.preventDefault();
+          const answers = new FormData(checkForm);
+          const correct =
+            answers.get('q1') === 'user-first' &&
+            answers.get('q2') === '401' &&
+            answers.get('q3') === 'detach' &&
+            answers.get('q4') === '503';
+          checkResult.hidden = false;
+          checkResult.querySelector('[data-status]').textContent = correct
+            ? '상태: 핵심 경로 이해 확인'
+            : '상태: 재검토 필요';
+          checkResult.querySelector('[data-explanation]').textContent = correct
+            ? 'users 선행 잠금, 반복 token 401, usage 연결 해제, timeout rollback이 현재 구현의 기준입니다.'
+            : '정답 기준은 users → 종속 행, 반복 token 401, usage weekly_report_id NULL, timeout 503·rollback입니다.';
+          checkResult.querySelector('[data-next-action]').textContent =
+            '다음 조치: 실제 격리 PostgreSQL 경합·rollback 결과와 함께 운영 적용 여부를 별도로 판정하세요.';
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -25,6 +25,7 @@ import { ISSUE_QUERY_PERSISTENCE_ENTITIES } from '../../issue/persistence/issueQ
 import { INTEREST_PERSISTENCE_ENTITIES } from '../../interest/persistence/interest.persistence.entity.js';
 import { Migration20260915000000InterestPersistence } from '../../interest/migrations/Migration20260915000000InterestPersistence.js';
 import { Migration20260916000000IssueCardActions } from '../../interest/migrations/Migration20260916000000IssueCardActions.js';
+import { Migration20260917000000AccountWithdrawal } from '../../pipeline/migrations/Migration20260917000000AccountWithdrawal.js';
 
 const PERSISTENCE_ENTITIES = [
   ...USER_PERSISTENCE_ENTITIES,
@@ -85,6 +86,7 @@ export function createDatabaseOptions(
         Migration20260915000004FeedAlgorithmSnapshot,
         Migration20260916000000DiagnosticReport,
         Migration20260916000000IssueCardActions,
+        Migration20260917000000AccountWithdrawal,
       ],
       transactional: true,
       allOrNothing: true,

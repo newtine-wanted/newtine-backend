@@ -22,7 +22,14 @@ test('PostgresAuthRepository가 일반 사용자 CRUD를 ORM metadata로 수행�
   const findCalls: Array<{ entity: unknown; where: unknown }> = [];
   const insertCalls: Array<{ entity: unknown; data: unknown }> = [];
   const updateCalls: Array<{ entity: unknown; where: unknown; data: unknown }> = [];
+  const connection = {
+    execute: async (sql: string): Promise<unknown> => {
+      if (sql.includes('FROM users')) return { id: userId };
+      return undefined;
+    },
+  };
   const entityManager = createEntityManager({
+    connection,
     findOne: async (entity: unknown, where: unknown) => {
       findCalls.push({ entity, where });
       return {
@@ -84,6 +91,33 @@ test('PostgresAuthRepository가 일반 사용자 CRUD를 ORM metadata로 수행�
   assert.deepEqual(updateCalls[0]?.where, { tokenHash: 'hash', usedAt: null, revokedAt: null });
 });
 
+test('PostgresAuthRepository가 사용자를 먼저 잠그고 물리 삭제 결과를 반환한다', async () => {
+  const calls: Array<{ sql: string; method: string }> = [];
+  const connection = {
+    execute: async (sql: string, params: unknown[] = [], method = 'run'): Promise<unknown> => {
+      void params;
+      calls.push({ sql: sql.replace(/\s+/g, ' ').trim(), method });
+      if (sql.startsWith('SELECT')) return { id: userId };
+      if (sql.startsWith('DELETE')) return { affectedRows: 1 };
+      return { affectedRows: 0 };
+    },
+  };
+  const entityManager = createEntityManager({
+    connection,
+    isInTransaction: () => true,
+  });
+  const repository = new PostgresAuthRepository(entityManager as never);
+
+  assert.equal(await repository.deleteUser(userId), true);
+  assert.equal(calls.length, 4);
+  assert.match(calls[0]?.sql ?? '', /SET LOCAL lock_timeout/);
+  assert.match(calls[1]?.sql ?? '', /SET LOCAL statement_timeout/);
+  assert.match(calls[2]?.sql ?? '', /FOR UPDATE/);
+  assert.equal(calls[2]?.method, 'get');
+  assert.match(calls[3]?.sql ?? '', /DELETE FROM users/);
+  assert.equal(calls[3]?.method, 'run');
+});
+
 test('PostgresAuthRepository가 refresh rotation의 잠금·소비만 명시적 SQL로 수행한다', async () => {
   const sqlCalls: Array<{ sql: string; params: unknown[]; method: string }> = [];
   const insertCalls: Array<{ entity: unknown; data: unknown }> = [];
@@ -102,6 +136,7 @@ test('PostgresAuthRepository가 refresh rotation의 잠금·소비만 명시적 
           revoked_at: null,
         };
       }
+      if (normalized.includes('FROM users')) return { id: userId };
       if (normalized.startsWith('UPDATE refresh_sessions')) return { affectedRows: 1 };
       throw new Error(`Unhandled SQL: ${sql}`);
     },
@@ -140,11 +175,17 @@ test('PostgresAuthRepository가 refresh rotation의 잠금·소비만 명시적 
 
   assert.equal(result.status, 'rotated');
   assert.deepEqual(result.user, authUser());
-  assert.equal(sqlCalls.length, 2);
+  assert.equal(sqlCalls.length, 5);
   assert.equal(sqlCalls[0]?.method, 'get');
-  assert.match(sqlCalls[0]?.sql ?? '', /FOR UPDATE/);
-  assert.equal(sqlCalls[1]?.method, 'run');
-  assert.match(sqlCalls[1]?.sql ?? '', /SET used_at/);
+  assert.doesNotMatch(sqlCalls[0]?.sql ?? '', /FOR UPDATE/);
+  assert.equal(sqlCalls[1]?.method, 'get');
+  assert.match(sqlCalls[1]?.sql ?? '', /FOR KEY SHARE/);
+  assert.equal(sqlCalls[2]?.method, 'get');
+  assert.match(sqlCalls[2]?.sql ?? '', /FOR UPDATE/);
+  assert.equal(sqlCalls[3]?.method, 'run');
+  assert.match(sqlCalls[3]?.sql ?? '', /SET used_at/);
+  assert.equal(sqlCalls[4]?.method, 'get');
+  assert.match(sqlCalls[4]?.sql ?? '', /FOR KEY SHARE/);
   assert.equal(insertCalls.length, 1);
   assert.equal(insertCalls[0]?.entity, RefreshSessionSchema);
   assert.equal((insertCalls[0]?.data as { userId: string }).userId, userId);
@@ -188,8 +229,10 @@ test('PostgresAuthRepository가 refresh token 재사용 시 ORM nativeUpdate로 
   });
 
   assert.deepEqual(result, { status: 'reused' });
-  assert.equal(sqlCalls.length, 1);
-  assert.match(sqlCalls[0] ?? '', /FOR UPDATE/);
+  assert.equal(sqlCalls.length, 3);
+  assert.doesNotMatch(sqlCalls[0] ?? '', /FOR UPDATE/);
+  assert.match(sqlCalls[1] ?? '', /FOR KEY SHARE/);
+  assert.match(sqlCalls[2] ?? '', /FOR UPDATE/);
   assert.equal(updateCalls.length, 1);
   assert.equal(updateCalls[0]?.entity, RefreshSessionSchema);
   assert.deepEqual(updateCalls[0]?.where, { userId, usedAt: null, revokedAt: null });
@@ -224,7 +267,10 @@ test('PostgresAuthRepository가 만료된 refresh row를 회전하지 않고 inv
   });
 
   assert.deepEqual(result, { status: 'invalid' });
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 3);
+  assert.doesNotMatch(calls[0] ?? '', /FOR UPDATE/);
+  assert.match(calls[1] ?? '', /FOR KEY SHARE/);
+  assert.match(calls[2] ?? '', /FOR UPDATE/);
 });
 
 function createEntityManager(overrides: Record<string, unknown> = {}): Record<string, unknown> {
