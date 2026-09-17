@@ -16,8 +16,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN --mount=type=cache,id=newtine-backend-ttsc,target=/app/node_modules/.cache/ttsc,sharing=locked \
-    npm run build
+RUN npm run build
 
 FROM node:24-bookworm-slim AS runtime
 
