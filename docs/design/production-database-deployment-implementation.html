@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="운영 DB 수동 SQL 적용 산출물의 구현 상태·검증·운영 제어 기록" />
+    <meta name="audience" content="NEWTINE 백엔드 개발자와 배포 담당자" />
+    <meta name="problem" content="빈 production PostgreSQL에 운영자가 직접 적용할 DDL·기준 seed·검증 절차가 필요함" />
+    <meta name="core-flow" content="SQL 산출물 생성 → 임시 빈 DB 검증 → production 수동 적용 문서화 → schema·seed 검증" />
+    <title>운영 DB 수동 SQL 적용 구현 제어</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #213047; background: #f3f6fa; }
+      body { max-width: 1080px; margin: 0 auto; padding: 28px 20px 56px; line-height: 1.65; }
+      header, section, aside { background: #fff; border: 1px solid #d7e0eb; border-radius: 12px; padding: 22px; margin: 20px 0; }
+      h1, h2 { line-height: 1.35; }
+      h1 { margin-top: 0; }
+      a { color: #1b5dbb; }
+      dt { font-weight: 700; }
+      dd { margin: 0 0 10px; }
+      code, pre { background: #eef3f8; }
+      code { padding: 1px 5px; border-radius: 4px; }
+      pre { padding: 14px; overflow: auto; border-radius: 8px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #cbd8e4; padding: 9px; text-align: left; vertical-align: top; }
+      th { background: #f4f7fb; }
+      aside { border-left: 5px solid #bf8425; border-radius: 4px 12px 12px 4px; background: #fff9ed; }
+      .state { color: #875a10; font-weight: 700; }
+      .quizSlide { border: 1px solid #d7e0eb; border-radius: 10px; padding: 16px; margin: 14px 0; }
+      .quizSlide:not(.active) { display: none; }
+      .quizSlide label { display: block; margin: 9px 0; }
+      .quiz-actions { display: flex; gap: 8px; margin-top: 12px; }
+      .quiz-result { margin-top: 12px; padding: 12px; background: #edf5ef; border-left: 4px solid #4d8c61; }
+      [hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="state">운영 제어 보류 · High-risk · 기술 검증 완료, production 적용 대기</p>
+      <h1>운영 DB 수동 SQL 적용 구현 제어</h1>
+      <p>승인된 설계 기준에 따라 빈 production PostgreSQL에 운영자가 직접 실행할 SQL 산출물과 검증 절차를 만든다. 이 작업은 production DB에 접속하거나 SQL을 실행하지 않는다.</p>
+      <dl>
+        <dt>기준선</dt>
+        <dd><a href="production-database-deployment-design.html">운영 DB 스키마·기준 시드 배포 설계</a> · 설계 승인됨 · 승인 범위는 빈 DB baseline, 정적 reference seed, 수동 실행 문서다.</dd>
+        <dt>현재 구현 상태</dt>
+        <dd>임시 빈 PostgreSQL에서 DDL·seed·verify를 실제 순서로 적용해 성공했다.</dd>
+        <dt>구현 제어 상태</dt>
+        <dd><strong>운영 제어 보류</strong> · 기술 산출물은 완료됐고, production DB 적용은 운영 담당자의 직접 실행과 검증 결과를 기다린다.</dd>
+        <dt>운영 이해 점검</dt>
+        <dd>미실시. 아래 구현 이해 점검에서 실제 운영 순서·실패 대응을 확인할 수 있다.</dd>
+      </dl>
+    </header>
+
+    <main>
+      <section>
+        <h2>승인된 실행 계약</h2>
+        <ol>
+          <li><code>deploy/db/production/001_schema.sql</code>을 빈 DB에 직접 실행한다.</li>
+          <li><code>deploy/db/production/002_seed.sql</code>을 실행한다.</li>
+          <li>같은 문서에 기록된 사전·사후 검증 쿼리를 실행한다.</li>
+          <li>모든 검증이 성공한 뒤 API와 worker를 배포한다.</li>
+        </ol>
+        <p>애플리케이션 startup, Docker Compose init, <code>npm run db:migrate</code>는 production 적용 경로에 포함하지 않는다.</p>
+      </section>
+
+      <section>
+        <h2>현재 구현·검증 기록</h2>
+        <table>
+          <caption>구현 제어 상태</caption>
+          <thead><tr><th scope="col">항목</th><th scope="col">상태</th><th scope="col">근거·다음 행동</th></tr></thead>
+          <tbody>
+            <tr><td>DDL 산출물</td><td>해결됨</td><td><a href="../../deploy/db/production/001_schema.sql"><code>001_schema.sql</code></a> · current schema 기준 29개 application table, vector extension, function, sequence, constraint, index, FK 포함. local smoke table·migration bookkeeping 제외.</td></tr>
+            <tr><td>정적 seed 산출물</td><td>해결됨</td><td><a href="../../deploy/db/production/002_seed.sql"><code>002_seed.sql</code></a> · categories 10개와 regions 17개, <code>ON CONFLICT</code> 재실행 가능.</td></tr>
+            <tr><td>빈 DB 적용 검증</td><td>해결됨</td><td><a href="../../deploy/db/production/003_verify.sql"><code>003_verify.sql</code></a> 통과. required table/index/vector/seed count 확인.</td></tr>
+            <tr><td>production 실행</td><td>해당 없음</td><td>사용자가 직접 실행할 대상이며 Codex가 수행하지 않는다.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>이슈 기록</h2>
+        <table>
+          <caption>구현 이슈 register</caption>
+          <thead><tr><th scope="col">이슈</th><th scope="col">상태</th><th scope="col">대응</th></tr></thead>
+          <tbody>
+            <tr><td>pg_dump가 migration bookkeeping sequence를 함께 포함함</td><td>해결됨</td><td>production 수동 SQL에는 필요하지 않아 <code>mikro_orm_migrations_id_seq</code>를 제거했다. fresh DB 적용 후 verify로 재확인했다.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>검증 근거</h2>
+        <pre><code>PGPASSWORD=local_only psql -h 127.0.0.1 -p 55439 -U postgres -d newtine_verify -v ON_ERROR_STOP=1 -f deploy/db/production/001_schema.sql
+PGPASSWORD=local_only psql -h 127.0.0.1 -p 55439 -U postgres -d newtine_verify -v ON_ERROR_STOP=1 -f deploy/db/production/002_seed.sql
+PGPASSWORD=local_only psql -h 127.0.0.1 -p 55439 -U postgres -d newtine_verify -v ON_ERROR_STOP=1 -f deploy/db/production/003_verify.sql</code></pre>
+        <ul>
+          <li>세 명령 모두 <code>ON_ERROR_STOP=1</code>로 성공했다.</li>
+          <li>검증 결과: <code>issue_categories=10</code>, <code>regions=17</code>.</li>
+          <li>seed를 한 번 더 실행한 뒤에도 row count는 <code>10|17</code>로 유지됐다.</li>
+          <li>production DB에는 접속하지 않았다.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>구현 이해 점검</h2>
+        <p>아래 점검은 기술 완료와 별도의 운영 이해 확인이다. 결과는 이 브라우저 안에서만 처리된다.</p>
+        <div id="implementation-quiz" data-current="0">
+          <div class="quizSlide active" data-answer="a">
+            <fieldset>
+              <legend>IC-01 · 빈 production DB의 실행 순서는?</legend>
+              <label><input type="radio" name="ic01" value="a" /> <code>001_schema.sql</code> → <code>002_seed.sql</code> → <code>003_verify.sql</code> → API 배포</label>
+              <label><input type="radio" name="ic01" value="b" /> API 배포 → seed → schema 보정</label>
+            </fieldset>
+          </div>
+          <div class="quizSlide" data-answer="a">
+            <fieldset>
+              <legend>IC-02 · <code>003_verify.sql</code>이 실패하면?</legend>
+              <label><input type="radio" name="ic02" value="a" /> API 롤아웃을 보류하고 대상 DB·SQL 실행 결과를 확인한다.</label>
+              <label><input type="radio" name="ic02" value="b" /> 일부 schema가 있어도 API를 먼저 시작한다.</label>
+            </fieldset>
+          </div>
+          <div class="quizSlide" data-answer="a">
+            <fieldset>
+              <legend>IC-03 · 자동 seed 범위는?</legend>
+              <label><input type="radio" name="ic03" value="a" /> canonical category 10개와 region 17개만이다.</label>
+              <label><input type="radio" name="ic03" value="b" /> entity·기사·사용자·admin 데이터까지 임의로 넣는다.</label>
+            </fieldset>
+          </div>
+          <div class="quiz-actions">
+            <button type="button" id="implementation-prev">이전</button>
+            <button type="button" id="implementation-next">다음</button>
+            <button type="button" id="implementation-submit">제출</button>
+          </div>
+          <p id="implementation-progress">1 / 3</p>
+          <div class="quiz-result" id="implementation-result" hidden></div>
+        </div>
+        <script>
+          (() => {
+            const root = document.getElementById('implementation-quiz');
+            const slides = [...root.querySelectorAll('.quizSlide')];
+            const progress = document.getElementById('implementation-progress');
+            const result = document.getElementById('implementation-result');
+            const render = () => {
+              const current = Number(root.dataset.current);
+              slides.forEach((slide, index) => slide.classList.toggle('active', index === current));
+              progress.textContent = `${current + 1} / ${slides.length}`;
+            };
+            document.getElementById('implementation-prev').addEventListener('click', () => {
+              root.dataset.current = Math.max(0, Number(root.dataset.current) - 1);
+              render();
+            });
+            document.getElementById('implementation-next').addEventListener('click', () => {
+              root.dataset.current = Math.min(slides.length - 1, Number(root.dataset.current) + 1);
+              render();
+            });
+            document.getElementById('implementation-submit').addEventListener('click', () => {
+              const values = ['ic01', 'ic02', 'ic03'].map((name) => document.querySelector(`input[name="${name}"]:checked`)?.value);
+              result.hidden = false;
+              result.textContent = values.every((value) => value === 'a')
+                ? '확립: 적용 순서·실패 시 보류·seed 범위를 예측했다.'
+                : '보완 필요: 수동 적용 순서와 verify 실패 시 롤아웃 보류를 다시 확인한다.';
+            });
+          })();
+        </script>
+      </section>
+
+      <section>
+        <h2>검증 공백과 잔여 위험</h2>
+        <ul>
+          <li>production DB 자체에는 접속하지 않으므로 실제 운영 적용 성공은 검증하지 않는다.</li>
+          <li>운영 DB가 빈 DB라는 전제 밖의 delta·데이터 보존은 이번 산출물 범위가 아니다.</li>
+          <li>SQL 적용 후 운영 담당자가 검증 쿼리 결과를 확인해야 API 롤아웃이 안전하다.</li>
+          <li>운영 담당자의 실제 적용 결과가 아직 보고되지 않았으므로 운영 제어 상태는 보류다.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
