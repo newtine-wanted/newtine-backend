@@ -77,6 +77,8 @@
               <tr><td><code>scripts/migrate.mjs</code></td><td>현재는 base table preflight 후 migration을 실행하는 개발/Compose 경로</td><td>production 수동 적용 경로에서는 호출하지 않는다.</td></tr>
               <tr><td><code>compose/postgres-init/001-base-schema.sql</code></td><td>주석상 local-only disposable fixture</td><td>운영 DDL의 기준으로 재사용하려면 소유권과 idempotency를 별도로 결정해야 한다.</td></tr>
               <tr><td><code>libs/core/src/*/migrations</code></td><td>지역·category 등 기준 데이터 일부가 migration 안의 <code>INSERT ... ON CONFLICT</code>로 관리됨</td><td>같은 seed를 별도 수동 SQL로 중복 관리하면 source of truth가 갈라진다.</td></tr>
+              <tr><td><code>deploy/db/production/001_schema.sql</code></td><td>현재 baseline은 <code>CHECK 60개 / PK 29개 / UNIQUE 12개 / FK 40개 / 인덱스 29개</code>를 포함한다.</td><td>production writer가 앱 서버로 한정된다는 전제에서 입력 검증용 CHECK와 조회에 쓰이지 않는 인덱스·관계 제약을 최소화할 여지가 있다.</td></tr>
+              <tr><td><code>origin/main</code>의 account withdrawal migration·repository</td><td>사용자 탈퇴는 <code>DELETE users</code> 한 번으로 member-owned row를 cascade 삭제하고, report usage는 <code>SET NULL</code>로 보존한다.</td><td>이 동작을 유지하려면 관련 user FK·feed 자식 cascade·weekly report usage FK는 남겨야 한다. 전부 제거하려면 앱의 명시적 삭제 순서까지 함께 변경해야 한다.</td></tr>
             </tbody>
           </table>
           <aside>
@@ -117,17 +119,38 @@
             <li>기존 운영 데이터가 있는 상태에서 destructive drop·무검증 타입 변경을 자동 수행하지 않는다.</li>
             <li>migration 실패 시 API 롤아웃을 진행하지 않고, 실패 원인과 적용된 migration 상태를 확인할 수 있어야 한다.</li>
             <li>운영 entity master·publisher·article·admin 계정은 근거와 책임 주체가 정해지기 전까지 기준 seed에 포함하지 않는다.</li>
+            <li>입력 범위·상태 enum·수치 범위 CHECK는 production DDL에서 제거하고, API·worker의 공통 validator가 저장 전에 책임진다.</li>
+            <li>PK는 유지한다. 애플리케이션의 <code>ON CONFLICT</code>가 직접 요구하는 unique key와 동시성 race를 막는 email·idempotency·주차 report unique도 유지한다.</li>
+            <li>FK는 account withdrawal의 사용자 cascade와 feed 자식 cascade, report usage의 <code>SET NULL</code>에 필요한 최소 집합만 유지한다. 나머지 issue/article/master 관계 FK는 앱 쓰기 경계에서 검증한다.</li>
+            <li>인덱스는 실제 worker queue·lease·report 집계·개인화 lookup·account withdrawal 경로에만 둔다. 현재 코드에서 사용되지 않는 만료·catalog·중복 보조 인덱스는 제외한다.</li>
           </ul>
+        </section>
+
+        <section id="constraint-index-policy">
+          <h2>이번 요청의 설계 delta · constraint/index 최소화</h2>
+          <p>아래는 기존 승인 baseline을 보완하는 후속 설계다. SQL 파일을 바로 덮어쓰지 않고, 이 정책 승인 뒤에만 <code>001_schema.sql</code>·<code>003_verify.sql</code>을 갱신한다.</p>
+          <table>
+            <caption>보존·제거 기준</caption>
+            <thead><tr><th scope="col">대상</th><th scope="col">권고</th><th scope="col">근거와 영향</th></tr></thead>
+            <tbody>
+              <tr><td>CHECK 60개</td><td><strong>제거</strong></td><td>API·batch validator가 허용 상태·범위·상태 간 계약을 검사한다. summary JSON은 조회 시 사용하는 함수는 남기고, 저장 제약만 제거한다.</td></tr>
+              <tr><td>PK 29개</td><td><strong>유지</strong></td><td>식별자 조회, composite parent key, <code>ON CONFLICT (id)</code>, 남겨둘 FK의 참조 대상에 필요하다.</td></tr>
+              <tr><td>UNIQUE</td><td><strong>필요한 것만 유지</strong></td><td>article URL, detail/task/embedding/impact upsert, preference upsert, pipeline idempotency, refresh token, 주차 report는 현재 SQL·동시성 계약이 직접 요구한다. feed session 내 issue 중복과 미사용 issue-entity 중복 방어는 앱 책임으로 옮긴다.</td></tr>
+              <tr><td>FK 40개</td><td><strong>12개 안팎으로 축소</strong></td><td><code>users</code>의 member-owned cascade 9개, feed session→batch→item cascade 2개, <code>ai_usage_records.weekly_report_id</code>의 <code>SET NULL</code> 1개를 보존한다. 나머지를 제거하면 orphan 검증·삭제 순서를 앱이 맡는다.</td></tr>
+              <tr><td>인덱스 29개</td><td><strong>16개로 축소</strong></td><td>usage/run, job/run, embedding claim/pending, entity/relation lookup, interaction 최신·기간 조회, report claim/lease, user cascade 경로만 보존한다. feed guest/expiry, 작은 regions, 사용되지 않는 representative/category/region 보조 인덱스는 제외한다.</td></tr>
+            </tbody>
+          </table>
+          <aside><strong>중요한 경계:</strong> unique key나 cascade FK를 삭제하면 단순히 “앱에서 한 번 더 체크”하는 수준이 아니다. 동시 요청에서 중복을 허용하거나, 탈퇴 시 자식 row 삭제를 앱 transaction으로 직접 구현해야 한다. 이 영향까지 승인 범위에 포함한다.</aside>
         </section>
 
         <section id="grilling-state">
           <h2>설계 의사결정 상태 (grilling)</h2>
           <dl>
-            <dt>진행 상태</dt><dd>진행 중</dd>
-            <dt>현재 frontier</dt><dd>없음. 운영 DB가 빈 DB라는 답으로 baseline 경로가 확정되었다.</dd>
-            <dt>확정된 사실</dt><dd>운영 담당자가 SQL을 직접 실행한다. 앱·Compose·migration job은 production DB를 자동 변경하지 않는다. 운영 DB는 빈 DB다.</dd>
-            <dt>미확정 가정</dt><dd>없음. 저장소에 canonical source가 없는 운영 entity·기사·사용자 데이터는 seed에서 제외한다.</dd>
-            <dt>보류된 결정</dt><dd>없음</dd>
+            <dt>진행 상태</dt><dd>완료</dd>
+            <dt>현재 frontier</dt><dd>없음. G4~G6의 constraint/index 최소화 delta까지 사용자 승인으로 확정되었다.</dd>
+            <dt>확정된 사실</dt><dd>운영 담당자가 SQL을 직접 실행한다. 앱·Compose·migration job은 production DB를 자동 변경하지 않는다. 운영 DB는 빈 DB이며, 앱 서버가 유일한 writer다.</dd>
+            <dt>미확정 가정</dt><dd>없음. 실제 production 적용 전에는 운영 담당자가 대상 DB가 빈 DB인지 확인해야 한다.</dd>
+            <dt>보류된 결정</dt><dd>없음. EXPLAIN 근거가 없는 추가 인덱스는 후속 작업으로 보류한다.</dd>
           </dl>
           <table>
             <caption>현재 결정 트리</caption>
@@ -136,6 +159,9 @@
               <tr><td>G1</td><td>SQL을 어떤 DB 상태에 적용할까?</td><td><strong>결정: 빈 DB용 전체 baseline</strong>. 기존 DB용 delta는 이번 범위가 아니다.</td><td>해결됨</td></tr>
               <tr><td>G2</td><td>production SQL 파일을 어떤 단위로 둘까?</td><td><strong>결정: <code>001_schema.sql</code>과 <code>002_seed.sql</code> 분리</strong>. 자동 실행 경로에는 연결하지 않는다.</td><td>해결됨</td></tr>
               <tr><td>G3</td><td>기준 seed에 무엇을 포함할까?</td><td><strong>결정: 저장소에 canonical source가 있는 regions/categories만 포함</strong>. entity master·기사·사용자 데이터는 별도 적재로 둔다.</td><td>해결됨</td></tr>
+              <tr><td>G4</td><td>DB constraint를 어디까지 없앨까?</td><td><strong>결정: CHECK 전부 제거, PK 유지, 앱의 <code>ON CONFLICT</code>·동시성·탈퇴 cascade에 필요한 UNIQUE/FK만 유지</strong>. 전부 제거하면 앱 transaction·race 방어 변경이 추가된다.</td><td>해결됨 · G4-A 승인</td></tr>
+              <tr><td>G5</td><td>UNIQUE와 cascade를 앱 검사로 대체할까?</td><td><strong>결정: 현재 release의 email/idempotency/주차 report/upsert unique와 account withdrawal cascade는 유지</strong>. feed item 중복·미사용 관계 FK만 앱 책임으로 이동한다.</td><td>해결됨 · G5-A 승인</td></tr>
+              <tr><td>G6</td><td>인덱스를 무엇만 남길까?</td><td><strong>결정: 실제 queue·lease·report·personalization·interaction·탈퇴 cascade 경로만 유지</strong>. 사용 근거 없는 인덱스는 제거하고, EXPLAIN 근거 없는 새 인덱스는 추가하지 않는다.</td><td>해결됨 · G6-A 승인</td></tr>
             </tbody>
           </table>
         </section>
@@ -164,26 +190,42 @@
               <label><input type="radio" name="dc04" value="a" /> SQL 실행을 멈추고 schema 검증·로그 확인 후 API 롤아웃을 보류한다.</label>
               <label><input type="radio" name="dc04" value="b" /> 일부 성공해도 API를 먼저 올린다.</label>
             </fieldset>
+            <fieldset>
+              <legend>DC-05 · 이번 최소화안에서 CHECK와 PK는?</legend>
+              <label><input type="radio" name="dc05" value="a" /> CHECK는 앱으로 옮기되 PK는 유지한다.</label>
+              <label><input type="radio" name="dc05" value="b" /> PK까지 제거하고 앱에서 ID 중복을 검사한다.</label>
+            </fieldset>
+            <fieldset>
+              <legend>DC-06 · UNIQUE/FK는 왜 일부 남기는가?</legend>
+              <label><input type="radio" name="dc06" value="a" /> 현재 ON CONFLICT·동시성·탈퇴 cascade 계약에 직접 필요하기 때문이다.</label>
+              <label><input type="radio" name="dc06" value="b" /> DB 제약은 모두 같은 종류라서 전부 제거해도 현재 앱 동작은 같다.</label>
+            </fieldset>
+            <fieldset>
+              <legend>DC-07 · 인덱스 제거 기준은?</legend>
+              <label><input type="radio" name="dc07" value="a" /> 실제 query/worker/삭제 경로 근거가 있는 것만 남긴다.</label>
+              <label><input type="radio" name="dc07" value="b" /> 테이블마다 보조 인덱스를 넉넉히 둔다.</label>
+            </fieldset>
             <button type="button" id="dc-submit">제출</button>
             <output id="dc-result" aria-live="polite" hidden></output>
           </form>
           <script>
             document.getElementById('dc-submit').addEventListener('click', () => {
-              const answers = ['dc01', 'dc02', 'dc03', 'dc04'];
+              const answers = ['dc01', 'dc02', 'dc03', 'dc04', 'dc05', 'dc06', 'dc07'];
               const selected = answers.map((name) => document.querySelector(`input[name="${name}"]:checked`)?.value);
               const result = document.getElementById('dc-result');
               result.hidden = false;
               result.textContent = selected.every((value) => value === 'a')
-                ? '확립: 수동 SQL 적용, schema→seed 순서, 정적 seed 범위, 실패 시 롤아웃 보류를 예측했다.'
-                : '보완 필요: 수동 SQL 적용과 실패 시 롤아웃 보류를 다시 확인한다.';
+                ? '확립: 수동 SQL 적용, schema→seed 순서, 정적 seed 범위, 실패 시 롤아웃 보류, constraint/index 최소화 경계를 예측했다.'
+                : '보완 필요: 수동 SQL 적용·실패 시 롤아웃 보류·PK/필수 unique/FK 보존 경계를 다시 확인한다.';
             });
           </script>
         </section>
 
         <section id="approval-state">
           <h2>설계 승인 상태</h2>
-          <p><strong class="state">설계 승인됨</strong> · 사용자의 “ㄱㄱ” 승인으로 빈 DB용 production DDL·seed SQL 생성을 시작한다.</p>
-          <p>승인 범위: <code>deploy/db/production/001_schema.sql</code>, <code>deploy/db/production/002_seed.sql</code>, 실행 전·후 검증 쿼리와 운영 문서. 자동 migration 연결은 제외한다.</p>
+          <p><strong class="state">승인됨</strong> · 사용자가 2026-09-18 현재 대화에서 “ㄱㄱ”으로 G4-A·G5-A·G6-A를 명시적으로 승인했다.</p>
+          <p>승인 범위: <code>001_schema.sql</code>의 CHECK 전부 제거, PK 전부 유지, 현재 코드의 ON CONFLICT·동시성·탈퇴 cascade에 필요한 UNIQUE/FK 유지, 실제 경로 인덱스 16개 유지, <code>003_verify.sql</code>과 production README 갱신. <code>002_seed.sql</code>의 seed 범위와 자동 migration 제외 정책은 그대로다.</p>
+          <p><strong>구현 상태:</strong> 승인된 범위로 SQL 산출물과 검증 계약을 갱신 중이며, production DB에는 접속하지 않는다.</p>
         </section>
       </article>
     </main>
