@@ -23,7 +23,7 @@ const EXPECTED_FAILURE_STATUSES = {
   '/me/interest-analysis': ['401', '500'],
   '/me/liked-issues': ['400', '401', '500'],
   'get /me/reports': ['401', '500'],
-  'post /me/reports': ['400', '401', '429', '500'],
+  'post /me/reports': ['400', '401', '404', '429', '500', '503'],
   '/me/reports/{reportId}': ['400', '401', '404', '500'],
   '/me/reports/{reportId}/retry': ['400', '401', '404', '409', '429', '500'],
   '/me/onboarding/complete': ['400', '401', '500'],
@@ -36,6 +36,7 @@ const EXPECTED_FAILURE_STATUSES = {
   '/auth/login': ['400', '401', '500'],
   '/auth/refresh': ['401', '403', '500'],
   '/auth/logout': ['403', '500'],
+  '/auth/withdraw': ['400', '401', '403', '429', '503', '500'],
 };
 const EXPECTED_SUCCESS_STATUSES = {
   '/issues/{issueId}/interactions': '200',
@@ -45,6 +46,7 @@ const EXPECTED_SUCCESS_STATUSES = {
   '/auth/login': '200',
   '/auth/refresh': '200',
   '/auth/logout': '204',
+  '/auth/withdraw': '204',
 };
 const requiredFiles = [
   'api/index.ts',
