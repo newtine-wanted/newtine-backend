@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 
-import { canonicalizeEmail } from '@newtine/api/auth/domain/email-address.js';
+import { canonicalizeEmail } from '@newtine/api/auth/domain/emailAddress.js';
 
 export type RateLimitRule = {
   name: string;

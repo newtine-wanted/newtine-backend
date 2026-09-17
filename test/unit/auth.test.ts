@@ -24,7 +24,7 @@ import { LoginUseCase } from '@newtine/api/auth/application/login.usecase.js';
 import { RefreshUseCase } from '@newtine/api/auth/application/refresh.usecase.js';
 import { SessionIssuer } from '@newtine/api/auth/application/session-issuer.js';
 import { SignupUseCase } from '@newtine/api/auth/application/signup.usecase.js';
-import { EmailAddress } from '@newtine/api/auth/domain/email-address.js';
+import { EmailAddress } from '@newtine/api/auth/domain/emailAddress.js';
 import type { AuthenticatedRequest } from '@newtine/api/auth/auth.request.js';
 import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
 import { JwtTokenService } from '@newtine/api/auth/jwt-token.service.js';
