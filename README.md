@@ -145,13 +145,15 @@ NODE_ENV=development DB_HOST=127.0.0.1 node --env-file=.env dist/apps/batch/src/
 | 호스트 Node 프로세스 | 기본 `127.0.0.1` | `3000`     | `127.0.0.1` | `5432`    |
 
 Compose에서 `.env`는 interpolation 입력으로만 사용됩니다. `DB_NAME`, `DB_USER`, `DB_PASSWORD`와
-선택적인 `LOG_LEVEL`, `HTTP_SLOW_THRESHOLD_MS`는 각 서비스의 `environment`에 명시적으로
+선택적인 `LOG_LEVEL`, `HTTP_SLOW_THRESHOLD_MS`, `RATE_LIMIT_*`는 각 서비스의 `environment`에 명시적으로
 전달되며 `.env` 파일 자체는 image에 복사되지 않습니다. API 컨테이너의 `NODE_ENV`는
 `production`, `AUTH_COOKIE_SECURE`는 `true`로 고정하여 `.env.example`의 호스트 개발 설정이
 production runtime에 잘못 전달되지 않게 합니다. 따라서 Docker API는 stdout JSON을 사용하고,
 호스트 Node 실행은 `node --env-file=.env ...`로 개발 설정을 사용할 수 있습니다. `API_PORT`와
 `DB_PORT`는 host에 publish할 포트를 정하고, 컨테이너 내부 API·PostgreSQL 포트는 각각
-`3000`·`5432`로 고정됩니다.
+`3000`·`5432`로 고정됩니다. rate limit 상태는 Cloud Run 인스턴스별 API 프로세스 메모리에만
+있으므로, 인스턴스별 best-effort quota입니다. 수평 확장 시 유효 허용량이 인스턴스 수만큼
+늘어날 수 있고, 재시작·scale-to-zero·revision 교체 시 quota가 초기화됩니다.
 호스트 Node 실행에서는 애플리케이션이 `.env`를 자동으로 읽지 않으므로 셸 환경변수나 Node
 `--env-file` 등으로 직접 주입해야 합니다.
 
@@ -215,6 +217,16 @@ node --env-file=.env dist/apps/api/src/main.js
 | `DB_PASSWORD`             | `postgres`                | 필수                    |
 | `LOG_LEVEL`               | `debug`                   | 기본 `info`             |
 | `HTTP_SLOW_THRESHOLD_MS`  | `1000`                    | 필요에 따라 지정        |
+| `RATE_LIMIT_WINDOW_MS`    | `60000`                   | 공통 quota window(ms)   |
+| `RATE_LIMIT_MAX_REQUESTS` | `120`                     | IP별 공통 window quota  |
+| `RATE_LIMIT_AUTH_MAX_REQUESTS` | `10`                 | signup/login/logout IP quota |
+| `RATE_LIMIT_AUTH_ACCOUNT_MAX_REQUESTS` | `5`          | canonical email account quota |
+| `RATE_LIMIT_REFRESH_MAX_REQUESTS` | `20`             | refresh IP quota        |
+| `RATE_LIMIT_FEED_MAX_REQUESTS` | `30`                 | feed IP quota           |
+| `RATE_LIMIT_SEARCH_MAX_REQUESTS` | `60`              | issue search IP quota   |
+| `RATE_LIMIT_MAX_KEYS`     | `10000`                   | process-local bucket 상한 |
+| `RATE_LIMIT_IDLE_TTL_MS`  | `120000`                  | idle bucket 정리(ms)    |
+| `RATE_LIMIT_TRUST_PROXY_HOPS` | `0`                   | Express trust proxy hop 수; staging 검증 후 지정 |
 | `NAVER_CLIENT_ID`         | 없음                      | 파이프라인 실행 시 필수 |
 | `NAVER_CLIENT_SECRET`     | 없음                      | 파이프라인 실행 시 필수 |
 | `OPENAI_API_KEY`          | 없음                      | 파이프라인 실행 시 필수 |
@@ -267,6 +279,7 @@ Client ID와 Client Secret을 직접 입력하세요. 예제에는 실제 값을
 | `npm test`                                                     | unit·integration 테스트                        |
 | `npm run test:contracts`                                       | 생성 계약 테스트                               |
 | `npm run test:smoke`                                           | 빌드된 API의 실제 HTTP 동작 확인               |
+| `npm run test:smoke:rate-limit`                               | parser 전 429·health bypass·account limit·trailing slash·forwarded header 우회 방지 확인 |
 | `npm run test:smoke:compose`                                  | fresh Compose 인증 smoke 확인                  |
 | `npm run test:smoke:compose:data`                             | disposable PostgreSQL 이슈 데이터·회원/비회원 cursor smoke |
 | `npm run contracts:all`                                        | SDK·e2e·OpenAPI 생성                           |

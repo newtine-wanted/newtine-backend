@@ -8,7 +8,7 @@ import {
   type TransactionManager,
 } from '@newtine/core';
 
-import { EmailAddress } from '../domain/email-address.js';
+import { EmailAddress } from '../domain/emailAddress.js';
 import { assertPasswordLength, PasswordService } from '../password.service.js';
 import { invalidCredentials } from './auth.errors.js';
 import type { AuthCredentialsInput, AuthSessionResult } from './auth.types.js';

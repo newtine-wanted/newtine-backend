@@ -8,6 +8,13 @@ import { exceptionDiagnostic, resolveHttpSlowThreshold } from '@newtine/core';
 import { ApiModule } from '@newtine/api/api.module.js';
 import { bodyParserExceptionMiddleware } from '@newtine/api/common/middleware/bodyParser.middleware.js';
 import { HttpRequestContextMiddleware } from '@newtine/api/common/middleware/httpRequestContext.middleware.js';
+import {
+  createAuthAccountRateLimitMiddleware,
+  createRateLimitMiddleware,
+  InMemoryRateLimitStore,
+  type RateLimitRejectionEvent,
+} from '@newtine/api/common/middleware/rateLimit.middleware.js';
+import { createRateLimitOptions } from '@newtine/api/common/middleware/rateLimit.options.js';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(ApiModule, {
@@ -20,14 +27,37 @@ async function bootstrap(): Promise<void> {
     app.useLogger(app.get(NestPinoLogger));
     pinoLogger = await app.resolve(PinoLogger);
     pinoLogger?.setContext('ApiBootstrap');
+    const rateLimitOptions = createRateLimitOptions();
+    app.set('trust proxy', rateLimitOptions.trustProxyHops);
     const httpRequestContextMiddleware = new HttpRequestContextMiddleware(
       pinoLogger,
       resolveHttpSlowThreshold(),
     );
     app.use(httpRequestContextMiddleware.use.bind(httpRequestContextMiddleware));
+    const rateLimitStore = new InMemoryRateLimitStore(
+      rateLimitOptions.maxKeys,
+      rateLimitOptions.idleTtlMs,
+    );
+    const rateLimitObserver = (event: RateLimitRejectionEvent): void => {
+      pinoLogger?.warn(
+        { event: 'http.rate_limited', status: 429, ...event },
+        'HTTP request rate limited',
+      );
+    };
+    app.use(
+      createRateLimitMiddleware(rateLimitStore, rateLimitOptions, Date.now, rateLimitObserver),
+    );
     app.useBodyParser('json');
     app.useBodyParser('urlencoded', { extended: true });
     app.use(bodyParserExceptionMiddleware);
+    app.use(
+      createAuthAccountRateLimitMiddleware(
+        rateLimitStore,
+        rateLimitOptions,
+        Date.now,
+        rateLimitObserver,
+      ),
+    );
     app.enableShutdownHooks();
 
     const port = Number(process.env.API_PORT ?? 3000);

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="승인된 백엔드 공통 rate limit 설계를 코드·테스트·운영 검증으로 구현하는 기록" />
+    <meta name="audience" content="백엔드 개발자와 운영 담당자" />
+    <meta name="problem" content="외부 WAF·gateway 없이 API가 인증 전·공개 요청을 무제한 처리하는 위험을 해소하는 구현과 검증" />
+    <meta name="core-flow" content="설계 baseline → limiter 구현 → early wiring·endpoint override → 테스트·빌드·smoke → 잔여 위험 점검" />
+    <title>백엔드 공통 Rate Limit 구현 관리</title>
+    <style>
+      body { max-width: 1040px; margin: 36px auto; padding: 0 24px; color: #1f2d3d; font: 16px/1.7 system-ui, sans-serif; }
+      header, section { margin: 28px 0; }
+      nav { display: flex; flex-wrap: wrap; gap: 16px; border-block: 1px solid #ccd5df; padding: 12px 0; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ccd5df; padding: 10px; text-align: left; vertical-align: top; }
+      th { background: #f3f6f8; }
+      figure, aside, pre { background: #f3f6f8; padding: 14px; }
+      code { background: #eef2f5; padding: 1px 4px; }
+      .state { font-weight: 700; color: #1f7a4d; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>백엔드 공통 Rate Limit 구현 관리</h1>
+      <p>구현 제어 기록 · High-risk · <span class="state">구현 완료 · 로컬 검증 완료</span> · 2026-09-17 KST</p>
+      <dl>
+        <dt>목적</dt><dd>승인된 백엔드 공통 rate limit 설계를 코드·테스트·운영 검증으로 구현한다.</dd>
+        <dt>사용자</dt><dd>백엔드 개발자와 운영 담당자</dd>
+        <dt>문제</dt><dd>외부 WAF·gateway 없이 API가 인증 전·공개 요청을 무제한 처리한다.</dd>
+        <dt>핵심 흐름</dt><dd>설계 baseline → limiter 구현 → early wiring·endpoint override → 테스트·빌드·smoke → 잔여 위험 점검</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#baseline-reference">baseline</a>
+      <a href="#current-implementation">현재 구현</a>
+      <a href="#boundaries">경계·불변 조건</a>
+      <a href="#issue-register">이슈</a>
+      <a href="#verification-evidence">검증</a>
+      <a href="#residual-risks">잔여 위험</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="baseline-reference">
+          <h2>승인된 baseline</h2>
+          <p><a href="backend-rate-limit-design.html">백엔드 공통 Rate Limit 설계</a>의 G1-A·G2-B·G3-A를 기준으로 한다. 사용자는 2026-09-17 KST “ㅇㅇ 해”로 구현을 승인했다.</p>
+          <dl>
+            <dt>G1-A</dt><dd>Cloud Run 인스턴스별 bounded in-memory token bucket. DB·Redis shared quota 없이 인스턴스별 best-effort로 동작하며 lifecycle 종료 시 상태 초기화.</dd>
+            <dt>G2-B</dt><dd>body parser 전 IP 전역 limiter와 auth·account·guest feed의 더 엄격한 override. raw forwarded header는 직접 파싱하지 않고 설정된 trust proxy hop만 반영.</dd>
+            <dt>G3-A</dt><dd><code>/health</code> 명시적 예외. 초과 시 429 ProblemDetails와 <code>Retry-After</code>.</dd>
+          </dl>
+        </section>
+
+        <section id="current-implementation">
+          <h2>현재 구현</h2>
+          <p><code>apps/api/src/common/middleware/rateLimit.middleware.ts</code>에 Cloud Run 인스턴스별 bounded process-local token bucket과 공통 Express middleware를 구현하고, <code>apps/api/src/main.ts</code>에서 request context 다음·body parser 전에 등록했다. method와 canonical path(trailing slash 제거)로 endpoint override를 선택하며, body parser 뒤에는 login/signup의 canonical email SHA-256 account bucket을 추가했다. DB·Redis에는 rate limit 상태를 기록하지 않는다. 이번 구현은 승인된 G1-A·G2-B·G3-A 범위 안에서 확인된 경계 이슈를 보완했다.</p>
+          <ul>
+            <li>전역 기본값은 IP별 분당 120회이며, signup/login/logout 10회, refresh 20회, <code>GET /feed</code> 30회, <code>POST /issues/search</code> 60회로 더 엄격한 override를 둔다. 모든 수치는 환경 변수로 조정한다.</li>
+            <li><code>/health</code>는 명시적으로 bypass한다. 제한 초과는 downstream parser·guard·controller·DB에 진입하지 않고 429 ProblemDetails, <code>Retry-After</code>, <code>RateLimit-*</code> 헤더를 반환한다.</li>
+            <li>Express의 <code>request.ip</code>를 사용한다. 기본 <code>RATE_LIMIT_TRUST_PROXY_HOPS=0</code>에서는 직접 peer IP만 사용하고, 설정된 hop 수가 있을 때만 Express trust proxy 결과를 반영한다. raw forwarded header는 직접 파싱하지 않는다. bucket map은 <code>RATE_LIMIT_MAX_KEYS</code>와 idle TTL로 bounded하며 eviction·429를 민감정보 없이 구조화해 기록한다.</li>
+            <li><code>scripts/rate-limit-smoke.mjs</code>와 <code>test:smoke:rate-limit</code>로 실제 bootstrap의 parser 전 global/endpoint/account 429, trailing slash 경로, forwarded-header 우회 방지, health bypass를 회귀 검증한다.</li>
+          </ul>
+          <figure>
+            <pre>request context → early rate limiter → body parser → Nest auth/route → service/DB
+                                  ├─ /health: bypass
+                                  └─ exceeded: 429 + Retry-After, no downstream side effect</pre>
+            <figcaption>구현 후 확인할 요청 실행 순서의 텍스트 등가.</figcaption>
+          </figure>
+        </section>
+
+        <section id="boundaries">
+          <h2>영향 경계와 불변 조건</h2>
+          <ul>
+            <li>제한된 요청은 body parsing, Argon2, JWT DB 조회, guest <code>feed_sessions</code> insert 전에 종료한다.</li>
+            <li>인스턴스별로 Express가 계산한 정규화 IP를 key로 사용하며 raw forwarded header를 직접 신뢰하지 않는다. endpoint override는 trailing slash 변형에서도 동일하게 적용한다.</li>
+            <li>bounded in-memory 상태는 key 수·idle TTL을 넘어서 무한히 증가하지 않는다.</li>
+            <li><code>/health</code>는 liveness probe를 위해 제한하지 않는다.</li>
+            <li>429는 <code>application/problem+json</code>, <code>RATE_LIMITED</code>, <code>Retry-After</code>를 제공하고 downstream side effect를 만들지 않는다.</li>
+            <li>다중 인스턴스 전역 shared quota와 DB·Redis 전환은 승인 범위 밖이다. Cloud Run scale-out에서는 인스턴스별 quota가 독립적으로 동작한다.</li>
+          </ul>
+        </section>
+
+        <section id="issue-register">
+          <h2>이슈 기록</h2>
+          <table>
+            <caption>구현 이슈와 상태</caption>
+            <thead><tr><th scope="col">ID</th><th scope="col">상태</th><th scope="col">내용</th><th scope="col">조치·근거</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">RL-IMPL-001</th><td>해결</td><td>승인 baseline의 process-local limiter·early wiring·endpoint override 구현</td><td>focused unit, 전체 unit, integration, contract, lint, format, typecheck, build, 기본 API smoke와 rate-limit HTTP smoke 통과</td></tr>
+              <tr><th scope="row">RL-OPS-001</th><td>잔여 위험</td><td>Cloud Run 수평 확장 시 process-local quota가 인스턴스 간 공유되지 않아 유효 허용량이 늘어날 수 있고, 재시작·scale-to-zero·revision 교체 시 초기화된다.</td><td>현재 per-instance best-effort 계약으로 수용한다. 전역 quota가 필요해지는 경우에만 공유 저장소와 fail-open/closed 정책을 별도 재승인한다.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="verification-evidence">
+          <h2>검증 증거와 공백</h2>
+          <dl>
+            <dt>계획</dt><dd>token bucket 경계·설정 검증·TTL cleanup unit, parser 전 HTTP burst integration, 429 header/ProblemDetails contract, lint·typecheck·build·smoke.</dd>
+            <dt>현재 증거</dt><dd>rate-limit unit 7/7, 전체 unit 44 suites·224 tests passed, integration 2 suites passed·3 suites skipped·11 tests passed·8 skipped, contract 5/5 passed, format·lint·typecheck·API/전체 build passed. 기본 API smoke와 제한 설정을 낮춘 HTTP smoke도 passed.</dd>
+            <dt>핵심 HTTP 증거</dt><dd>동일 email의 두 번째 auth 요청이 trailing slash 경로에서도 account 429가 되었고, malformed JSON 요청이 body parser 400보다 먼저 endpoint/global 429가 되었으며, 임의 <code>X-Forwarded-For</code>로 endpoint bucket을 우회하지 못했고, global quota 소진 뒤에도 <code>GET /health</code>는 200이었다.</dd>
+            <dt>현재 공백</dt><dd>실제 운영 트래픽 기반 quota tuning, 다중 API 인스턴스의 shared quota, Cloud Run ingress의 실제 proxy hop 수 검증과 운영 설정, Prometheus 같은 별도 metrics collector는 이번 범위에서 검증·추가하지 않았다.</dd>
+          </dl>
+        </section>
+
+        <section id="residual-risks">
+          <h2>잔여 위험</h2>
+          <ul>
+            <li>per-instance limiter는 lifecycle 종료 시 초기화되고 Cloud Run 다중 인스턴스에서 quota가 공유되지 않는다.</li>
+            <li>정확한 quota 수치는 실제 트래픽·Argon2 비용·DB p95 측정 후 운영 조정이 필요하다.</li>
+            <li>현재 구현 범위에서는 외부 gateway·WAF·Redis를 추가하지 않는다. rate-limit 429는 구조화 로그와 표준 응답 헤더로 관찰하며, 별도 metrics collector 연결은 후속 운영 항목이다.</li>
+          </ul>
+        </section>
+
+        <section id="implementation-control-state">
+          <h2>구현 제어 상태</h2>
+          <p>기술 상태: 구현 완료·로컬 검증 완료. 설계 delta: Cloud Run per-instance 경계와 명시적 trust proxy hop 설정을 운영 조건에 반영했으며 DB·Redis shared state는 추가하지 않았다. 구현 이해 점검: 승인된 설계의 self-check로 제공됨. 다음 행동: branch diff review 후 merge 여부를 결정하고, 배포 전 운영 환경에서 per-instance 전제·quota tuning·trust proxy hop·관측 연결을 확인한다.</p>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>
