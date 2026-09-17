@@ -54,10 +54,7 @@ export class IssueFeedService {
 
   async createSession(ownerInput: FeedOwnerInput): Promise<FeedSessionResult> {
     const owner = normalizeOwner(ownerInput);
-    const session = await this.repository.createFeedSession(owner, new Date(), {
-      candidateBudget: this.candidateBudget,
-      highScoreThreshold: this.highScoreThreshold,
-    });
+    const session = await this.createFeedSession(owner);
     return {
       sessionId: session.id,
       expiresAt: session.expiresAt,
@@ -72,18 +69,22 @@ export class IssueFeedService {
 
   async getFeed(ownerInput: FeedOwnerInput, cursor?: FeedCursorPosition): Promise<FeedPageResult> {
     const owner = normalizeOwner(ownerInput);
-    const position =
-      cursor ??
-      (await this.repository.createFeedSession(owner, new Date(), {
-        candidateBudget: this.candidateBudget,
-        highScoreThreshold: this.highScoreThreshold,
-      }));
+    const position = cursor ?? (await this.createFeedSession(owner));
     const page = await this.getBatchPage({
       owner,
       sessionId: 'sessionId' in position ? position.sessionId : position.id,
       batchNo: 'sessionId' in position ? position.batchNo : 0,
     });
     return { ...page.batch, expiresAt: page.expiresAt };
+  }
+
+  private createFeedSession(owner: FeedOwner): Promise<FeedSessionRecord> {
+    return this.transactionManager.execute(() =>
+      this.repository.createFeedSession(owner, new Date(), {
+        candidateBudget: this.candidateBudget,
+        highScoreThreshold: this.highScoreThreshold,
+      }),
+    );
   }
 
   private async getBatchPage(
