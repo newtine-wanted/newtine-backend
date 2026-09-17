@@ -214,8 +214,10 @@ export class ReportWorker implements OnModuleDestroy {
   ): Promise<ReportProviderResult<T>> {
     if (signal?.aborted || this.stopped) throw new ReportWorkerError('INTERRUPTED');
     const usageStart: ReportUsageStart = {
+      userId: claim.userId,
       reportId: claim.id,
       attempt: claim.attempt,
+      leaseToken: claim.leaseToken,
       purpose,
       model: this.configuration.model,
       promptVersion: REPORT_PROMPT_VERSION,

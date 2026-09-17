@@ -15,29 +15,50 @@ export class MikroOrmAiUsageRepository implements AiUsageRepository {
 
   async beginReport(input: ReportUsageStart): Promise<UuidV7> {
     const id = generateUuidV7();
-    const rows = await executeReportSql<{ id: string }[]>(
-      this.entityManager,
-      `insert into ai_usage_records
-        (id, weekly_report_id, run_attempt, operation, purpose, prompt_version,
-         prompt_hash, provider, status, model, started_at, created_at)
-       select $1, r.id, $3, 'LLM', $4, $5, $6, 'openai', 'RUNNING', $7, $8, $8
-         from weekly_reports r
-        where r.id = $2 and r.status = 'RUNNING' and r.attempt_count = $3
-       for share of r
-       returning id`,
-      [
-        id,
-        input.reportId,
-        input.attempt,
-        input.purpose,
-        input.promptVersion,
-        input.promptHash,
-        input.model,
-        input.startedAt,
-      ],
-    );
-    if (rows.length !== 1) throw new ReportException('STALE_CLAIM');
-    return id;
+    return this.entityManager.transactional(async (em) => {
+      const userRows = await executeReportSql<{ id: string }[]>(
+        em,
+        'select id from users where id = $1::uuid for key share',
+        [input.userId],
+      );
+      if (userRows.length !== 1) throw new ReportException('STALE_CLAIM');
+
+      const reportRows = await executeReportSql<{ id: string }[]>(
+        em,
+        `select r.id
+           from weekly_reports r
+          where r.id = $2::uuid
+            and r.user_id = $1::uuid
+            and r.status = 'RUNNING'
+            and r.attempt_count = $3
+            and r.lease_token = $4::uuid
+            and r.lease_expires_at > clock_timestamp()
+          for share of r`,
+        [input.userId, input.reportId, input.attempt, input.leaseToken],
+      );
+      if (reportRows.length !== 1) throw new ReportException('STALE_CLAIM');
+
+      const usageRows = await executeReportSql<{ id: string }[]>(
+        em,
+        `insert into ai_usage_records
+          (id, weekly_report_id, run_attempt, operation, purpose, prompt_version,
+           prompt_hash, provider, status, model, started_at, created_at)
+        values ($1::uuid, $2::uuid, $3, 'LLM', $4, $5, $6, 'openai', 'RUNNING', $7, $8, $8)
+        returning id`,
+        [
+          id,
+          input.reportId,
+          input.attempt,
+          input.purpose,
+          input.promptVersion,
+          input.promptHash,
+          input.model,
+          input.startedAt,
+        ],
+      );
+      if (usageRows.length !== 1) throw new ReportException('STALE_CLAIM');
+      return id;
+    });
   }
 
   async finish(id: UuidV7, result: ReportUsageFinish): Promise<void> {
