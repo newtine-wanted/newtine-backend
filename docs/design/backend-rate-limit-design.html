@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="외부 WAF·gateway 없이 API 서버 자체에서 공통 요청 빈도 제한을 적용하는 설계" />
+    <meta name="audience" content="백엔드 개발자와 운영 담당자" />
+    <meta name="problem" content="공개·인증 전 endpoint와 guest feed가 앱 수준 quota 없이 비용 큰 처리와 DB session 생성을 수행하는 문제" />
+    <meta name="core-flow" content="클라이언트 요청 → 조기 admission limiter → body parser·인증 → controller → 429 또는 정상 응답" />
+    <title>백엔드 공통 Rate Limit 설계</title>
+    <style>
+      body { max-width: 1040px; margin: 36px auto; padding: 0 24px; color: #1f2d3d; font: 16px/1.7 system-ui, sans-serif; }
+      header, section { margin: 28px 0; }
+      nav { display: flex; flex-wrap: wrap; gap: 16px; border-block: 1px solid #ccd5df; padding: 12px 0; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ccd5df; padding: 10px; text-align: left; vertical-align: top; }
+      th { background: #f3f6f8; }
+      figure, aside, pre { background: #f3f6f8; padding: 14px; }
+      code { background: #eef2f5; padding: 1px 4px; }
+      .state { font-weight: 700; color: #9a4a00; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>백엔드 공통 Rate Limit 설계</h1>
+      <p>설계 기준선 · High-risk · <span class="state">설계 승인됨</span> · 2026-09-17 KST</p>
+      <dl>
+        <dt>목적</dt>
+        <dd>외부 WAF·gateway 없이 API 서버 자체에서 공통 요청 빈도 제한을 적용한다.</dd>
+        <dt>사용자</dt>
+        <dd>백엔드 개발자와 운영 담당자</dd>
+        <dt>문제</dt>
+        <dd>현재 앱에 전역 limiter가 없어서 인증 전 endpoint와 공개 feed가 무제한으로 비용 큰 작업에 도달한다.</dd>
+        <dt>핵심 흐름</dt>
+        <dd>클라이언트 요청 → 조기 admission limiter → body parser·인증 → controller → 429 또는 정상 응답</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#scope">범위</a>
+      <a href="#evidence">현재 근거</a>
+      <a href="#decisions">설계 결정</a>
+      <a href="#resolved-design">확정 설계</a>
+      <a href="#grilling-state">grilling</a>
+      <a href="#control-check">이해 점검</a>
+      <a href="#approval-state">승인 상태</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="scope">
+          <h2>목표와 범위</h2>
+          <dl>
+            <dt>목표</dt>
+            <dd>모든 HTTP 요청이 body parsing·인증·DB·도메인 처리에 들어가기 전에 공통 quota를 통과하도록 한다.</dd>
+            <dt>포함</dt>
+            <dd>public, auth, guest/member feed, user, admin route의 공통 admission 제한과 429 응답·Retry-After·관측성·회귀 검증.</dd>
+            <dt>별도 override</dt>
+            <dd>로그인·가입·refresh·guest feed처럼 abuse 비용이 큰 경로는 공통 limit보다 엄격한 제한을 둘 수 있다.</dd>
+            <dt>제외</dt>
+            <dd>Batch worker의 HTTP가 아닌 작업, 외부 WAF·gateway 구축, 제품별 최종 quota 수치의 근거 없는 확정.</dd>
+          </dl>
+          <figure>
+            <pre>요청
+  → [early app admission limiter]
+      ├─ 초과: 429 + ProblemDetails + Retry-After
+      └─ 허용: body parser → Nest guard/auth → controller/service/DB</pre>
+            <figcaption>본문 크기 제한과 rate limit은 별개다. limiter는 가능한 한 body parser보다 앞에서 동작해야 한다.</figcaption>
+          </figure>
+        </section>
+
+        <section id="evidence">
+          <h2>현재 확인된 근거</h2>
+          <ul>
+            <li><code>apps/api/src/main.ts</code>에는 request context와 body parser만 등록되어 있다.</li>
+            <li><code>apps/api/src/api.module.ts</code>에는 전역 예외 필터만 있고 limiter guard/interceptor가 없다.</li>
+            <li><code>package.json</code>과 Compose에는 rate-limit 저장소·공유 상태 구성이 없다.</li>
+            <li><code>POST /me/reports/:reportId/retry</code>의 60초 cooldown은 서버 공통 요청 제한이 아니다.</li>
+            <li><code>/feed</code>의 cursor 없는 요청은 feed session을 새로 생성하므로 guest abuse의 admission 제한이 중요하다.</li>
+          </ul>
+        </section>
+
+        <section id="decisions">
+          <h2>설계 결정 기록</h2>
+          <table>
+            <caption>사용자 선택이 반영된 의사결정</caption>
+            <thead>
+              <tr><th scope="col">ID</th><th scope="col">결정</th><th scope="col">확인된 사실·가정</th><th scope="col">권고</th><th scope="col">상태</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">G1</th>
+                <td>제한 상태 저장소와 배포 단위</td>
+                <td>현재 Compose는 API 1개와 PostgreSQL 1개다. API가 여러 인스턴스로 늘어나면 process-local quota는 합산되지 않는다.</td>
+                <td>사용자 선택 G1-A. Cloud Run 인스턴스마다 bounded in-memory limiter를 독립적으로 둔다. DB·Redis shared quota는 사용하지 않으며, scale-out 시 인스턴스 수만큼 유효 허용량이 늘어날 수 있고 재시작·scale-to-zero·revision 교체 시 quota는 초기화된다.</td>
+                <td>선택 완료 · G1-A</td>
+              </tr>
+              <tr>
+                <th scope="row">G2</th>
+                <td>식별자와 적용 계층</td>
+                <td>인증 전 요청은 userId를 알 수 없다. 직접 연결 기본값에서는 외부 proxy를 신뢰하지 않으며, 운영 토폴로지에 따라 trust proxy hop 수를 별도 검증해야 한다.</td>
+                <td>사용자 선택 G2-B. body parser보다 앞선 전역 IP limiter와 인증·계정·guest feed의 더 엄격한 endpoint override를 둔다. raw forwarded header는 직접 파싱하지 않고, <code>RATE_LIMIT_TRUST_PROXY_HOPS=0</code> 기본값에서 Express가 계산한 직접 peer IP만 사용한다.</td>
+                <td>선택 완료 · G2-B</td>
+              </tr>
+              <tr>
+                <th scope="row">G3</th>
+                <td>health 예외와 실패 정책</td>
+                <td>Compose healthcheck는 <code>127.0.0.1/health</code>를 호출한다. 실제 운영 health 공개 범위는 별도 확인이 필요하다.</td>
+                <td>사용자 선택 G3-A. <code>/health</code>는 전역 limiter에서 명시적으로 제외하고, 제한 초과는 <code>application/problem+json</code>과 <code>Retry-After</code>를 반환한다.</td>
+                <td>선택 완료 · G3-A</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="resolved-design">
+          <h2>확정 설계</h2>
+          <dl>
+            <dt>상태 저장</dt>
+            <dd>Cloud Run 인스턴스별 process-local bounded in-memory token bucket을 사용한다. DB·Redis에는 기록하지 않는다. key 수와 idle entry 수를 상한·TTL cleanup으로 제한하며, 인스턴스 수가 늘면 quota가 공유되지 않고 재시작·scale-to-zero·revision 교체 시 상태가 초기화된다는 운영 위험을 기록한다.</dd>
+            <dt>조기 전역 경계</dt>
+            <dd><code>main.ts</code>에서 request context보다 앞서 또는 최소한 body parser보다 앞서 IP 기반 admission limiter를 실행한다. 초과 요청은 body parsing·인증·controller·DB에 진입하지 않는다.</dd>
+            <dt>보조 제한</dt>
+            <dd>전역 IP quota 위에 로그인·가입·refresh와 guest feed에 더 엄격한 endpoint/account 또는 guest-key 제한을 둔다. 인증 전 요청도 전역 IP quota로 먼저 보호한다.</dd>
+            <dt>key 정책</dt>
+            <dd>Express가 계산한 <code>request.ip</code>를 사용한다. 기본 <code>RATE_LIMIT_TRUST_PROXY_HOPS=0</code>에서는 직접 peer IP이며, proxy hop 수를 운영 환경에서 명시한 경우에만 해당 trust 설정을 통해 proxy 경로의 원주소를 반영한다. raw <code>X-Forwarded-For</code>는 limiter가 직접 파싱·신뢰하지 않는다.</dd>
+            <dt>health</dt>
+            <dd><code>GET /health</code>는 liveness probe를 위해 명시적으로 예외 처리한다. 나머지 HTTP operation은 공통 정책 또는 더 엄격한 override를 가져야 한다.</dd>
+            <dt>응답·관측</dt>
+            <dd>제한 시 <code>429</code>, <code>RATE_LIMITED</code>, <code>application/problem+json</code>, <code>Retry-After</code>를 일관되게 반환하고, 표준 <code>RateLimit-*</code> 헤더와 민감정보 없는 구조화 429 로그로 rule·route·key cardinality·eviction을 관찰한다. 별도 metrics collector는 현재 범위 밖이다.</dd>
+          </dl>
+          <figure>
+            <pre>요청
+  → IP normalize → bounded token bucket
+      ├─ /health: 명시적 예외 → body parser → controller
+      ├─ quota 초과: 429 + Retry-After (side effect 없음)
+      └─ 허용: body parser → auth/user override → controller/service/DB
+
+재시작·scale-to-zero·revision 교체: 해당 인스턴스의 process-local counter 초기화
+수평 확장: 인스턴스별 quota가 독립적으로 적용됨; shared store 전환 없이는 전역 quota로 주장하지 않음</pre>
+            <figcaption>Cloud Run 인스턴스별 경계와 요청 admission 순서의 텍스트 등가.</figcaption>
+          </figure>
+          <h3>불변 조건과 실패·복구</h3>
+          <ul>
+            <li>제한된 요청은 JSON parsing, Argon2, JWT 조회, guest <code>feed_sessions</code> insert보다 먼저 종료한다.</li>
+            <li>사용자 입력이나 raw forwarded header로 다른 client key를 임의로 선택할 수 없다. proxy 신뢰 hop 수는 명시적 운영 설정으로만 변경한다.</li>
+            <li>bounded map은 요청량에 따라 무한히 증가하지 않으며 idle key는 TTL cleanup 또는 eviction으로 제거한다.</li>
+            <li>인스턴스별 in-memory 상태는 재시작·scale-to-zero·revision 교체 시 사라진다. 이는 장애 시 fail-open 정책이 아니라 선택된 Cloud Run per-instance 모델의 잔여 위험이다.</li>
+            <li>quota 수치와 endpoint override는 환경 설정으로 조정하되, 안전하지 않은 0·음수·비유한 값은 startup에서 거부하거나 안전한 기본값으로 정규화한다.</li>
+          </ul>
+          <h3>검증 계획</h3>
+          <ol>
+            <li>unit: token bucket 경계, burst, refill, zero/negative/maximum 설정, key normalization, TTL cleanup.</li>
+            <li>HTTP integration: <code>/auth/login</code>, <code>/auth/signup</code>, <code>/feed</code>, <code>/issues/search</code> burst에서 429가 parser·controller·DB보다 먼저 발생하는지 확인.</li>
+            <li>HTTP contract: 429 ProblemDetails와 <code>Retry-After</code>, <code>/health</code> 예외, route override를 확인.</li>
+            <li>운영 smoke: 재시작·scale-to-zero 시 counter 초기화, scale-out 시 per-instance 동작, 메모리 상한·429 metric·로그 sampling을 확인.</li>
+          </ol>
+          <aside>수평 확장·다중 리전에서 동일 quota가 필요해지는 순간 현재 per-instance 범위는 충분하지 않다. 그때도 DB·Redis 도입은 별도 요구사항·설계 승인으로 결정해야 하며, fail-open/fail-closed 정책도 함께 정한다.</aside>
+        </section>
+
+        <section id="grilling-state">
+          <h2>설계 의사결정 질문 (grilling)</h2>
+          <dl>
+            <dt>진행 상태</dt><dd>완료</dd>
+            <dt>범위</dt><dd>G1 저장소·배포 단위 → G2 key·계층 → G3 health·실패·응답 계약</dd>
+            <dt>현재 frontier</dt><dd>없음</dd>
+            <dt>해결된 결정</dt><dd>G1-A · G2-B · G3-A. 사용자가 2026-09-17 KST에 “권고대로 ㄱ”으로 선택했다.</dd>
+            <dt>보류 branch</dt><dd>Cloud Run 수평 확장 시 전역 quota 보장과 공유 저장소 전환은 현재 per-instance 범위 밖으로 보류한다.</dd>
+            <dt>중요 가정</dt><dd>백엔드 프로세스가 최종 방어선이며 외부 WAF·gateway quota는 사용하지 않는다.</dd>
+          </dl>
+        </section>
+
+        <section id="design-control-state">
+          <h2>설계 이해·통제 점검</h2>
+          <p>상태: 미실시. 아래 문항은 설계 선택과 별개의 비차단 self-check이며, 브라우저 결과는 Codex에 자동 전달되지 않는다.</p>
+          <table>
+            <caption>설계 이해·통제 coverage ledger</caption>
+            <thead><tr><th scope="col">축</th><th scope="col">문항</th><th scope="col">이유</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">목표·범위</th><td>DC1</td><td>parser 전 admission 경계의 목적 확인</td></tr>
+              <tr><th scope="row">결정·불변 조건</th><td>DC2, DC3</td><td>IP key와 process-local 수명·상한 확인</td></tr>
+              <tr><th scope="row">경계·상태</th><td>DC4, DC5</td><td>guest session 생성 전 차단과 health 예외 확인</td></tr>
+              <tr><th scope="row">실패·복구·외부 효과</th><td>DC6</td><td>429 side effect와 복구 정보 확인</td></tr>
+              <tr><th scope="row">운영·검증·잔여 위험</th><td>DC7</td><td>per-instance 가정과 필요한 검증 확인</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="control-check">
+          <h2>설계 이해·통제 점검 문항</h2>
+          <p id="control-progress" aria-live="polite">1 / 7 · 답변 0 / 7</p>
+          <div class="control-card">
+            <fieldset>
+              <legend>DC1 · 큰 JSON 요청이 <code>/issues/search</code>로 들어오면 가장 먼저 일어나는 일은?</legend>
+              <label><input type="radio" name="dc1" value="a" /> IP quota를 확인하고 초과면 body parser 전에 429로 종료한다.</label>
+              <label><input type="radio" name="dc1" value="b" /> body parser가 JSON을 모두 읽은 다음 Nest guard에서 제한한다.</label>
+              <label><input type="radio" name="dc1" value="c" /> public search는 공통 제한 대상이 아니므로 controller까지 통과시킨다.</label>
+            </fieldset>
+            <button type="button" class="control-submit">답변 제출</button>
+            <div class="control-result" hidden role="status"><strong class="control-status"></strong><p class="control-explanation"></p><p class="control-next"></p></div>
+          </div>
+          <div class="control-card" hidden>
+            <fieldset>
+              <legend>DC2 · 직접 연결 요청의 제한 key로 사용하면 안 되는 값은?</legend>
+              <label><input type="radio" name="dc2" value="a" /> socket/request IP를 정규화한 값</label>
+              <label><input type="radio" name="dc2" value="b" /> 인증 후 principal userId와 IP를 조합한 보조 key</label>
+              <label><input type="radio" name="dc2" value="c" /> 검증되지 않은 <code>X-Forwarded-For</code>의 첫 번째 주소</label>
+            </fieldset>
+            <button type="button" class="control-submit">답변 제출</button>
+            <div class="control-result" hidden role="status"><strong class="control-status"></strong><p class="control-explanation"></p><p class="control-next"></p></div>
+          </div>
+          <div class="control-card" hidden>
+            <fieldset>
+              <legend>DC3 · 현재 G1-A의 process-local limiter에 대한 설명으로 맞는 것은?</legend>
+              <label><input type="radio" name="dc3" value="a" /> API 재시작 시 counter가 초기화되며, 다중 인스턴스 전체 quota로 주장할 수 없다.</label>
+              <label><input type="radio" name="dc3" value="b" /> PostgreSQL이 자동으로 모든 API 프로세스의 counter를 공유한다.</label>
+              <label><input type="radio" name="dc3" value="c" /> 인스턴스가 늘어나도 각 인스턴스 quota의 합이 공통 quota가 된다.</label>
+            </fieldset>
+            <button type="button" class="control-submit">답변 제출</button>
+            <div class="control-result" hidden role="status"><strong class="control-status"></strong><p class="control-explanation"></p><p class="control-next"></p></div>
+          </div>
+          <div class="control-card" hidden>
+            <fieldset>
+              <legend>DC4 · 쿠키 없는 guest가 <code>/feed</code> 첫 페이지를 반복 요청할 때 보호해야 하는 지점은?</legend>
+              <label><input type="radio" name="dc4" value="a" /> 전역 IP limiter가 session insert보다 먼저 초과 요청을 차단한다.</label>
+              <label><input type="radio" name="dc4" value="b" /> guest cookie가 없으므로 limiter도 key를 만들 수 없다.</label>
+              <label><input type="radio" name="dc4" value="c" /> session insert 후에만 제한해 실제 사용량을 정확히 센다.</label>
+            </fieldset>
+            <button type="button" class="control-submit">답변 제출</button>
+            <div class="control-result" hidden role="status"><strong class="control-status"></strong><p class="control-explanation"></p><p class="control-next"></p></div>
+          </div>
+          <div class="control-card" hidden>
+            <fieldset>
+              <legend>DC5 · <code>GET /health</code>의 선택된 정책은?</legend>
+              <label><input type="radio" name="dc5" value="a" /> liveness probe를 위해 전역 limiter에서 명시적으로 제외한다.</label>
+              <label><input type="radio" name="dc5" value="b" /> 다른 endpoint와 같은 quota를 적용한다.</label>
+              <label><input type="radio" name="dc5" value="c" /> health 요청마다 DB-backed limiter를 호출한다.</label>
+            </fieldset>
+            <button type="button" class="control-submit">답변 제출</button>
+            <div class="control-result" hidden role="status"><strong class="control-status"></strong><p class="control-explanation"></p><p class="control-next"></p></div>
+          </div>
+          <div class="control-card" hidden>
+            <fieldset>
+              <legend>DC6 · quota 초과 응답이 보장해야 하는 것은?</legend>
+              <label><input type="radio" name="dc6" value="a" /> controller를 실행하지 않고 429 ProblemDetails와 <code>Retry-After</code>를 반환한다.</label>
+              <label><input type="radio" name="dc6" value="b" /> 200 응답을 반환한 뒤 로그에만 rate limit을 기록한다.</label>
+              <label><input type="radio" name="dc6" value="c" /> 429만 반환하고 retry 시점을 알려주지 않는다.</label>
+            </fieldset>
+            <button type="button" class="control-submit">답변 제출</button>
+            <div class="control-result" hidden role="status"><strong class="control-status"></strong><p class="control-explanation"></p><p class="control-next"></p></div>
+          </div>
+          <div class="control-card" hidden>
+            <fieldset>
+              <legend>DC7 · 구현 후 반드시 검증해야 하는 조합은?</legend>
+              <label><input type="radio" name="dc7" value="a" /> burst 429·parser 전 차단·health 예외·key isolation·TTL cleanup·재시작 초기화를 확인한다.</label>
+              <label><input type="radio" name="dc7" value="b" /> 정상 200 한 건만 확인하면 공통 limiter가 증명된다.</label>
+              <label><input type="radio" name="dc7" value="c" /> 단위 테스트만 통과하면 실제 HTTP 순서와 header는 확인하지 않는다.</label>
+            </fieldset>
+            <button type="button" class="control-submit">답변 제출</button>
+            <div class="control-result" hidden role="status"><strong class="control-status"></strong><p class="control-explanation"></p><p class="control-next"></p></div>
+          </div>
+          <button type="button" id="control-prev">이전</button>
+          <button type="button" id="control-next">다음</button>
+          <output id="control-overall" aria-live="polite"></output>
+          <script>
+            (() => {
+              const cards = [...document.querySelectorAll('.control-card')];
+              const correct = ['a', 'c', 'a', 'a', 'a', 'a', 'a'];
+              const explanations = [
+                '조기 limiter의 목적은 parser와 이후 비용 큰 경계를 보호하는 것이다.',
+                'raw forwarded header를 직접 파싱하지 않고, 명시된 trust proxy hop 설정이 있을 때만 Express가 계산한 IP를 사용한다.',
+                'process-local 상태는 재시작·인스턴스 간에 공유되지 않는다. Cloud Run scale-out은 전역 quota가 아니다.',
+                '허용된 첫 요청만 guest session을 만들고, 초과 요청은 insert 전에 끝나야 한다.',
+                'liveness probe가 quota에 막혀 장애로 오인되지 않도록 health를 명시적으로 예외 처리한다.',
+                '429는 재시도 가능한 시점과 표준 ProblemDetails를 함께 제공해야 한다.',
+                '공통 limiter는 정상 응답만이 아니라 순서·경계·운영 수명까지 검증해야 한다.'
+              ];
+              let index = 0;
+              const answered = new Array(cards.length).fill(false);
+              const progress = document.getElementById('control-progress');
+              const overall = document.getElementById('control-overall');
+              const render = () => {
+                cards.forEach((card, cardIndex) => { card.hidden = cardIndex !== index; });
+                progress.textContent = `${index + 1} / ${cards.length} · 답변 ${answered.filter(Boolean).length} / ${cards.length}`;
+              };
+              cards.forEach((card, cardIndex) => {
+                card.querySelector('.control-submit').addEventListener('click', () => {
+                  const selected = card.querySelector('input:checked');
+                  if (!selected) return;
+                  const result = card.querySelector('.control-result');
+                  const ok = selected.value === correct[cardIndex];
+                  answered[cardIndex] = true;
+                  result.querySelector('.control-status').textContent = ok ? '상태: 확립' : '상태: 추가 확인 필요';
+                  result.querySelector('.control-explanation').textContent = explanations[cardIndex];
+                  result.querySelector('.control-next').textContent = ok ? '다음: 다음 문항 또는 구현 승인으로 이동한다.' : '다음: 구현 전 해당 경계와 불변 조건을 다시 확인한다.';
+                  result.hidden = false;
+                  progress.textContent = `${index + 1} / ${cards.length} · 답변 ${answered.filter(Boolean).length} / ${cards.length}`;
+                  if (answered.every(Boolean)) overall.textContent = '모든 문항 제출 완료 · 이 결과는 구현 승인과 별개다.';
+                });
+              });
+              document.getElementById('control-prev').addEventListener('click', () => { index = Math.max(0, index - 1); render(); });
+              document.getElementById('control-next').addEventListener('click', () => { index = Math.min(cards.length - 1, index + 1); render(); });
+              render();
+            })();
+          </script>
+        </section>
+
+        <section id="approval-state">
+          <h2>승인 상태</h2>
+          <p>설계 승인됨. 사용자가 2026-09-17 KST “ㅇㅇ 해”로 G1-A·G2-B·G3-A 설계와 구현 시작을 승인했고, Cloud Run에서는 인스턴스별로만 관리하며 DB·Redis에 쓰지 않는다는 운영 경계를 추가로 확정했다. 설계 이해·통제 점검은 비차단 self-check로 제공하며, 구현 범위는 이 기준선에 한정한다.</p>
+        </section>
+      </article>
+    </main>
+  </body>
+</html>
