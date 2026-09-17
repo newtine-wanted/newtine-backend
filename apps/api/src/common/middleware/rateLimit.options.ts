@@ -50,6 +50,14 @@ export function createRateLimitOptions(env: NodeJS.ProcessEnv = process.env): Ra
         ),
       ],
       [
+        'POST /auth/withdraw',
+        rule(
+          'auth-ip',
+          readPositiveInteger(env, 'RATE_LIMIT_AUTH_MAX_REQUESTS', DEFAULT_AUTH_MAX_REQUESTS),
+          windowMs,
+        ),
+      ],
+      [
         'POST /auth/refresh',
         rule(
           'refresh-ip',

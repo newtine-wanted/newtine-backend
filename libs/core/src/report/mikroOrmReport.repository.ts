@@ -75,6 +75,13 @@ export class MikroOrmReportRepository implements ReportRepository {
       try {
         return await this.entityManager.transactional(
           async (em) => {
+            const ownerRows = await executeInTransaction<Row[]>(
+              em,
+              'select id from users where id = $1::uuid for key share',
+              [userId],
+            );
+            if (ownerRows.length !== 1) throw new ReportException('NOT_FOUND');
+
             const existingRows = await executeInTransaction<Row[]>(
               em,
               `select * from weekly_reports
@@ -280,22 +287,8 @@ export class MikroOrmReportRepository implements ReportRepository {
     }
     const token = generateUuidV7();
     const expiresAt = new Date(now.getTime() + leaseMs);
+    await this.recoverFinishedUsage(now, leaseMs);
     return this.entityManager.transactional(async (em) => {
-      // Recover ledger writes that failed after a provider response or after
-      // report deletion. UNKNOWN can later be reconciled by a known response.
-      await executeReportSql(
-        em,
-        `update ai_usage_records usage
-          set status = 'UNKNOWN', error_code = coalesce(error_code, 'USAGE_FINISH_INTERRUPTED'),
-              finished_at = $1::timestamptz
-        where usage.status = 'RUNNING' and usage.started_at <= $2::timestamptz
-          and usage.purpose in ('report_generation', 'report_semantic_validation')
-          and (usage.weekly_report_id is null or exists (
-            select 1 from weekly_reports report where report.id = usage.weekly_report_id
-              and report.status in ('SUCCEEDED', 'FAILED')
-          ))`,
-        [now, new Date(now.getTime() - leaseMs)],
-      );
       const expiredRows = await executeInTransaction<Row[]>(
         em,
         `update weekly_reports
@@ -364,6 +357,62 @@ export class MikroOrmReportRepository implements ReportRepository {
       const row = rows[0];
       if (row === undefined) return null;
       return toReportClaim(row);
+    });
+  }
+
+  private async recoverFinishedUsage(now: Date, leaseMs: number): Promise<void> {
+    await this.entityManager.transactional(async (em) => {
+      // Lock terminal reports before their usage rows. This keeps the
+      // report-worker cleanup order compatible with account deletion.
+      const terminalRows = await executeInTransaction<Row[]>(
+        em,
+        `select report.id
+           from weekly_reports report
+          where report.status in ('SUCCEEDED', 'FAILED')
+            and exists (
+              select 1
+                from ai_usage_records usage
+               where usage.weekly_report_id = report.id
+                 and usage.status = 'RUNNING'
+                 and usage.started_at <= $1::timestamptz
+                 and usage.purpose in ('report_generation', 'report_semantic_validation')
+            )
+          order by report.id
+          limit 100
+          for update skip locked`,
+        [new Date(now.getTime() - leaseMs)],
+      );
+      const reportIds = terminalRows.map((row) => String(row.id));
+      if (reportIds.length > 0) {
+        await executeInTransaction(
+          em,
+          `update ai_usage_records
+              set status = 'UNKNOWN',
+                  error_code = coalesce(error_code, 'USAGE_FINISH_INTERRUPTED'),
+                  finished_at = $2::timestamptz
+            where weekly_report_id = any($1::uuid[])
+              and status = 'RUNNING'
+              and started_at <= $3::timestamptz
+              and purpose in ('report_generation', 'report_semantic_validation')`,
+          [reportIds, now, new Date(now.getTime() - leaseMs)],
+        );
+      }
+
+      // A deleted report is detached by ON DELETE SET NULL. These rows no
+      // longer have a member-owned report row to lock and can be recovered
+      // independently of the report claim transaction.
+      await executeInTransaction(
+        em,
+        `update ai_usage_records
+            set status = 'UNKNOWN',
+                error_code = coalesce(error_code, 'USAGE_FINISH_INTERRUPTED'),
+                finished_at = $1::timestamptz
+          where weekly_report_id is null
+            and status = 'RUNNING'
+            and started_at <= $2::timestamptz
+            and purpose in ('report_generation', 'report_semantic_validation')`,
+        [now, new Date(now.getTime() - leaseMs)],
+      );
     });
   }
 

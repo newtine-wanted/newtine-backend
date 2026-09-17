@@ -105,8 +105,10 @@ export interface ReportRepository {
 }
 export const REPORT_REPOSITORY = Symbol('REPORT_REPOSITORY');
 export interface ReportUsageStart {
+  userId: UuidV7;
   reportId: UuidV7;
   attempt: number;
+  leaseToken: UuidV7;
   purpose: string;
   model: string;
   promptVersion: string;

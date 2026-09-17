@@ -11,6 +11,7 @@ import type {
   RotateRefreshSessionResult,
 } from './domain/auth.model.js';
 import { AuthRole } from './domain/auth.model.js';
+import { AuthException, AuthExceptionCode } from './domain/auth.exception.js';
 import type { UuidV7 } from '../common/id/uuidV7.generator.js';
 import { RefreshSessionSchema } from './persistence/auth.persistence.entity.js';
 import {
@@ -68,8 +69,40 @@ export class PostgresAuthRepository implements AuthRepository {
     };
   }
 
+  async deleteUser(userId: UuidV7): Promise<boolean> {
+    const entityManager = this.currentEntityManager();
+    if (entityManager.isInTransaction()) {
+      await this.executeAuthCommand(entityManager, `SET LOCAL lock_timeout = '3s'`);
+      await this.executeAuthCommand(entityManager, `SET LOCAL statement_timeout = '10s'`);
+    }
+
+    const owner = await this.executeAuthQuery<{ id: string }>(
+      entityManager,
+      'SELECT id::text AS id FROM users WHERE id = ?::uuid FOR UPDATE',
+      [userId],
+    );
+    if (owner === undefined) return false;
+
+    const deleted = await this.executeAuthCommand(
+      entityManager,
+      'DELETE FROM users WHERE id = ?::uuid',
+      [userId],
+    );
+    return deleted.affectedRows === 1;
+  }
+
   async createRefreshSession(command: CreateRefreshSessionCommand): Promise<void> {
-    await this.currentEntityManager().insert(RefreshSessionSchema, {
+    const entityManager = this.currentEntityManager();
+    const owner = await this.executeAuthQuery<{ id: string }>(
+      entityManager,
+      'SELECT id::text AS id FROM users WHERE id = ?::uuid FOR KEY SHARE',
+      [command.userId],
+    );
+    if (owner === undefined) {
+      throw new AuthException(AuthExceptionCode.InvalidCredentials, '인증이 필요합니다.');
+    }
+
+    await entityManager.insert(RefreshSessionSchema, {
       id: command.id,
       userId: command.userId,
       tokenHash: command.tokenHash,
@@ -84,6 +117,20 @@ export class PostgresAuthRepository implements AuthRepository {
     command: RotateRefreshSessionCommand,
   ): Promise<RotateRefreshSessionResult> {
     const entityManager = this.currentEntityManager();
+    const owner = await this.findRotationSessionOwner(entityManager, command.tokenHash);
+    if (owner === undefined) {
+      return { status: 'invalid' };
+    }
+
+    const userLock = await this.executeAuthQuery<{ id: string }>(
+      entityManager,
+      'SELECT id::text AS id FROM users WHERE id = ?::uuid FOR KEY SHARE',
+      [owner.user_id],
+    );
+    if (userLock === undefined) {
+      return { status: 'invalid' };
+    }
+
     const session = await this.findRotationSession(entityManager, command.tokenHash);
     if (session === undefined) {
       return { status: 'invalid' };
@@ -154,6 +201,21 @@ export class PostgresAuthRepository implements AuthRepository {
     );
   }
 
+  private async findRotationSessionOwner(
+    entityManager: EntityManager,
+    tokenHash: string,
+  ): Promise<{ readonly user_id: string } | undefined> {
+    return this.executeAuthQuery<{ user_id: string }>(
+      entityManager,
+      `
+        SELECT user_id::text AS user_id
+          FROM refresh_sessions
+         WHERE token_hash = ?::text
+      `,
+      [tokenHash],
+    );
+  }
+
   private async revokeActiveSessions(
     entityManager: EntityManager,
     userId: string,
@@ -194,6 +256,26 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   private async executeRotationCommand(
+    entityManager: EntityManager,
+    sql: string,
+    params: unknown[] = [],
+  ): Promise<RunResult> {
+    return (await entityManager
+      .getConnection()
+      .execute(sql, params, 'run', entityManager.getTransactionContext())) as RunResult;
+  }
+
+  private async executeAuthQuery<T extends object>(
+    entityManager: EntityManager,
+    sql: string,
+    params: unknown[] = [],
+  ): Promise<T | undefined> {
+    return (await entityManager
+      .getConnection()
+      .execute(sql, params, 'get', entityManager.getTransactionContext())) as T | undefined;
+  }
+
+  private async executeAuthCommand(
     entityManager: EntityManager,
     sql: string,
     params: unknown[] = [],

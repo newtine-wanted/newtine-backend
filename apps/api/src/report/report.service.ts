@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import type { UuidV7 } from '@newtine/core';
 import {
   REPORT_REPOSITORY,
@@ -28,7 +28,14 @@ export class ReportService {
     const period = reportPeriod(periodStart);
     if (period.start !== eligibleReportPeriod(now).start)
       throw new ReportException('INVALID_PERIOD');
-    return toReportSummary(await this.repository.request(userId, period, now), now);
+    try {
+      return toReportSummary(await this.repository.request(userId, period, now), now);
+    } catch (error: unknown) {
+      if (isTransientDatabaseError(error)) {
+        throw new ServiceUnavailableException(undefined, { cause: error });
+      }
+      throw error;
+    }
   }
   async list(userId: UuidV7, now = new Date()): Promise<ReportListResponse> {
     const periods = recentReportPeriods(now);
@@ -97,6 +104,20 @@ export class ReportService {
     return toReportSummary(await this.repository.retry(userId, reportId, now), now);
   }
 }
+
+function isTransientDatabaseError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (current === null || typeof current !== 'object') return false;
+    const code = (current as { readonly code?: unknown }).code;
+    if (code === '40001' || code === '40P01' || code === '55P03' || code === '57014') {
+      return true;
+    }
+    current = (current as { readonly cause?: unknown }).cause;
+  }
+  return false;
+}
+
 function toOptional(record: ReportRecord | undefined, now: Date): ReportSummaryResponse | null {
   return record === undefined ? null : toReportSummary(record, now);
 }
