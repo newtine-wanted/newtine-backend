@@ -15,6 +15,10 @@ export function invalidCredentials(): AuthException {
   );
 }
 
+export function invalidAuthenticatedUser(): AuthException {
+  return new AuthException(AuthExceptionCode.InvalidCredentials, '인증이 필요합니다.');
+}
+
 export function invalidRefreshToken(): AuthException {
   return new AuthException(
     AuthExceptionCode.InvalidRefreshToken,
