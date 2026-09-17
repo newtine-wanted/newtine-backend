@@ -40,11 +40,38 @@ DECLARE
     'weekly_reports'
   ];
   required_index text;
+  required_fk text;
   required_indexes constant text[] := ARRAY[
-    'users_email_canonical_unique',
-    'user_interaction_events_user_issue_created_idx',
+    'ai_usage_records_run_idx',
+    'ai_usage_records_weekly_report_idx',
+    'feed_sessions_member_active_idx',
+    'issue_content_jobs_run_idx',
+    'issue_detail_views_user_issue_idx',
+    'issue_embedding_tasks_claim_owner_idx',
+    'issue_embedding_tasks_pending_idx',
+    'issue_entities_entity_idx',
+    'issue_relations_from_verified_idx',
+    'pipeline_runs_one_active_idx',
+    'refresh_sessions_user_id_idx',
+    'user_interaction_events_user_created_idx',
     'user_interaction_events_user_issue_order_idx',
-    'weekly_reports_claim_idx'
+    'users_email_canonical_unique',
+    'weekly_reports_claim_idx',
+    'weekly_reports_expired_lease_idx'
+  ];
+  required_fks constant text[] := ARRAY[
+    'ai_usage_records_weekly_report_fk',
+    'feed_batch_items_feed_session_id_batch_no_fkey',
+    'feed_batches_feed_session_id_fkey',
+    'feed_sessions_user_fk',
+    'issue_detail_views_user_fk',
+    'refresh_sessions_user_fk',
+    'user_category_preferences_user_fk',
+    'user_entity_preferences_user_fk',
+    'user_interaction_events_user_fk',
+    'user_issue_contributions_user_fk',
+    'user_region_preferences_user_fk',
+    'weekly_reports_user_id_fkey'
   ];
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
@@ -60,6 +87,27 @@ BEGIN
   FOREACH required_index IN ARRAY required_indexes LOOP
     IF to_regclass(format('public.%I', required_index)) IS NULL THEN
       RAISE EXCEPTION 'Required index is missing: %', required_index;
+    END IF;
+  END LOOP;
+
+  IF EXISTS (
+    SELECT 1
+      FROM pg_constraint
+     WHERE connamespace = 'public'::regnamespace
+       AND contype = 'c'
+  ) THEN
+    RAISE EXCEPTION 'Unexpected CHECK constraints remain in the production baseline';
+  END IF;
+
+  FOREACH required_fk IN ARRAY required_fks LOOP
+    IF NOT EXISTS (
+      SELECT 1
+        FROM pg_constraint
+       WHERE connamespace = 'public'::regnamespace
+         AND conname = required_fk
+         AND contype = 'f'
+    ) THEN
+      RAISE EXCEPTION 'Required foreign key is missing: %', required_fk;
     END IF;
   END LOOP;
 
