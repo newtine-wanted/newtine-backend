@@ -44,7 +44,7 @@ export class InterestController {
     @CurrentUser() principal: AuthPrincipal,
     @TypedQuery<LikedIssuesQuery>({
       type: 'validate',
-      validate: (input) => typia.validateEquals<LikedIssuesQuery>(input),
+      validate: (input) => typia.http.validateQuery<LikedIssuesQuery>(input),
     })
     query: LikedIssuesQuery,
   ): Promise<LikedIssuesResponse> {

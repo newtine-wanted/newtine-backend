@@ -71,7 +71,7 @@ export class FeedController {
   async getFeed(
     @TypedQuery<FeedRequest>({
       type: 'validate',
-      validate: (input) => typia.validateEquals<FeedRequest>(input),
+      validate: (input) => typia.http.validateQuery<FeedRequest>(input),
     })
     request: FeedRequest,
     @Req() httpRequest: Request,

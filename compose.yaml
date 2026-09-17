@@ -90,9 +90,18 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_SLOW_THRESHOLD_MS: ${HTTP_SLOW_THRESHOLD_MS:-1000}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PIPELINE_AI_CONFIG_PATH: ${PIPELINE_AI_CONFIG_PATH:-config/pipeline-ai.yml}
+      PIPELINE_WORKER_POLL_MS: ${PIPELINE_WORKER_POLL_MS:-1000}
+      PIPELINE_WORKER_ONCE: ${PIPELINE_WORKER_ONCE:-0}
+      PIPELINE_EMBEDDING_REPAIR_RECLAIM_OWNER: ${PIPELINE_EMBEDDING_REPAIR_RECLAIM_OWNER:-}
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: "no"
 
   report-worker:

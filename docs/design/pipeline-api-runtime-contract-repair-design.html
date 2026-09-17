@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="현재 Compose 환경에서 pipeline API 등록·조회·재시도 계약과 query 입력 파싱을 복구하고 worker 환경 주입을 명시적으로 보장">
+  <meta name="audience" content="NEWTINE 백엔드 개발자와 로컬·배포 환경 운영자">
+  <meta name="problem" content="MikroORM raw SQL placeholder 경계가 PostgreSQL positional placeholder를 처리하지 못해 pipeline API가 500을 반환하고, TypedQuery 검증기가 URL query를 디코딩하지 않으며, Compose batch에 pipeline provider 환경변수가 전달되지 않음">
+  <meta name="core-flow" content="HTTP 입력 디코딩·검증 → pipeline persistence transaction → batch worker 설정 주입 → API·DB·worker 경계 검증">
+  <title>Pipeline API 런타임 계약 복구 설계</title>
+  <style>
+    :root { color-scheme: light; --ink:#172b42; --muted:#526476; --line:#ccd5dd; --paper:#fff; --wash:#f4f7fa; --accent:#145ba8; --warn:#fff4d6; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--wash); color: var(--ink); font: 16px/1.7 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .shell { max-width: 1020px; margin: 0 auto; padding: 28px 22px 64px; }
+    header, article { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+    article { margin-top: 16px; }
+    h1, h2, h3 { line-height: 1.3; }
+    h1 { margin-top: 0; }
+    h2 { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 28px; }
+    nav { margin: 16px 0; padding: 12px 16px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; }
+    nav a { color: var(--accent); margin-right: 14px; }
+    dt { font-weight: 700; }
+    dd { margin: 0 0 8px; color: var(--muted); }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    code { background: #eef2f6; padding: 1px 4px; border-radius: 4px; }
+    pre { overflow-x: auto; padding: 14px; background: #101923; color: #edf4fb; border-radius: 8px; }
+    figure { margin: 16px 0; }
+    figcaption { color: var(--muted); font-size: .95rem; }
+    .notice { background: var(--warn); border-left: 4px solid #cc8b00; padding: 12px 16px; }
+    .state { display: inline-block; padding: 3px 9px; border-radius: 999px; background: #e9f1fb; color: #145ba8; font-weight: 700; }
+    .question { border: 1px solid var(--line); border-radius: 9px; padding: 14px; margin: 14px 0; }
+    fieldset { border: 0; padding: 0; margin: 0; }
+    legend { font-weight: 700; }
+    label { display: block; margin: 4px 0; }
+    button { border: 1px solid #7292ad; background: #eef5fb; color: var(--ink); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+    .result { margin-top: 12px; padding: 10px 12px; background: #f4f7fa; border-radius: 7px; }
+    .result h3 { margin-top: 0; }
+    .result p { margin: 3px 0; }
+    .result .status { font-weight: 700; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <p><span class="state">설계 승인됨</span> · Standard · <time datetime="2026-09-17">2026-09-17</time></p>
+    <h1>Pipeline API 런타임 계약 복구</h1>
+    <dl>
+      <dt>목적 (purpose)</dt><dd>현재 Compose 환경에서 pipeline API 등록·조회·재시도 계약과 query 입력 파싱을 복구하고 worker 환경 주입을 명시적으로 보장</dd>
+      <dt>사용자 (audience)</dt><dd>NEWTINE 백엔드 개발자와 로컬·배포 환경 운영자</dd>
+      <dt>문제 (problem)</dt><dd>MikroORM raw SQL placeholder 경계가 PostgreSQL positional placeholder를 처리하지 못해 pipeline API가 500을 반환하고, TypedQuery 검증기가 URL query를 디코딩하지 않으며, Compose batch에 pipeline provider 환경변수가 전달되지 않음</dd>
+      <dt>핵심 흐름 (core-flow)</dt><dd>HTTP 입력 디코딩·검증 → pipeline persistence transaction → batch worker 설정 주입 → API·DB·worker 경계 검증</dd>
+    </dl>
+    <p>추적 메모: 현재 실행 중인 Compose API의 live API 점검에서 확인한 런타임 결함을 다룬다. 기존 뉴스 공급자 연동 설계·이슈 생성 정책 설계와 목적·문제·핵심 흐름이 달라 새 동료 문서로 기록한다.</p>
+  </header>
+
+  <nav aria-label="설계 탐색">
+    <a href="#goal">범위</a><a href="#system-model">구조</a><a href="#decisions">결정</a><a href="#failure-recovery">실패·복구</a><a href="#verification-plan">검증</a><a href="#design-control-state">이해 점검</a><a href="#approval-state">승인</a>
+  </nav>
+
+  <main>
+    <article>
+      <section id="goal">
+        <h2>목표와 범위</h2>
+        <p>pipeline API의 DB persistence 경계가 실제 PostgreSQL driver를 통해 positional placeholder를 실행하도록 고친다. <code>onboarding/entities</code>, <code>feed</code>, <code>me/liked-issues</code>의 <code>TypedQuery</code>는 URL query를 숫자·문자열 DTO로 디코딩하고 검증하도록 고친다. Compose의 <code>batch</code> service에는 pipeline worker가 읽는 provider·AI config 환경변수를 전달한다.</p>
+        <p>성공 신호는 pipeline 등록·조회·retry·interrupt가 의도한 HTTP/DB 계약으로 응답하고, <code>limit=1</code> 같은 query 값이 실제 service 입력에 반영되며, invalid query가 400으로 거절되는 것이다.</p>
+        <h3>이번 변경에 포함하지 않는 것</h3>
+        <ul>
+          <li>NAVER API HUB·OpenAI의 실제 credential 발급, 외부 quota, 실제 provider 인증 성공</li>
+          <li>pipeline 상태 머신·DB schema·migration·공개 API payload의 의도된 필드 변경</li>
+          <li>API 컨테이너에 worker 전용 provider secret을 복사하거나 저장소에 secret 값을 기록하는 것</li>
+        </ul>
+      </section>
+
+      <section id="system-model">
+        <h2>확인된 현재 구조와 경계</h2>
+        <figure>
+          <pre>HTTP pipeline controller
+  └─ PipelineRunService
+      └─ MikroOrmPipelineRepository ── MikroORM execute() ── PostgreSQL
+                                                ▲
+                         현재 $1 positional SQL이 그대로 전달되어 42P02 발생
+
+HTTP TypedQuery controller ── URLSearchParams ── typia.http.validateQuery ── DTO
+                                      ▲
+                  현재 typia.validateEquals는 URLSearchParams 자체를 object로 검사
+
+Compose api: DB/JWT만 필요       Compose batch: NAVER/OpenAI/AI config 필요</pre>
+          <figcaption>런타임 원인과 수정 경계를 분리한다. API 등록은 외부 provider를 호출하지 않고 DB에 run을 enqueue한다.</figcaption>
+        </figure>
+        <dl>
+          <dt>확인된 환경</dt><dd>API 컨테이너의 <code>NODE_ENV=production</code>, <code>DB_HOST=db</code>, DB/JWT 값은 주입됨. <code>OPENAI_API_KEY</code>, <code>NAVER_CLIENT_ID</code>, <code>NAVER_CLIENT_SECRET</code>는 API에 없어도 등록 API의 선행조건이 아니다.</dd>
+          <dt>확인된 결함</dt><dd><code>MikroOrmPipelineRepository.enqueue()</code>가 <code>select ... $1</code>를 ORM connection에 전달해 <code>there is no parameter $1</code>를 반환한다. 같은 repository의 transaction query도 같은 경계를 사용한다.</dd>
+          <dt>설정 결함</dt><dd><code>.env</code>의 provider 값은 비어 있고, Compose <code>batch.environment</code>에는 해당 키 매핑 자체가 없다. AI 설정 파일은 이미지에 복사되어 기본 경로에서 읽을 수 있다.</dd>
+        </dl>
+      </section>
+
+      <section id="decisions">
+        <h2>설계 결정</h2>
+        <ol>
+          <li><strong>SQL 실행 경계:</strong> <code>libs/core/src/common/database/postgresSql.ts</code>에 PostgreSQL raw execution helper를 두고 pipeline repository가 이를 사용한다. helper는 <code>EntityManager.getTransactionContext()</code>를 우선하고, PostgreSQL driver의 <code>executeQuery</code>에 원래 <code>$n</code> query와 params를 전달한다. 이미 report repository에서 사용하는 경계와 같은 방식이다.</li>
+          <li><strong>query 디코딩:</strong> 세 <code>TypedQuery</code> 사용처의 validator를 <code>typia.http.validateQuery&lt;T&gt;</code>로 바꾼다. feed의 cursor ownership·unknown-query 수동 검증은 유지한다.</li>
+          <li><strong>Compose 환경:</strong> provider·AI config 키는 <code>batch</code>에만 <code>&#36;{...:-}</code> 형태로 연결하고, <code>batch</code>가 migration 완료 후 시작하도록 dependency를 명시한다. 빈 secret은 빈 값으로 유지하며 fake key를 넣지 않는다.</li>
+          <li><strong>검증 수준:</strong> unit/type/lint/contract gate와 live Compose HTTP smoke를 재실행한다. 실제 NAVER/OpenAI credential이 없으므로 provider 인증은 미검증으로 남기고 worker가 필요 환경을 읽는 설정 경계만 확인한다.</li>
+        </ol>
+        <h3>거부한 대안</h3>
+        <ul>
+          <li>모든 SQL의 <code>$n</code>을 <code>?</code>로 일괄 치환: 같은 query에서 positional parameter를 재사용하는 구문이 있어 params를 함께 재배열해야 하며 누락 위험이 더 크다.</li>
+          <li>API에 provider secret 주입: enqueue 단계는 provider 호출을 하지 않으며 secret 노출 범위를 불필요하게 넓힌다.</li>
+          <li>query를 controller에서 raw <code>Request.query</code>로만 수동 파싱: DTO 계약과 Nestia/typia의 공통 query decoder를 우회한다.</li>
+        </ul>
+      </section>
+
+      <section id="invariants">
+        <h2>불변 조건과 상태 경계</h2>
+        <ul>
+          <li>pipeline create는 provider credential 유무와 무관하게 persistence가 가능하면 202와 run snapshot을 반환하고, worker 외부 실행은 별도 단계다.</li>
+          <li>idempotency key replay는 동일 request hash에 대해 같은 run을 반환하고, 다른 hash는 conflict로 남는다.</li>
+          <li>transaction query는 같은 transaction context에서 실행되어 retry·interrupt·issue registration의 lock/조건부 update 경계를 보존한다.</li>
+          <li>query DTO의 숫자는 문자열이 아닌 number로 service에 전달되며, <code>limit=0</code>, 비숫자 값, 범위 밖 값은 400이다.</li>
+          <li>provider secret과 <code>OPENAI_API_KEY</code>의 원문은 소스·설계·검증 출력에 기록하지 않는다.</li>
+        </ul>
+      </section>
+
+      <section id="failure-recovery">
+        <h2>실패·복구·운영</h2>
+        <dl>
+          <dt>API persistence failure</dt><dd>HTTP 500과 구조화 로그에서 SQL/driver 원인을 확인한다. 수정 후 enqueue → get → retry/interrupt 경로를 DB fixture로 재검증한다.</dd>
+          <dt>worker provider key 누락</dt><dd>Compose가 빈 값을 worker에 전달하더라도 실제 provider 호출 전 명시된 외부 오류로 run이 실패한다. 이 변경은 키를 생성하거나 외부 호출을 우회하지 않는다. 운영자는 <code>.env</code>/secret store에 실제 값을 넣고 worker를 재시작한다.</dd>
+          <dt>AI config 누락·오류</dt><dd>batch bootstrap에서 <code>config/pipeline-ai.yml</code> 읽기 실패가 드러난다. 이미지 포함 여부와 <code>PIPELINE_AI_CONFIG_PATH</code>를 먼저 확인하고, 수정 후 worker를 재시작한다.</dd>
+          <dt>검증 fixture</dt><dd>live 테스트가 만든 user/run/issue/report fixture는 exact id·prefix로 정리하고 기존 feed session 등 사전 데이터는 삭제하지 않는다.</dd>
+        </dl>
+      </section>
+
+      <section id="verification-plan">
+        <h2>검증 계획</h2>
+        <ol>
+          <li>focused source/build: <code>npm run typecheck</code>, <code>npm run lint</code>, pipeline/query 관련 unit test</li>
+          <li>contract/build: <code>npm run test:contracts</code>, API·batch build 및 Compose image 재생성</li>
+          <li>live HTTP: health, onboarding query valid/invalid, feed cursor, liked-issues pagination, admin pipeline create/get/retry/interrupt</li>
+          <li>configuration: <code>docker compose config</code>와 batch container env key presence를 secret 원문 없이 확인</li>
+          <li>external boundary gap: NAVER/OpenAI 실제 credential이 비어 있으므로 provider 인증 성공은 잔여 검증 항목으로 보고</li>
+        </ol>
+      </section>
+
+      <section id="grilling-state">
+        <h2>설계 의사결정 상태 (grilling)</h2>
+        <p><strong>완료.</strong> 로컬 코드·컨테이너·로그가 원인을 분리했으며, SQL 경계·query decoder·Compose env 범위의 material frontier를 닫았다. 사용자가 소유해야 할 별도 정책 선택은 없고, 실제 provider credential 인증은 외부 상태 때문에 <code>검증 필요</code>로 설계 범위 밖에 남긴다.</p>
+        <dl>
+          <dt>G1 · SQL 방식</dt><dd>raw PostgreSQL helper 권고를 선택. positional parameter 재사용을 보존하고 transaction context를 잃지 않는다.</dd>
+          <dt>G2 · query 방식</dt><dd>typia HTTP decoder를 선택. 세 사용처를 동일하게 고쳐 계약 불일치를 막는다.</dd>
+          <dt>G3 · env 범위</dt><dd>worker 전용 env만 batch에 전달. API enqueue와 외부 provider 실행을 분리한다.</dd>
+        </dl>
+      </section>
+
+      <section id="design-control-state">
+        <h2>설계 이해·통제 점검 (design-control)</h2>
+        <p><strong>미실시 · 비차단 자기점검.</strong> 아래 문항은 설계 선택 질문이 아니라 구현 전에 동작·불변 조건·실패 경계를 예측하는 점검이다. 답변은 이 HTML 안에만 남고 Codex로 자동 전송되지 않는다. 구현 승인은 별도다.</p>
+        <div id="questions">
+          <div class="question"><fieldset><legend>D1 · <code>GET /onboarding/entities?limit=1</code>의 결과는?</legend><label><input type="radio" name="q0" value="0">응답의 <code>limit</code>이 1이고 service에도 숫자 1이 전달된다.</label><label><input type="radio" name="q0" value="1">query가 무시되어 기본 limit 20이 유지된다.</label></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div>
+          <div class="question"><fieldset><legend>D2 · provider key가 비어 있을 때 pipeline create의 경계는?</legend><label><input type="radio" name="q1" value="0">API enqueue는 DB에 성공하면 202를 반환하고, provider 실패는 worker 단계의 run 상태로 기록된다.</label><label><input type="radio" name="q1" value="1">API가 provider를 호출하므로 key가 없으면 등록 요청 자체가 500이어야 한다.</label></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div>
+          <div class="question"><fieldset><legend>D3 · SQL helper가 보존해야 하는 것은?</legend><label><input type="radio" name="q2" value="0">원래 <code>$n</code> positional query와 현재 transaction context다.</label><label><input type="radio" name="q2" value="1">모든 placeholder를 문자열 치환하고 transaction context는 생략해도 된다.</label></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div>
+          <div class="question"><fieldset><legend>D4 · Compose에 pipeline env를 어디에 주입하는가?</legend><label><input type="radio" name="q3" value="0">worker를 실행하는 <code>batch</code> service에만 주입하고 API에는 provider secret을 넣지 않는다.</label><label><input type="radio" name="q3" value="1">모든 서비스에 secret을 복제해 어느 컨테이너에서도 provider를 호출할 수 있게 한다.</label></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div>
+          <div class="question"><fieldset><legend>D5 · 현재 실제 키가 비어 있다는 사실이 의미하는 것은?</legend><label><input type="radio" name="q4" value="0">live API/persistence 검증은 가능하지만 NAVER/OpenAI 인증 성공은 잔여 검증으로 남는다.</label><label><input type="radio" name="q4" value="1">모의 provider 테스트만으로 실제 외부 인증도 통과했다고 볼 수 있다.</label></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div>
+        </div>
+        <p id="progress" aria-live="polite">0/5 제출</p>
+        <p>커버리지: 입력·계약(D1), 외부 효과와 상태 경계(D2), transaction 불변 조건(D3), 운영 설정 경계(D4), 검증 공백(D5).</p>
+      </section>
+
+      <section id="approval-state">
+        <h2>구현 승인 상태</h2>
+        <p><strong>설계 승인됨 · 2026-09-17T00:33:58+09:00.</strong> 사용자의 “개선 ㄱ”으로 SQL execution helper 공통화, 세 query validator 수정, Compose batch env/dependency wiring, 그리고 명시된 검증 명령·live smoke 범위를 승인했다. 구현 제어 기록: <a href="pipeline-api-runtime-contract-repair-implementation.html">pipeline-api-runtime-contract-repair-implementation.html</a>. 실제 provider credential 입력·외부 인증은 별도 운영 상태로 남긴다.</p>
+      </section>
+    </article>
+  </main>
+</div>
+<script>
+  const answers = [0, 0, 0, 0, 0];
+  const explanations = [
+    ['확립', 'HTTP query decoder가 문자열을 DTO 타입으로 변환하므로 숫자 1이 service로 간다.', '다음: compiled API에서 1과 invalid boundary를 확인한다.'],
+    ['확립', 'create는 provider를 호출하지 않는 persistence 경계이고, 외부 실패는 worker run 상태에 기록된다.', '다음: API와 worker 검증을 분리해 실행한다.'],
+    ['확립', 'PostgreSQL driver의 executeQuery와 현재 transaction context를 사용해 positional 재사용을 보존한다.', '다음: retry·interrupt transaction smoke를 확인한다.'],
+    ['확립', 'provider secret은 실제 실행자인 batch에만 전달하고 API의 노출 범위를 좁힌다.', '다음: compose config에서 값 원문 없이 key 전달만 확인한다.'],
+    ['확립', '실제 credential이 없으면 외부 인증은 검증되지 않는다. 모의·DB·HTTP 증거와 잔여 위험을 분리한다.', '다음: 운영 credential 입력 뒤 별도 provider smoke를 실행한다.']
+  ];
+  const questions = Array.from(document.querySelectorAll('.question'));
+  const progress = document.getElementById('progress');
+  questions.forEach((question, index) => {
+    question.querySelector('.submit').addEventListener('click', () => {
+      const selected = question.querySelector('input:checked');
+      const result = question.querySelector('.result');
+      const status = question.querySelector('.status');
+      const explanation = question.querySelector('.explanation');
+      const nextAction = question.querySelector('.next-action');
+      if (!selected) {
+        status.textContent = '미실시';
+        explanation.textContent = '선택한 답변이 없습니다.';
+        nextAction.textContent = '다음: 보기 중 하나를 선택한 뒤 다시 제출하세요.';
+        result.hidden = false;
+        return;
+      }
+      const ok = Number(selected.value) === answers[index];
+      status.textContent = ok ? explanations[index][0] : '추가 확인 필요';
+      explanation.textContent = ok ? explanations[index][1] : '선택한 답변은 승인된 설계의 경계와 다릅니다.';
+      nextAction.textContent = ok ? explanations[index][2] : '다음: 설계의 해당 결정과 불변 조건을 다시 확인하세요.';
+      result.hidden = false;
+      progress.textContent = questions.filter((item) => !item.querySelector('.result').hidden).length + '/5 제출';
+    });
+  });
+</script>
+</body>
+</html>

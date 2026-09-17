@@ -62,6 +62,40 @@ test('MikroORM issue registration passes the transaction context to every raw qu
   assert.ok(calls.every((call) => call.context === transactionContext));
 });
 
+test('MikroORM job claim returns the target job id when the ownership CTE also has an id', async () => {
+  const runId = generateUuidV7();
+  const jobId = generateUuidV7();
+  const issueId = generateUuidV7();
+  const executionId = generateUuidV7();
+  let claimQuery = '';
+  const connection = {
+    execute: async (query: string) => {
+      claimQuery = query;
+      return [
+        {
+          id: jobId,
+          issue_id: issueId,
+          pipeline_run_id: runId,
+          status: 'RUNNING',
+          stage: 'SEARCH',
+          attempt: 1,
+          failure_kind: null,
+          last_error: null,
+        },
+      ];
+    },
+  };
+  const entityManager = { getConnection: () => connection };
+  const repository = new MikroOrmPipelineRepository(entityManager as never);
+
+  const claimed = await repository.claimJob(jobId, 1, executionId);
+
+  assert.equal(claimed?.id, jobId);
+  assert.equal(claimed?.runId, runId);
+  assert.match(claimQuery, /select id as owner_run_id/);
+  assert.match(claimQuery, /returning j\.\*/);
+});
+
 test('MikroORM issue registration persists producer personalization metadata', async () => {
   const runId = generateUuidV7();
   const articleId = generateUuidV7();

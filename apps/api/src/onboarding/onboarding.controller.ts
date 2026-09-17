@@ -36,7 +36,7 @@ export class OnboardingController {
   async searchEntities(
     @TypedQuery<OnboardingEntityQuery>({
       type: 'validate',
-      validate: (input) => typia.validateEquals<OnboardingEntityQuery>(input),
+      validate: (input) => typia.http.validateQuery<OnboardingEntityQuery>(input),
     })
     query: OnboardingEntityQuery,
   ): Promise<OnboardingEntitySearchResult> {

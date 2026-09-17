@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { EntityManager } from '@mikro-orm/core';
 import { Injectable } from '@nestjs/common';
 
+import { executePostgresSql } from '@newtine/core/common/database/postgresSql.js';
 import { generateUuidV7, isUuidV7, type UuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
 import {
   PipelineException,
@@ -45,18 +46,19 @@ function executeInTransaction<T>(
   query: string,
   params: unknown[] = [],
 ): Promise<T> {
-  return em
-    .getConnection()
-    .execute<T>(query, params, 'all', em.getTransactionContext()) as Promise<T>;
+  return executePostgresSql<T>(em, query, params);
 }
 
 @Injectable()
 export class MikroOrmPipelineRepository implements PipelineRunRepository {
   constructor(private readonly entityManager: EntityManager) {}
 
+  private execute<T>(query: string, params: unknown[] = []): Promise<T> {
+    return executePostgresSql<T>(this.entityManager, query, params);
+  }
+
   async enqueue(input: EnqueuePipelineRunInput): Promise<PipelineRunSnapshot> {
-    const connection = this.entityManager.getConnection();
-    const existing = await connection.execute<Row[]>(
+    const existing = await this.execute<Row[]>(
       'select * from pipeline_runs where idempotency_key = $1 limit 1',
       [input.idempotencyKey],
     );
@@ -71,7 +73,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
       return this.readSnapshot(row);
     }
 
-    const active = await connection.execute<Row[]>(
+    const active = await this.execute<Row[]>(
       "select id from pipeline_runs where status in ('QUEUED', 'RUNNING') limit 1",
     );
     if (active.length > 0) {
@@ -83,7 +85,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
 
     const id = generateUuidV7();
     try {
-      const rows = await connection.execute<Row[]>(
+      const rows = await this.execute<Row[]>(
         `insert into pipeline_runs
           (id, idempotency_key, request_hash, request_json, status, attempt, candidate_counts, created_at, updated_at)
          values ($1, $2, $3, $4::jsonb, 'QUEUED', 1,
@@ -95,7 +97,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     } catch (error: unknown) {
       if (isUniqueViolation(error)) {
         const row = (
-          await connection.execute<Row[]>(
+          await this.execute<Row[]>(
             'select * from pipeline_runs where idempotency_key = $1 limit 1',
             [input.idempotencyKey],
           )
@@ -107,7 +109,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
             '멱등 키가 다른 요청에 사용되었습니다.',
           );
         }
-        const activeAfterRace = await connection.execute<Row[]>(
+        const activeAfterRace = await this.execute<Row[]>(
           "select id from pipeline_runs where status in ('QUEUED', 'RUNNING') limit 1",
         );
         if (activeAfterRace.length > 0) {
@@ -126,9 +128,9 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
   }
 
   async findById(runId: UuidV7): Promise<PipelineRunSnapshot | null> {
-    const rows = await this.entityManager
-      .getConnection()
-      .execute<Row[]>('select * from pipeline_runs where id = $1 limit 1', [runId]);
+    const rows = await this.execute<Row[]>('select * from pipeline_runs where id = $1 limit 1', [
+      runId,
+    ]);
     const row = rows[0];
     if (row === undefined) return null;
     return this.readSnapshot(row);
@@ -360,7 +362,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
   }
 
   async claimNext(executionId: UuidV7): Promise<PipelineRunWork | null> {
-    const rows = await this.entityManager.getConnection().execute<Row[]>(
+    const rows = await this.execute<Row[]>(
       `with picked as (
          select id from pipeline_runs where status = 'QUEUED' order by created_at, id
          limit 1 for update skip locked
@@ -379,9 +381,8 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     _runId: UuidV7,
     articles: DiscoveredArticle[],
   ): Promise<DiscoveredArticle[]> {
-    const connection = this.entityManager.getConnection();
     const result: DiscoveredArticle[] = [];
-    const existingRows = await connection.execute<Row[]>(
+    const existingRows = await this.execute<Row[]>(
       'select id, title, description, article_url, naver_url, publisher_name, published_at from articles',
     );
     const existingByNormalizedUrl = new Map<string, Row>(
@@ -391,7 +392,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
       const normalizedUrl = normalizePipelineArticleUrl(article.sourceUrl);
       const existing = existingByNormalizedUrl.get(normalizedUrl);
       if (existing !== undefined) {
-        const updatedRows = await connection.execute<Row[]>(
+        const updatedRows = await this.execute<Row[]>(
           `update articles set title = $2, description = $3,
              naver_url = coalesce($4, naver_url), publisher_name = $5,
              published_at = coalesce($6, published_at), updated_at = now()
@@ -412,7 +413,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
         continue;
       }
       const id = article.id ?? generateUuidV7();
-      const rows = await connection.execute<Row[]>(
+      const rows = await this.execute<Row[]>(
         `insert into articles (id, title, description, article_url, naver_url, publisher_name, published_at, source_status, created_at, updated_at)
          values ($1, $2, $3, $4, $5, $6, $7, 'AVAILABLE', now(), now())
          on conflict (article_url) do update set title = excluded.title, description = excluded.description,
@@ -437,7 +438,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
   }
 
   async loadExistingIssues(query: string): Promise<ExistingIssueSummary[]> {
-    const rows = await this.entityManager.getConnection().execute<Row[]>(
+    const rows = await this.execute<Row[]>(
       `select i.id, i.title, i.publication_status, d.integrated_summary
        from issues i left join issue_details d on d.issue_id = i.id
        where i.title ilike '%' || $1 || '%' or coalesce(d.integrated_summary, '') ilike '%' || $1 || '%'
@@ -456,7 +457,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
   }
 
   async loadIssue(issueId: UuidV7): Promise<ExistingIssueSummary | null> {
-    const rows = await this.entityManager.getConnection().execute<Row[]>(
+    const rows = await this.execute<Row[]>(
       `select i.id, i.title, i.publication_status, d.integrated_summary
        from issues i left join issue_details d on d.issue_id = i.id where i.id = $1 limit 1`,
       [issueId],
@@ -476,7 +477,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
   }
 
   async loadSeedArticles(issueId: UuidV7): Promise<DiscoveredArticle[]> {
-    const rows = await this.entityManager.getConnection().execute<Row[]>(
+    const rows = await this.execute<Row[]>(
       `select a.id, a.title, a.description, a.article_url, a.naver_url, a.publisher_name, a.published_at
        from issue_seed_articles s join articles a on a.id = s.article_id where s.issue_id = $1 order by a.published_at desc nulls last`,
       [issueId],
@@ -594,7 +595,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     executionId: UuidV7,
     outcome: DiscoveryOutcome,
   ): Promise<void> {
-    await this.entityManager.getConnection().execute(
+    await this.execute(
       `update pipeline_runs set candidate_counts = $4::jsonb, current_stage = 'SEARCH', updated_at = now()
        where id = $1 and attempt = $2 and execution_id = $3 and status = 'RUNNING'`,
       [runId, attempt, executionId, JSON.stringify(outcome)],
@@ -608,7 +609,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     _failureKind: string,
     message: string,
   ): Promise<void> {
-    await this.entityManager.getConnection().execute(
+    await this.execute(
       `update pipeline_runs set status = 'FAILED', last_error = $4, finished_at = now(), updated_at = now()
        where id = $1 and attempt = $2 and execution_id = $3 and status = 'RUNNING'`,
       [runId, attempt, executionId, safeError(message)],
@@ -625,14 +626,14 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     attempt: number,
     executionId: UuidV7,
   ): Promise<PipelineJobRecord | null> {
-    const rows = await this.entityManager.getConnection().execute<Row[]>(
+    const rows = await this.execute<Row[]>(
       `with owner as (
-         select id from pipeline_runs where execution_id = $3 and status = 'RUNNING' for update
+         select id as owner_run_id from pipeline_runs where execution_id = $3 and status = 'RUNNING' for update
        )
        update issue_content_jobs j set status = 'RUNNING', updated_at = now()
        from owner
-       where j.id = $1 and j.attempt = $2 and j.status = 'QUEUED' and j.pipeline_run_id = owner.id
-       returning *`,
+       where j.id = $1 and j.attempt = $2 and j.status = 'QUEUED' and j.pipeline_run_id = owner.owner_run_id
+       returning j.*`,
       [jobId, attempt, executionId],
     );
     return rows[0] === undefined ? null : this.toJob(rows[0]!);
@@ -644,7 +645,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     executionId: UuidV7,
     stage: PipelineJobStage,
   ): Promise<void> {
-    await this.entityManager.getConnection().execute(
+    await this.execute(
       `update pipeline_runs set current_stage = $4, updated_at = now()
        where id = $1 and attempt = $2 and execution_id = $3 and status = 'RUNNING'`,
       [runId, attempt, executionId, stage],
@@ -657,7 +658,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     executionId: UuidV7,
     stage: PipelineJobStage,
   ): Promise<void> {
-    await this.entityManager.getConnection().execute(
+    await this.execute(
       `with owner as (
          select id from pipeline_runs where execution_id = $3 and status = 'RUNNING' for update
        )
@@ -839,7 +840,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
     failureKind: PipelineJobRecord['failureKind'],
     message: string,
   ): Promise<void> {
-    await this.entityManager.getConnection().execute(
+    await this.execute(
       `with owner as (
          select id from pipeline_runs where execution_id = $3 and status = 'RUNNING' for update
        )
@@ -852,7 +853,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
   }
 
   async completeRun(runId: UuidV7, attempt: number, executionId: UuidV7): Promise<void> {
-    await this.entityManager.getConnection().execute(
+    await this.execute(
       `with counts as (
          select count(*) filter (where status = 'SUCCEEDED') as succeeded,
                 count(*) filter (where status = 'FAILED') as failed,
@@ -1055,7 +1056,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
 
   async listPendingEmbeddingTasks(limit: number): Promise<PipelineEmbeddingTask[]> {
     const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 100) : 100;
-    const rows = await this.entityManager.getConnection().execute<Row[]>(
+    const rows = await this.execute<Row[]>(
       `select t.id, t.issue_id, t.pipeline_run_id, t.issue_content_job_id, t.run_attempt,
               t.run_execution_id, t.input_hash, t.model, t.status, t.attempt_count, t.last_error,
               t.claim_token, t.claimed_by_process_execution_id, t.claimed_at,
@@ -1144,11 +1145,10 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
   }
 
   private async readJobs(runId: string): Promise<PipelineJobRecord[]> {
-    const rows = await this.entityManager
-      .getConnection()
-      .execute<
-        Row[]
-      >('select * from issue_content_jobs where pipeline_run_id = $1 order by created_at, id', [runId]);
+    const rows = await this.execute<Row[]>(
+      'select * from issue_content_jobs where pipeline_run_id = $1 order by created_at, id',
+      [runId],
+    );
     return rows.map((row: Row) => this.toJob(row));
   }
 
@@ -1163,7 +1163,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
 
   private async readEmbeddingPendingCount(runId: string): Promise<number> {
     const row = (
-      await this.entityManager.getConnection().execute<Row[]>(
+      await this.execute<Row[]>(
         `select count(*)::int as count
          from issue_embedding_tasks t
          join issues i on i.id = t.issue_id and i.publication_status = 'PUBLISHED'
@@ -1179,7 +1179,7 @@ export class MikroOrmPipelineRepository implements PipelineRunRepository {
 
   private async readUsageSummary(runId: string): Promise<PipelineUsageSummary> {
     const row = (
-      await this.entityManager.getConnection().execute<Row[]>(
+      await this.execute<Row[]>(
         `select count(*)::int as calls,
                 count(*) filter (where status = 'SUCCEEDED')::int as succeeded_calls,
                 count(*) filter (where status = 'FAILED')::int as failed_calls,

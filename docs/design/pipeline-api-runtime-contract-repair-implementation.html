@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="승인된 pipeline API 런타임 계약 복구 설계를 구현·검증하고 잔여 운영 위험을 기록">
+  <meta name="audience" content="NEWTINE 백엔드 개발자와 구현·운영 검토자">
+  <meta name="problem" content="MikroORM pipeline raw SQL의 PostgreSQL placeholder 실행 실패, TypedQuery query 파싱 누락, Compose batch pipeline 환경변수 미전달을 해결">
+  <meta name="core-flow" content="승인 기준 확인 → SQL·query·env 경계 구현 → 정적 게이트 → Compose live 검증 → 잔여 위험 기록">
+  <title>Pipeline API 런타임 계약 복구 구현 제어</title>
+  <style>
+    :root { --ink:#172b42; --muted:#526476; --line:#ccd5dd; --paper:#fff; --wash:#f4f7fa; --accent:#145ba8; }
+    * { box-sizing:border-box; } body { margin:0; background:var(--wash); color:var(--ink); font:16px/1.7 system-ui,sans-serif; }
+    .shell { max-width:1000px; margin:0 auto; padding:28px 22px 64px; } header,article { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:24px; } article { margin-top:16px; }
+    h1,h2,h3 { line-height:1.3; } h1 { margin-top:0; } h2 { border-top:1px solid var(--line); padding-top:20px; margin-top:28px; }
+    nav { margin:16px 0; padding:12px 16px; background:var(--paper); border:1px solid var(--line); border-radius:10px; } nav a { color:var(--accent); margin-right:14px; }
+    dt { font-weight:700; } dd { margin:0 0 8px; color:var(--muted); } code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; } code { background:#eef2f6; padding:1px 4px; border-radius:4px; } pre { overflow-x:auto; padding:14px; background:#101923; color:#edf4fb; border-radius:8px; }
+    .state { display:inline-block; padding:3px 9px; border-radius:999px; background:#e9f1fb; color:#145ba8; font-weight:700; } .issue { border-left:4px solid #cc8b00; background:#fff4d6; padding:10px 14px; }
+    .question { border:1px solid var(--line); border-radius:9px; padding:14px; margin:14px 0; } fieldset { border:0; padding:0; margin:0; } legend { font-weight:700; } label { display:block; margin:4px 0; }
+    button { border:1px solid #7292ad; background:#eef5fb; color:var(--ink); border-radius:6px; padding:7px 12px; cursor:pointer; } .result { margin-top:12px; padding:10px 12px; background:#f4f7fa; border-radius:7px; } .result h3 { margin-top:0; } .result p { margin:3px 0; } .result .status { font-weight:700; }
+  </style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <p><span class="state">재검토 필요</span> · Standard · <time datetime="2026-09-17">2026-09-17</time></p>
+    <h1>Pipeline API 런타임 계약 복구 구현 제어</h1>
+    <dl>
+      <dt>목적 (purpose)</dt><dd>승인된 pipeline API 런타임 계약 복구 설계를 구현·검증하고 잔여 운영 위험을 기록</dd>
+      <dt>사용자 (audience)</dt><dd>NEWTINE 백엔드 개발자와 구현·운영 검토자</dd>
+      <dt>문제 (problem)</dt><dd>MikroORM pipeline raw SQL의 PostgreSQL placeholder 실행 실패, TypedQuery query 파싱 누락, Compose batch pipeline 환경변수 미전달을 해결</dd>
+      <dt>핵심 흐름 (core-flow)</dt><dd>승인 기준 확인 → SQL·query·env 경계 구현 → 정적 게이트 → Compose live 검증 → 잔여 위험 기록</dd>
+      <dt>리뷰 유형</dt><dd>현재 작업 흐름에서 구현된 자기 변경에 대한 read-only engineering review</dd>
+      <dt>작성자·리뷰어</dt><dd>Codex 구현 · Codex 재리뷰</dd>
+      <dt>저장소·브랜치·범위</dt><dd><code>newtine-backend</code> · <code>main</code> · <code>HEAD 111671b</code> 대비 현재 working tree 변경</dd>
+      <dt>PR·이슈</dt><dd>없음. 승인 설계 <code>pipeline-api-runtime-contract-repair-design.html</code>와 as-built 및 실제 diff를 대조</dd>
+      <dt>리뷰 범위</dt><dd>PostgreSQL raw execution, pipeline 상태·실패 복구, Naver/OpenAI live 경계, TypedQuery, Compose env, unit/integration gate</dd>
+      <dt>갱신</dt><dd><time datetime="2026-09-17">2026-09-17</time></dd>
+    </dl>
+  </header>
+  <nav aria-label="구현 제어 탐색"><a href="#baseline-reference">기준선</a><a href="#current-implementation">현재 구현</a><a href="#issue-register">이슈</a><a href="#verification-evidence">검증</a><a href="#review">재리뷰</a><a href="#residual-risks">잔여 위험</a><a href="#implementation-control-state">통제 상태</a></nav>
+  <main><article>
+    <section id="baseline-reference">
+      <h2>승인 기준선</h2>
+      <p><a href="pipeline-api-runtime-contract-repair-design.html">pipeline-api-runtime-contract-repair-design.html</a>의 2026-09-17T00:33:58+09:00 승인 범위를 따른다.</p>
+      <ul><li>공통 PostgreSQL raw execution helper와 pipeline repository 연결</li><li>세 TypedQuery 사용처의 typia HTTP decoder 전환</li><li>Compose batch provider·AI config env 및 migration dependency 연결</li><li>typecheck, lint, unit/contract, image rebuild, live API·DB 검증</li></ul>
+    </section>
+    <section id="current-implementation">
+      <h2>현재 구현과 변경 경계</h2>
+      <dl><dt>현재 상태</dt><dd>구현·이미지 재빌드·정적/단위/통합/계약/Compose live 검증 완료. 실제 Naver/OpenAI 외부 호출까지 확인했고 테스트 fixture는 exact ID로 정리했다.</dd>
+      <dt>SQL</dt><dd><code>libs/core/src/common/database/postgresSql.ts</code>가 실제 PostgreSQL에서는 <code>executeQuery</code>로 원래 <code>$n</code> placeholder와 transaction context를 보존한다. pipeline repository의 모든 raw query가 공통 helper를 사용하고, report helper도 이를 재사용한다. job claim은 ownership CTE의 중복 <code>id</code>를 alias하고 <code>returning j.*</code>를 사용해 실제 job ID를 보존한다.</dd>
+      <dt>HTTP query</dt><dd><code>apps/api/src/onboarding/onboarding.controller.ts</code>, <code>apps/api/src/issue/feed.controller.ts</code>, <code>apps/api/src/interest/interest.controller.ts</code>의 <code>TypedQuery</code> validator를 <code>typia.http.validateQuery</code>로 전환했다.</dd>
+      <dt>운영 설정</dt><dd><code>compose.yaml</code>의 <code>batch.environment</code>에 provider/config/worker env를 연결하고, batch가 migration 완료 뒤 시작되도록 dependency를 추가했다. 현재 env로 Naver 검색·OpenAI 후보/본문 생성/검증/embedding 호출까지 확인했다.</dd>
+      <dt>금지 범위</dt><dd>schema/migration, 의도된 API payload, provider secret 값, 외부 API 계약은 변경하지 않는다.</dd></dl>
+    </section>
+    <section id="design-delta">
+      <h2>설계 delta와 결정 이력</h2>
+      <p>현재 없음. 승인 baseline의 SQL helper·query decoder·batch env 범위를 그대로 구현한다. 구현 중 계약·상태·실패 처리·검증 전략이 바뀌면 설계 문서를 재승인 필요로 되돌리고 멈춘다.</p>
+      <ol><li>원래 PostgreSQL positional query와 transaction context를 보존한다.</li><li>raw request 수동 파싱 대신 typia HTTP decoder를 사용한다.</li><li>provider env는 API가 아니라 worker인 <code>batch</code>에만 전달한다.</li></ol>
+    </section>
+    <section id="affected-boundaries">
+      <h2>영향 경계와 상태 전이</h2>
+      <pre>HTTP create -- DB only --> QUEUED run
+                              |
+                              +-- batch worker -- NAVER/OpenAI --> SUCCEEDED or FAILED
+
+URL query -- validateQuery --> typed DTO --> service limit/offset/cursor</pre>
+      <p>create의 202 persistence 성공과 worker 외부 provider 성공은 별도 상태 경계다. query 실패는 service 진입 전 400이어야 한다.</p>
+    </section>
+    <section id="issue-register">
+      <h2>이슈 레지스터</h2>
+      <div class="issue"><dl>
+        <dt>PIPE-001 · 해결됨</dt><dd>공통 raw PostgreSQL execution helper로 교체했다. live create/get/replay는 202/200/202, QUEUED 상태의 retry/interrupt는 409 도메인 응답으로 확인했다.</dd>
+        <dt>PIPE-002 · 해결됨</dt><dd><code>claimJob</code>의 <code>UPDATE ... FROM owner RETURNING *</code>가 소유 run의 <code>id</code>로 target job ID를 덮어쓰던 문제를 확인했다. ownership alias와 <code>returning j.*</code>로 수정하고 job usage·stage·failure 전이를 live 재검증했다.</dd>
+        <dt>QUERY-001 · 해결됨</dt><dd>세 TypedQuery 사용처를 HTTP decoder로 전환했다. 유효 query는 200, <code>limit=0</code>, 비정수 limit, 빈 cursor는 400으로 확인했다.</dd>
+        <dt>ENV-001 · 해결됨</dt><dd>batch에 env 매핑과 migration dependency를 추가했고 현재 값으로 실제 Naver/OpenAI 호출을 완료했다.</dd>
+      </dl></div>
+    </section>
+    <section id="verification-evidence">
+      <h2>검증 증거</h2>
+      <ul><li><code>npm run typecheck</code>, <code>npm run lint</code>, <code>npm run build</code> 통과.</li><li><code>npm run test:unit</code>: 43 suites, 209 tests 통과. <code>MikroOrmPipelineRepository</code> 회귀 테스트 9개 통과. <code>npm run test:contracts</code>: 5 tests 통과. <code>npm run test:integration</code>: 2 suites, 11 tests 통과, 8 skipped.</li><li><code>docker compose up -d --build --wait db migrate api</code> 성공, <code>GET /health</code> 200.</li><li>live pipeline create/get/idempotency replay는 202/200/202, QUEUED retry/interrupt는 409. onboarding/feed/interest의 유효 query는 200, invalid query는 400.</li><li>현재 credential로 실제 <code>정책</code> 실행을 수행했다. Naver discovery 20건, OpenAI 후보 분류 성공, 후보 3건 중 1건은 원문 2건 확보·OpenAI 생성·semantic validation·embedding·<code>PUBLISHED</code>까지 성공했다. 나머지 2건은 허용되지 않은 원문으로 <code>SOURCE_UNAVAILABLE</code> 처리되어 전체 run은 <code>PARTIALLY_SUCCEEDED</code>로 정상 종료했다.</li><li>사용량 ledger 22건이 job ID와 함께 저장됐고, 임시 admin user/run/articles/issues/usage는 exact ID로 삭제했다. 삭제 확인값은 모두 0이다.</li></ul>
+      <p>재현에 사용한 핵심 명령:</p><pre>npm run typecheck
+npm run lint
+npm run test:unit
+npm run test:contracts
+npm run test:integration
+npm run build
+docker compose up -d --build --wait db migrate api
+SMOKE_DB_HOST=127.0.0.1 SMOKE_DB_PORT=5432 SMOKE_DB_NAME=newtine SMOKE_DB_USER=postgres SMOKE_DB_PASSWORD=postgres API_BASE_URL=http://127.0.0.1:3000 npm run test:smoke:compose:data
+SMOKE_DB_HOST=127.0.0.1 SMOKE_DB_PORT=5432 SMOKE_DB_NAME=newtine SMOKE_DB_USER=postgres SMOKE_DB_PASSWORD=postgres API_BASE_URL=http://127.0.0.1:3000 npm run test:smoke:compose:actions</pre>
+    </section>
+    <section id="verification-gaps">
+      <h2>검증 공백</h2>
+      <ul><li>Naver API가 반환하는 일부 <code>originallink/link</code>가 외부 언론사 도메인이라 현재 본문 provider 허용 목록에서 제외된다. 실제 실행에서 3개 후보 중 2개가 이 경계로 실패했다.</li><li>admin pipeline live test는 임시 fixture가 필요하며, 이번 실행에서는 exact user/run을 생성 후 정리했다.</li><li>report DB integration opt-in gap으로 integration 3 suites, 8 tests가 skip된 상태다.</li></ul>
+    </section>
+    <section id="residual-risks">
+      <h2>잔여 위험과 복구</h2>
+      <dl><dt>원문 source coverage</dt><dd>현재 정책은 Naver 허용 host만 본문을 읽는다. 외부 언론사 원문을 지원하려면 허용 도메인·리디렉션·robots/법적 범위를 별도 결정한 뒤 adapter를 확장해야 한다.</dd><dt>SQL helper 회귀</dt><dd>enqueue·claim·retry·interrupt·registration과 job claim ID mapping을 Compose DB로 확인했다. 재발 시 SQL placeholder·params·transaction context와 반환 컬럼 충돌을 함께 비교한다.</dd><dt>fixture 오염</dt><dd>이번 검증에서 생성한 exact user/run은 삭제했고 기존 feed session은 보존했다.</dd></dl>
+    </section>
+    <section id="review">
+      <h2>꼼꼼한 재리뷰</h2>
+      <p>리뷰 기준은 <code>입력 → 판단 → 상태 변화 → 외부 부작용 → 관찰 결과</code>의 수직 경로다. 구현 자체의 승인 범위와 실제 working tree diff를 대조했으며, 이미 수정된 결함은 중복 finding으로 남기지 않고 <code>fixed</code>로 기록했다.</p>
+      <figure><pre>API create → QUEUED run → claimNext/RUNNING
+                       → Naver search → candidate registration
+                       → claimJob → article fetch → OpenAI generate/validate
+                       → atomic publish + embedding task → terminal run
+                       ↘ failure finalization / retry / interrupt</pre><figcaption>정상 경로는 실제 provider 호출과 DB 상태로 확인했다. 실패 finalization은 DB 쓰기 자체가 실패하는 2차 오류 경로를 별도로 검토했다.</figcaption></figure>
+      <table>
+        <caption>Finding register · 심각도순</caption>
+        <thead><tr><th scope="col">ID</th><th scope="col">상태·심각도</th><th scope="col">근거와 실제 동작</th><th scope="col">최소 조치</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">PIPE-002</th><td><code>fixed</code><br>Blocker 해결</td><td><code>libs/core/src/pipeline/repository/mikroOrmPipeline.repository.ts:629-639</code>. 기존 <code>UPDATE ... FROM owner RETURNING *</code>는 두 <code>id</code> 중 소유 run ID가 job ID를 덮어썼고, usage·stage·failure 전이가 잘못된 대상에 적용됐다. <code>owner_run_id</code>와 <code>returning j.*</code>로 수정했으며 live에서 job ID·ledger·terminal 상태를 재확인했다.</td><td>현재 수정 유지. PostgreSQL driver 반환 shape를 자동 회귀 테스트에 추가한다.</td></tr>
+          <tr><th scope="row">STATE-001</th><td><code>open</code><br>Non-blocking risk</td><td><code>apps/batch/src/pipeline/pipeline.worker.ts:439-447</code>의 <code>saveJobFailure</code>가 DB 장애로 throw하면 <code>processRun</code>의 catch로 올라간다. <code>failRun</code>(<code>libs/core/src/pipeline/repository/mikroOrmPipeline.repository.ts:605-617</code>)은 run만 <code>FAILED</code>로 만들고 <code>QUEUED/RUNNING</code> job을 정리하지 않는다. 따라서 run은 종료됐는데 job은 <code>RUNNING</code>으로 남아 active index와 CONTENT retry를 막을 수 있다.</td><td>run 실패 finalization을 job 정리와 원자적으로 묶거나, 종료 확인 후 <code>RUNNING</code> job을 복구하는 lease/reaper를 둔다. 원래 장애 원인은 보존한다.</td></tr>
+          <tr><th scope="row">SRC-001</th><td><code>open</code><br>논의 필요</td><td><code>apps/batch/src/pipeline/naverNews.provider.ts:69-77</code>는 <code>link</code>를 우선 사용하고 Naver host allowlist 밖이면 즉시 <code>SOURCE_UNAVAILABLE</code>로 처리한다. 실제 <code>정책</code> 실행에서 후보 3건 중 2건이 외부 언론사 URL 경계로 실패해 1건만 <code>PUBLISHED</code>, run은 <code>PARTIALLY_SUCCEEDED</code>였다. 보안상 의도된 정책인지, 검색 결과 커버리지 결함인지 제품 결정이 필요하다.</td><td>외부 publisher가 범위면 명시적 allowlist/adapter·redirect·robots/법적 정책과 테스트를 추가한다. 범위 밖이면 현재 partial 성공률과 운영 알림을 계약으로 문서화한다.</td></tr>
+          <tr><th scope="row">TEST-001</th><td><code>open</code><br>Non-blocking risk</td><td><code>test/unit/mikroOrmPipelineRepository.test.ts:65-97</code>는 lightweight connection double과 SQL 문자열을 검증한다. duplicate-column driver mapping 자체는 재현하지 못하고, 그 결함은 이번 수동 live 실행에서 발견됐다.</td><td>disposable PostgreSQL integration 또는 실제 driver 반환 shape를 모사하는 adapter 회귀 테스트를 추가한다.</td></tr>
+          <tr><th scope="row">TEST-002</th><td><code>open</code><br>Non-blocking risk</td><td><code>npm test</code>는 통과하지만 현재 출력은 unit 43 suites/209 tests와 integration 11 tests 통과에 더해 report integration 8 tests를 <code>skipped</code>로 둔다. <code>REPORT_TEST_DATABASE_URL</code>이 없으면 세 suite가 <code>test.skip</code>이므로 기본 green gate가 report PostgreSQL 동작을 보장하지 않는다. 별도 disposable DB 수동 실행 8건은 통과했다.</td><td>report disposable DB를 기본 integration runner/CI에 연결하거나, 해당 환경에서 URL이 없으면 명시적으로 fail-fast하도록 결정한다.</td></tr>
+          <tr><th scope="row">VERIFY-001</th><td><code>open</code><br>Non-blocking risk</td><td><code>npm run format:check</code>가 새 <code>libs/core/src/common/database/postgresSql.ts:11-13</code>만 Prettier 경고로 실패했다. typecheck·lint·build 및 diff check는 통과했지만 현재 전체 로컬 gate는 완전 green이 아니다.</td><td>해당 helper만 저장소 Prettier 출력에 맞춘 뒤 format check를 재실행한다.</td></tr>
+        </tbody>
+      </table>
+      <h3>검증 증거와 공백</h3>
+      <ul><li>정적·단위·계약·build와 Compose live API/DB 검증은 통과했다. 실제 Naver discovery, OpenAI candidate/content/validation/embedding 호출과 usage 22건 저장도 확인했다.</li><li>실제 pipeline run의 fixture는 exact ID로 정리되어 잔여 active run/job이 0임을 확인했다.</li><li>수동 report DB 검증은 통과했지만 기본 <code>npm test</code>의 skip 상태를 대체하지 않는다. <code>format:check</code>도 현재 실패 상태다.</li></ul>
+      <aside><strong>리뷰 판단: 논의 필요</strong><br>현재 수정은 핵심 SQL/HTTP/env 문제를 해결했고, PIPE-002는 실제 장애 재현 후 고쳐졌다. 다만 원문 provider 범위는 제품 정책 결정이 필요하고, DB 2차 장애 시 job 복구와 report test gate는 후속 보완 없이는 운영 신뢰도를 낮춘다. 이는 구현 완료·출시 판정과 별도의 리뷰 결론이다.</aside>
+    </section>
+    <section id="implementation-control-state">
+      <h2>구현 제어 상태</h2>
+      <p><strong>기술 상태:</strong> 구현 완료 및 실제 provider live 검증 통과. 원문 source coverage는 별도 정책 결정 대기.</p><p><strong>구현 이슈:</strong> PIPE-001·PIPE-002·QUERY-001·ENV-001 해결. 외부 언론사 원문 허용 범위는 미결정.</p><p><strong>개발자 운영 이해:</strong> 미실시. 아래 점검 결과를 사용자가 제출했다는 증거는 없으므로 운영 이해 확립으로 표시하지 않는다. HTML 결과는 Codex에 자동 전달되지 않는다.</p>
+      <div class="question"><fieldset><legend>I1 · create가 202인데 worker가 실패하면 첫 확인 지점은?</legend><label><input type="radio" name="i0" value="0">run status와 batch 로그·provider env 존재 여부를 분리 확인한다.</label><label><input type="radio" name="i0" value="1">API controller가 provider를 다시 호출하도록 수정한다.</label></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div>
+      <div class="question"><fieldset><legend>I2 · invalid query가 service까지 도달하면?</legend><label><input type="radio" name="i1" value="0">compiled query decoder와 DTO validator를 먼저 확인하고 400 경계를 복구한다.</label><label><input type="radio" name="i1" value="1">service 기본값을 바꿔 invalid input을 흡수한다.</label></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div>
+      <div class="question"><fieldset><legend>I3 · SQL 500 재발 시 비교할 증거는?</legend><label><input type="radio" name="i2" value="0">raw query의 placeholder·params·transaction context와 API stack을 비교한다.</label><label><input type="radio" name="i2" value="1">DB를 초기화하고 같은 요청을 무조건 반복한다.</label></fieldset><button type="button" class="submit">답변 제출</button><div class="result" hidden><h3>점검 결과</h3><p class="status"></p><p class="explanation"></p><p class="next-action"></p></div></div>
+      <p id="progress" aria-live="polite">0/3 제출</p>
+    </section>
+  </article></main>
+</div>
+<script>
+  const answers = [0, 0, 0];
+  const explanations = [
+    ['확립', '202 응답은 enqueue 성공일 뿐이다. 외부 provider는 batch 상태와 로그에서 진단한다.', '다음: run status와 batch env를 함께 확인한다.'],
+    ['확립', '입력 계약의 경계는 service 전 validator다. 기본값으로 invalid input을 숨기지 않는다.', '다음: compiled TypedQuery와 typia output을 확인한다.'],
+    ['확립', '재현 가능한 원인은 SQL text, params, transaction context, stack을 함께 비교한다.', '다음: exact fixture로 한 번 재현하고 변경된 경계만 검증한다.']
+  ];
+  const questions = Array.from(document.querySelectorAll('.question'));
+  const progress = document.getElementById('progress');
+  questions.forEach((question, index) => {
+    question.querySelector('.submit').addEventListener('click', () => {
+      const selected = question.querySelector('input:checked');
+      const result = question.querySelector('.result');
+      const status = question.querySelector('.status');
+      const explanation = question.querySelector('.explanation');
+      const nextAction = question.querySelector('.next-action');
+      if (!selected) { status.textContent = '미실시'; explanation.textContent = '선택한 답변이 없습니다.'; nextAction.textContent = '다음: 보기를 선택한 뒤 다시 제출하세요.'; result.hidden = false; return; }
+      const ok = Number(selected.value) === answers[index];
+      status.textContent = ok ? explanations[index][0] : '추가 확인 필요';
+      explanation.textContent = ok ? explanations[index][1] : '선택한 답변은 as-built 운영 경계와 다르다.';
+      nextAction.textContent = ok ? explanations[index][2] : '다음: 구현 제어 기록과 실제 증거를 다시 확인하세요.';
+      result.hidden = false;
+      progress.textContent = questions.filter((item) => !item.querySelector('.result').hidden).length + '/3 제출';
+    });
+  });
+</script>
+</body>
+</html>
