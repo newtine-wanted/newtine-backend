@@ -1,14 +1,21 @@
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '@jest/globals';
 
-import { normalizeOpenApiDocument, PROBLEM_DETAILS_REF } from '../../scripts/openapi.mjs';
+import {
+  API_PREFIX,
+  normalizeOpenApiDocument,
+  PROBLEM_DETAILS_REF,
+} from '../../scripts/openapi.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const generatedRoot = join(root, 'generated');
 const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace']);
+const apiPath = (path) => `${API_PREFIX}${path}`;
+const GENERATED_PATH_COMMENT = /@path\s+\S+\s+(\/\S+)/g;
+const ROOT_PATH_LITERAL = /(["'`])\/(?!api(?:\/|["'`]))/;
 const EXPECTED_FAILURE_STATUSES = {
   '/issues/search': ['400', '413', '500'],
   '/issues/{issueId}': ['400', '401', '404', '503'],
@@ -88,11 +95,59 @@ test('Nestia emits the required contract artifacts', async () => {
   await Promise.all(requiredFiles.map((file) => access(join(generatedRoot, file))));
 });
 
+test('generated SDK route metadata and path literals use the API prefix', async () => {
+  async function collectTypeScriptFiles(directory) {
+    const entries = await readdir(directory, { withFileTypes: true });
+    const files = [];
+    for (const entry of entries) {
+      const file = join(directory, entry.name);
+      if (entry.isDirectory()) files.push(...(await collectTypeScriptFiles(file)));
+      else if (entry.isFile() && entry.name.endsWith('.ts')) files.push(file);
+    }
+    return files;
+  }
+
+  const files = await collectTypeScriptFiles(join(generatedRoot, 'api'));
+  let routeCommentCount = 0;
+  for (const file of files) {
+    const source = await readFile(file, 'utf8');
+    for (const match of source.matchAll(GENERATED_PATH_COMMENT)) {
+      routeCommentCount += 1;
+      assert.equal(
+        match[1] === API_PREFIX || match[1].startsWith(`${API_PREFIX}/`),
+        true,
+        `${file} has an unprefixed generated route comment: ${match[1]}`,
+      );
+    }
+    assert.equal(
+      ROOT_PATH_LITERAL.test(source),
+      false,
+      `${file} contains a root path literal that is not under ${API_PREFIX}`,
+    );
+  }
+  assert.ok(routeCommentCount > 0, 'generated SDK route comments must be present');
+});
+
 test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   const document = JSON.parse(await readFile(join(generatedRoot, 'openapi.json'), 'utf8'));
 
   assert.equal(document.openapi, '3.1.0');
   assert.deepEqual(document.servers, [{ url: '/', description: 'Current API origin' }]);
+  assert.ok(Object.keys(document.paths ?? {}).length > 0);
+  for (const path of Object.keys(document.paths ?? {})) {
+    assert.equal(
+      path === API_PREFIX || path.startsWith(`${API_PREFIX}/`),
+      true,
+      `${path} must use ${API_PREFIX}`,
+    );
+  }
+  for (const removedPath of ['/onboarding/options', '/onboarding/entities']) {
+    assert.equal(
+      document.paths?.[apiPath(removedPath)],
+      undefined,
+      `${removedPath} must remain removed from the generated contract`,
+    );
+  }
 
   const schemas = document.components?.schemas;
   const problemDetails = schemas?.ProblemDetails;
@@ -103,7 +158,7 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   assert.equal(schemas?.PipelineRunLimitsRequest, undefined);
 
   const retrySchema =
-    document.paths?.['/pipeline/runs/{runId}/retry']?.post?.requestBody?.content?.[
+    document.paths?.[apiPath('/pipeline/runs/{runId}/retry')]?.post?.requestBody?.content?.[
       'application/json'
     ]?.schema;
   assert.deepEqual(retrySchema?.discriminator?.propertyName, 'scope');
@@ -128,7 +183,7 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
     '/me/interest-analysis',
     '/me/liked-issues',
   ]) {
-    const operation = Object.values(document.paths[path] ?? {}).find(
+    const operation = Object.values(document.paths[apiPath(path)] ?? {}).find(
       (value) => value && typeof value === 'object' && 'security' in value,
     );
     assert.deepEqual(operation?.security, [{ bearerAuth: [] }], `${path} must require bearerAuth`);
@@ -140,13 +195,13 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
     '/pipeline/runs/{runId}/retry',
     '/pipeline/runs/{runId}/interrupt',
   ]) {
-    const operation = Object.values(document.paths[path] ?? {}).find(
+    const operation = Object.values(document.paths[apiPath(path)] ?? {}).find(
       (value) => value && typeof value === 'object' && 'security' in value,
     );
     assert.deepEqual(operation?.security, [{ bearerAuth: [] }], `${path} must require bearerAuth`);
   }
 
-  const feed = document.paths?.['/feed']?.get;
+  const feed = document.paths?.[apiPath('/feed')]?.get;
   assert.deepEqual(feed?.security, [{ bearerAuth: [] }, { guestFeedCookie: [] }, {}]);
   assert.deepEqual(feed?.parameters, [
     {
@@ -167,7 +222,7 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
     'nextCursor',
   ]);
 
-  const publicDetail = document.paths?.['/issues/{issueId}']?.get;
+  const publicDetail = document.paths?.[apiPath('/issues/{issueId}')]?.get;
   assert.deepEqual(publicDetail?.security, [{ bearerAuth: [] }, {}]);
 
   for (const [path, pathItem] of Object.entries(document.paths ?? {})) {
@@ -176,14 +231,16 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
     for (const [method, operation] of Object.entries(pathItem)) {
       if (!HTTP_METHODS.has(method) || !operation || typeof operation !== 'object') continue;
 
+      const relativePath = path.startsWith(API_PREFIX) ? path.slice(API_PREFIX.length) : path;
+
       const failureStatuses = Object.keys(operation.responses ?? {}).filter((status) =>
         /^(?:[45]XX|[45]\d\d)$/.test(status),
       );
       assert.deepEqual(
         failureStatuses.sort(),
         [
-          ...(EXPECTED_FAILURE_STATUSES[`${method} ${path}`] ??
-            EXPECTED_FAILURE_STATUSES[path] ??
+          ...(EXPECTED_FAILURE_STATUSES[`${method} ${relativePath}`] ??
+            EXPECTED_FAILURE_STATUSES[relativePath] ??
             []),
         ].sort(),
         `${method.toUpperCase()} ${path} must declare only its supported failure statuses`,
@@ -192,10 +249,10 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
       const successStatuses = Object.keys(operation.responses ?? {}).filter((status) =>
         /^2\d\d$/.test(status),
       );
-      if (EXPECTED_SUCCESS_STATUSES[path] !== undefined) {
-        const expectedSuccessStatuses = Array.isArray(EXPECTED_SUCCESS_STATUSES[path])
-          ? EXPECTED_SUCCESS_STATUSES[path]
-          : [EXPECTED_SUCCESS_STATUSES[path]];
+      if (EXPECTED_SUCCESS_STATUSES[relativePath] !== undefined) {
+        const expectedSuccessStatuses = Array.isArray(EXPECTED_SUCCESS_STATUSES[relativePath])
+          ? EXPECTED_SUCCESS_STATUSES[relativePath]
+          : [EXPECTED_SUCCESS_STATUSES[relativePath]];
         assert.deepEqual(
           successStatuses.sort(),
           expectedSuccessStatuses.sort(),
@@ -203,8 +260,8 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
         );
       }
 
-      for (const status of EXPECTED_FAILURE_STATUSES[`${method} ${path}`] ??
-        EXPECTED_FAILURE_STATUSES[path] ??
+      for (const status of EXPECTED_FAILURE_STATUSES[`${method} ${relativePath}`] ??
+        EXPECTED_FAILURE_STATUSES[relativePath] ??
         []) {
         const response = operation.responses?.[status];
         const content = response?.content?.['application/problem+json'];
@@ -247,7 +304,7 @@ test('OpenAPI normalizer preserves response metadata and is idempotent', () => {
           },
         },
       },
-      '/issues/{issueId}/detail-views/{viewId}': {
+      [apiPath('/issues/{issueId}/detail-views/{viewId}')]: {
         put: {
           responses: {
             201: {
@@ -275,11 +332,12 @@ test('OpenAPI normalizer preserves response metadata and is idempotent', () => {
   assert.deepEqual(response.headers, { 'x-request-id': { schema: { type: 'string' } } });
   assert.ok(document.paths['/fixture'].post.responses['200'].content['application/json']);
   assert.equal(
-    document.paths['/issues/{issueId}/detail-views/{viewId}'].put.responses['200'].description,
+    document.paths[apiPath('/issues/{issueId}/detail-views/{viewId}')].put.responses['200']
+      .description,
     'The detail view already existed and the request was replayed.',
   );
   assert.ok(
-    document.paths['/issues/{issueId}/detail-views/{viewId}'].put.responses['200'].content[
+    document.paths[apiPath('/issues/{issueId}/detail-views/{viewId}')].put.responses['200'].content[
       'application/json'
     ],
   );
@@ -323,10 +381,10 @@ test('report contracts expose async request/replay and never worker-private data
     '/me/reports/{reportId}/retry': ['post'],
   })) {
     for (const method of methods)
-      assert.deepEqual(document.paths[path][method].security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths[apiPath(path)][method].security, [{ bearerAuth: [] }]);
   }
-  assert.ok(document.paths['/me/reports'].post.responses['200']);
-  assert.ok(document.paths['/me/reports'].post.responses['202']);
+  assert.ok(document.paths[apiPath('/me/reports')].post.responses['200']);
+  assert.ok(document.paths[apiPath('/me/reports')].post.responses['202']);
   for (const schema of ['ReportResponse', 'ReportSummaryResponse']) {
     const properties = document.components.schemas[schema].properties;
     for (const key of ['userId', 'input', 'candidates', 'attempt', 'leaseToken', 'leaseExpiresAt'])
@@ -336,7 +394,7 @@ test('report contracts expose async request/replay and never worker-private data
     'periodStart',
   ]);
   assert.equal(
-    document.paths['/me/reports/{reportId}/retry'].post.responses['429'].content[
+    document.paths[apiPath('/me/reports/{reportId}/retry')].post.responses['429'].content[
       'application/problem+json'
     ].schema.$ref,
     PROBLEM_DETAILS_REF,

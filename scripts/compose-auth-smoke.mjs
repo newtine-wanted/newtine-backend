@@ -8,7 +8,8 @@ const email = `compose-auth-${Date.now()}@example.com`;
 const password = 'correct-horse-battery-staple';
 
 async function request(path, init = {}) {
-  const response = await fetch(new URL(path, baseUrl), init);
+  const publicPath = path === '/api' || path.startsWith('/api/') ? path : `/api${path}`;
+  const response = await fetch(new URL(publicPath, baseUrl), init);
   return { response, body: await response.text() };
 }
 
@@ -24,7 +25,7 @@ function refreshCookie(result) {
       : [result.response.headers.get('set-cookie') ?? ''];
   const value = setCookies.find((cookie) => cookie.startsWith('newtine_refresh='));
   assert.ok(value, `refresh cookie missing for ${result.response.url}`);
-  assert.match(value, /Path=\/auth/);
+  assert.match(value, /Path=\/api\/auth/);
   assert.match(value, /HttpOnly/);
   assert.match(value, /SameSite=Lax/);
   assert.match(value, /Secure/);
@@ -44,7 +45,7 @@ function feedGuestCookie(result) {
       : [result.response.headers.get('set-cookie') ?? ''];
   const value = setCookies.find((cookie) => cookie.startsWith('newtine_feed_guest='));
   assert.ok(value, `guest feed cookie missing for ${result.response.url}`);
-  assert.match(value, /Path=\/feed/);
+  assert.match(value, /Path=\/api\/feed/);
   assert.match(value, /HttpOnly/);
   assert.match(value, /SameSite=Lax/);
   assert.match(value, /Secure/);

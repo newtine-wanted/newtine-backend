@@ -83,7 +83,8 @@ async function stopApi() {
 }
 
 async function request(path, init = {}) {
-  return fetch(`${baseUrl}${path}`, init);
+  const publicPath = path === '/api' || path.startsWith('/api/') ? path : `/api${path}`;
+  return fetch(`${baseUrl}${publicPath}`, init);
 }
 
 function assertRateLimited(response, body, message) {

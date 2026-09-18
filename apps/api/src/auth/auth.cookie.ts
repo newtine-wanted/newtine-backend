@@ -32,7 +32,7 @@ export function setRefreshCookie(response: Response, token: string, options: Aut
     'Set-Cookie',
     [
       `${options.cookieName}=${encodeURIComponent(token)}`,
-      'Path=/auth',
+      'Path=/api/auth',
       'HttpOnly',
       'SameSite=Lax',
       `Max-Age=${options.refreshTokenTtlSeconds}`,
@@ -46,7 +46,7 @@ export function clearRefreshCookie(response: Response, options: AuthOptions): vo
     'Set-Cookie',
     [
       `${options.cookieName}=`,
-      'Path=/auth',
+      'Path=/api/auth',
       'HttpOnly',
       'SameSite=Lax',
       'Max-Age=0',

@@ -29,9 +29,9 @@
     "test:smoke:compose:actions": "node scripts/compose-issue-action-smoke.mjs",
     "typecheck:generated": "tsc --noEmit -p tsconfig.generated.json",
     "contracts:clean": "node scripts/clean-generated.mjs",
-    "contracts:sdk": "npm run contracts:clean && nestia sdk",
+    "contracts:sdk": "npm run contracts:clean && nestia sdk && node scripts/prefix-generated-api.mjs",
     "contracts:swagger": "node scripts/openapi.mjs",
-    "contracts:e2e": "npm run contracts:clean && nestia e2e",
+    "contracts:e2e": "npm run contracts:clean && nestia e2e && node scripts/prefix-generated-api.mjs",
     "contracts:all": "npm run contracts:sdk && npm run contracts:e2e && npm run contracts:swagger",
     "contracts:check": "npm run contracts:all && npm run test:contracts && npm run typecheck:generated"
   },

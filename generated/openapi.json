@@ -2369,7 +2369,7 @@
     }
   },
   "paths": {
-    "/pipeline/runs": {
+    "/api/pipeline/runs": {
       "post": {
         "tags": [],
         "parameters": [
@@ -2467,7 +2467,7 @@
         "x-samchon-controller": "PipelineController"
       }
     },
-    "/pipeline/runs/{runId}": {
+    "/api/pipeline/runs/{runId}": {
       "get": {
         "tags": [],
         "parameters": [
@@ -2556,7 +2556,7 @@
         "x-samchon-controller": "PipelineController"
       }
     },
-    "/pipeline/runs/{runId}/retry": {
+    "/api/pipeline/runs/{runId}/retry": {
       "post": {
         "tags": [],
         "parameters": [
@@ -2679,7 +2679,7 @@
         "x-samchon-controller": "PipelineController"
       }
     },
-    "/pipeline/runs/{runId}/interrupt": {
+    "/api/pipeline/runs/{runId}/interrupt": {
       "post": {
         "tags": [],
         "parameters": [
@@ -2788,7 +2788,7 @@
         "x-samchon-controller": "PipelineController"
       }
     },
-    "/me/reports": {
+    "/api/me/reports": {
       "get": {
         "tags": [],
         "parameters": [],
@@ -2944,7 +2944,7 @@
         "x-samchon-controller": "ReportController"
       }
     },
-    "/me/reports/{reportId}": {
+    "/api/me/reports/{reportId}": {
       "get": {
         "tags": [],
         "parameters": [
@@ -3023,7 +3023,7 @@
         "x-samchon-controller": "ReportController"
       }
     },
-    "/me/reports/{reportId}/retry": {
+    "/api/me/reports/{reportId}/retry": {
       "post": {
         "tags": [],
         "parameters": [
@@ -3122,7 +3122,7 @@
         "x-samchon-controller": "ReportController"
       }
     },
-    "/onboarding/options": {
+    "/api/onboarding/options": {
       "get": {
         "tags": [],
         "parameters": [],
@@ -3156,7 +3156,7 @@
         "x-samchon-controller": "OnboardingController"
       }
     },
-    "/onboarding/entities": {
+    "/api/onboarding/entities": {
       "get": {
         "tags": [],
         "parameters": [
@@ -3243,7 +3243,7 @@
         "x-samchon-controller": "OnboardingController"
       }
     },
-    "/me/onboarding": {
+    "/api/me/onboarding": {
       "get": {
         "tags": [],
         "parameters": [],
@@ -3292,7 +3292,7 @@
         "x-samchon-controller": "OnboardingController"
       }
     },
-    "/me/onboarding/complete": {
+    "/api/me/onboarding/complete": {
       "post": {
         "tags": [],
         "parameters": [],
@@ -3361,7 +3361,7 @@
         "x-samchon-controller": "OnboardingController"
       }
     },
-    "/me/onboarding/skip": {
+    "/api/me/onboarding/skip": {
       "post": {
         "tags": [],
         "parameters": [],
@@ -3410,7 +3410,7 @@
         "x-samchon-controller": "OnboardingController"
       }
     },
-    "/me/interest-analysis": {
+    "/api/me/interest-analysis": {
       "get": {
         "tags": [],
         "parameters": [],
@@ -3459,7 +3459,7 @@
         "x-samchon-controller": "InterestController"
       }
     },
-    "/me/liked-issues": {
+    "/api/me/liked-issues": {
       "get": {
         "tags": [],
         "parameters": [
@@ -3574,7 +3574,7 @@
         "x-samchon-controller": "InterestController"
       }
     },
-    "/health": {
+    "/api/health": {
       "get": {
         "tags": [],
         "parameters": [],
@@ -3618,7 +3618,7 @@
         "x-samchon-controller": "HealthController"
       }
     },
-    "/auth/signup": {
+    "/api/auth/signup": {
       "post": {
         "tags": [],
         "parameters": [],
@@ -3681,7 +3681,7 @@
         "x-samchon-controller": "AuthController"
       }
     },
-    "/auth/login": {
+    "/api/auth/login": {
       "post": {
         "tags": [],
         "parameters": [],
@@ -3744,7 +3744,7 @@
         "x-samchon-controller": "AuthController"
       }
     },
-    "/auth/refresh": {
+    "/api/auth/refresh": {
       "post": {
         "tags": [],
         "parameters": [],
@@ -3797,7 +3797,7 @@
         "x-samchon-controller": "AuthController"
       }
     },
-    "/auth/logout": {
+    "/api/auth/logout": {
       "post": {
         "tags": [],
         "parameters": [],
@@ -3833,7 +3833,7 @@
         "x-samchon-controller": "AuthController"
       }
     },
-    "/auth/withdraw": {
+    "/api/auth/withdraw": {
       "post": {
         "tags": [],
         "parameters": [],
@@ -3914,7 +3914,7 @@
         "x-samchon-controller": "AuthController"
       }
     },
-    "/issues/{issueId}/interactions": {
+    "/api/issues/{issueId}/interactions": {
       "post": {
         "tags": [],
         "parameters": [
@@ -4013,7 +4013,7 @@
         "x-samchon-controller": "IssueActionController"
       }
     },
-    "/issues/{issueId}/detail-views/{viewId}": {
+    "/api/issues/{issueId}/detail-views/{viewId}": {
       "put": {
         "tags": [],
         "parameters": [
@@ -4131,7 +4131,7 @@
         "x-samchon-controller": "IssueActionController"
       }
     },
-    "/issues/{issueId}/detail-views/{viewId}/progress": {
+    "/api/issues/{issueId}/detail-views/{viewId}/progress": {
       "put": {
         "tags": [],
         "parameters": [
@@ -4250,7 +4250,7 @@
         "x-samchon-controller": "IssueActionController"
       }
     },
-    "/issues/search": {
+    "/api/issues/search": {
       "post": {
         "tags": [],
         "parameters": [],
@@ -4313,7 +4313,7 @@
         "x-samchon-controller": "IssueController"
       }
     },
-    "/issues/{issueId}": {
+    "/api/issues/{issueId}": {
       "get": {
         "tags": [],
         "parameters": [
@@ -4392,7 +4392,7 @@
         "x-samchon-controller": "IssueController"
       }
     },
-    "/feed": {
+    "/api/feed": {
       "get": {
         "tags": [],
         "parameters": [

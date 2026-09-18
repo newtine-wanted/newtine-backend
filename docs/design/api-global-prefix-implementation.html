@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>API 전역 /api prefix 구현 제어</title>
+    <meta
+      name="purpose"
+      content="승인된 NEWTINE API 전역 /api prefix 설계를 구현하고 런타임·생성 계약·cookie·smoke 증거를 기록"
+    />
+    <meta name="audience" content="NEWTINE 백엔드 구현자와 운영·변경 검토자" />
+    <meta
+      name="problem"
+      content="승인된 strict /api public path 계약을 Nest 런타임과 생성·검증·cookie 경계에 누락 없이 반영"
+    />
+    <meta
+      name="core-flow"
+      content="승인 기준 확인 → runtime·Nestia·cookie·fixture 구현 → 생성 계약·정적 gate → HTTP smoke → as-built 이슈·잔여 위험 기록"
+    />
+    <style>
+      :root { --ink:#1d2b3f; --muted:#566579; --line:#d5dfec; --paper:#fff; --wash:#f5f7fb; --accent:#1d5ba8; }
+      * { box-sizing: border-box; }
+      body { margin:0; background:var(--wash); color:var(--ink); font:16px/1.7 system-ui,sans-serif; }
+      .shell { max-width:1080px; margin:0 auto; padding:28px 20px 64px; }
+      header, article, nav { background:var(--paper); border:1px solid var(--line); border-radius:12px; padding:24px; }
+      article { margin-top:18px; }
+      h1,h2,h3 { line-height:1.35; }
+      h1 { margin-top:0; }
+      h2 { margin-top:28px; padding-top:18px; border-top:1px solid var(--line); }
+      nav { margin:18px 0; }
+      nav a { margin-right:14px; color:var(--accent); }
+      dt { font-weight:700; }
+      dd { margin:0 0 8px; color:var(--muted); }
+      code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+      code { padding:1px 4px; border-radius:4px; background:#eef3fa; }
+      pre { overflow:auto; padding:16px; border-radius:8px; background:#edf2f9; }
+      table { width:100%; border-collapse:collapse; }
+      th, td { padding:9px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+      th { background:#eef3fa; }
+      .state { display:inline-block; padding:3px 9px; border-radius:999px; background:#e8f1ff; color:var(--accent); font-weight:700; }
+      .issue { padding:12px 16px; border-left:4px solid #c58918; background:#fff8e7; }
+      figure { margin:18px 0; padding:16px; border:1px solid #c9d8eb; background:#f7faff; }
+      figcaption { margin-top:8px; color:var(--muted); }
+      .question { margin:14px 0; padding:14px; border:1px solid var(--line); border-radius:9px; }
+      fieldset { border:0; padding:0; }
+      legend { font-weight:700; }
+      label { display:block; margin:5px 0; }
+      button { padding:8px 12px; border:1px solid #7187a5; border-radius:7px; background:#edf3ff; font:inherit; cursor:pointer; }
+      .result { margin-top:10px; padding:10px 12px; background:#f1f7f2; border-left:4px solid #2f7c4d; }
+      .result[hidden] { display:none; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <p><span class="state">구현 완료 · 검증 공백 기록</span> · Standard · <time datetime="2026-09-18">2026-09-18 KST</time></p>
+        <h1>API 전역 <code>/api</code> prefix 구현 제어</h1>
+        <dl>
+          <dt>목적 (purpose)</dt><dd>승인된 NEWTINE API 전역 <code>/api</code> prefix 설계를 구현하고 런타임·생성 계약·cookie·smoke 증거를 기록</dd>
+          <dt>사용자 (audience)</dt><dd>NEWTINE 백엔드 구현자와 운영·변경 검토자</dd>
+          <dt>문제 (problem)</dt><dd>승인된 strict <code>/api</code> public path 계약을 Nest 런타임과 생성·검증·cookie 경계에 누락 없이 반영</dd>
+          <dt>핵심 흐름 (core-flow)</dt><dd>승인 기준 확인 → runtime·Nestia·cookie·fixture 구현 → 생성 계약·정적 gate → HTTP smoke → as-built 이슈·잔여 위험 기록</dd>
+          <dt>기준선</dt><dd><a href="api-global-prefix-design.html">api-global-prefix-design.html</a> · G1-A·G2·G3 승인</dd>
+          <dt>구현 제어 상태</dt><dd>승인된 구현 완료 · focused gate 통과 · 기존 작업 트리와 환경으로 일부 전체 gate 보류</dd>
+        </dl>
+      </header>
+
+      <nav aria-label="구현 제어 탐색">
+        <a href="#baseline-reference">기준선</a>
+        <a href="#current-implementation">현재 구현</a>
+        <a href="#affected-boundaries">영향 경계</a>
+        <a href="#issue-register">이슈</a>
+        <a href="#verification-evidence">검증 증거</a>
+        <a href="#verification-gaps">검증 공백</a>
+        <a href="#residual-risks">잔여 위험</a>
+        <a href="#implementation-control-state">통제 상태</a>
+        <a href="#review">리뷰</a>
+      </nav>
+
+      <main>
+        <article>
+          <section id="baseline-reference">
+            <h2>승인 기준선</h2>
+            <p><a href="api-global-prefix-design.html">API 전역 /api prefix 계약 설계</a>의 <time datetime="2026-09-18">2026-09-18 KST</time> 승인 범위를 따른다.</p>
+            <ul>
+              <li>G1-A: <code>/api</code>만 canonical public path로 사용하고 legacy root alias는 제공하지 않는다.</li>
+              <li>G2: Nest runtime과 Nestia generated SDK·E2E·OpenAPI paths를 동기화한다.</li>
+              <li>G3: refresh cookie는 <code>/api/auth</code>, guest feed cookie는 <code>/api/feed</code>로 scope를 갱신한다.</li>
+              <li>README·rate-limit·HTTP/Compose smoke·contract expectation을 public path에 맞춘다.</li>
+            </ul>
+            <p><strong>금지 범위:</strong> response body·상태 코드·DB schema·도메인 로직·인증 정책·reverse proxy 운영 설정 변경.</p>
+          </section>
+
+          <section id="current-implementation">
+            <h2>현재 구현과 변경 경계</h2>
+            <p>승인된 범위의 as-built 상태다. controller의 상대 경로는 유지하고 public 경계에만 <code>/api</code>를 반영했다.</p>
+            <table>
+              <caption>승인된 구현 경계</caption>
+              <thead><tr><th scope="col">경계</th><th scope="col">대상</th><th scope="col">불변 조건</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">Runtime</th><td><code>apps/api/src/main.ts</code></td><td><code>app.setGlobalPrefix('api')</code>로 canonical route만 <code>/api</code>에 배치하고 legacy root alias는 만들지 않음</td></tr>
+                <tr><th scope="row">Generation</th><td><code>package.json</code>, <code>scripts/prefix-generated-api.mjs</code>, <code>scripts/openapi.mjs</code>, generated artifacts</td><td>Nestia controller input은 유지하고 SDK·E2E·OpenAPI public path만 deterministic post-process로 prefix</td></tr>
+                <tr><th scope="row">Cookie</th><td><code>apps/api/src/auth/auth.cookie.ts</code>, <code>apps/api/src/issue/guest-feed-cookie.ts</code></td><td>cookie value·보안 속성은 유지하고 Path만 public namespace로 이동</td></tr>
+                <tr><th scope="row">Boundary</th><td><code>rateLimit</code>, report <code>Location</code>, README, Compose healthcheck, smoke/contract fixture</td><td>route key·redirect location·운영 health endpoint·검증 호출도 public path와 일치</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="affected-boundaries">
+            <h2>영향 경계와 상태 전이</h2>
+            <figure>
+              <pre>client /api/... → Nest global prefix → existing controller route
+                                      ├→ rate-limit route key /api/...
+                                      ├→ cookie Path=/api/auth or /api/feed
+                                      └→ OpenAPI · SDK · E2E · smoke /api/...</pre>
+              <figcaption>텍스트 등가: 하나의 public path 변경이 runtime routing, rate limit, browser cookie, generated contract와 검증 호출에 전파된다.</figcaption>
+            </figure>
+            <p>route prefix 이외의 request validation, response serialization, authorization, persistence 상태 전이는 동일해야 한다.</p>
+          </section>
+
+          <section id="issue-register">
+            <h2>이슈 등록부</h2>
+            <table>
+              <caption>as-built 이슈와 판정</caption>
+              <thead><tr><th scope="col">ID</th><th scope="col">상태</th><th scope="col">증상·원인</th><th scope="col">조치·잔여 위험</th></tr></thead>
+              <tbody>
+                <tr><th scope="row">API-PREFIX-001</th><td>해결</td><td>runtime route가 root에 남아 있으면 strict 계약을 만족하지 못한다.</td><td><code>main.ts</code>에 global prefix를 추가하고 health smoke에서 <code>/api/health=200</code>, <code>/health=404</code>를 확인했다.</td></tr>
+                <tr><th scope="row">GEN-001</th><td>해결</td><td>Nestia 설정을 runtime app input으로 바꾸는 시도는 기존 path alias와 현재 타입 진단 때문에 generator 단계에서 중단됐다.</td><td>static Nestia input을 유지하고 SDK·E2E post-process와 OpenAPI path rewrite를 추가했다. 계약 생성 성공과 전체 path prefix assertion으로 보완했으며, 직접 <code>nestia</code> 실행은 package script를 통해야 한다.</td></tr>
+                <tr><th scope="row">VERIFY-001</th><td>완화됨 · 외부 변경</td><td>중간 검증에서 <code>libs/core/src/pipeline/domain/pipeline.validator.ts:152</code>의 dead <code>REGION</code> 비교가 <code>TS2367</code>를 발생시켰다.</td><td>현재 working tree에서는 해당 비교가 제거된 상태이며 정상 <code>typecheck</code>·build·generated typecheck·contracts:check가 통과했다. 이 변경의 작성자와 의도는 별도 확인이 필요하다.</td></tr>
+                <tr><th scope="row">VERIFY-002</th><td>완화됨 · 외부 변경</td><td>onboarding options/entities source와 generated artifact 정리 중 생성물 불일치가 있었다.</td><td>현재 <code>clean-generated</code> 흐름과 generated 삭제 상태에서 <code>typecheck:generated</code>가 통과했다. source·generated artifact 변경은 이번 prefix 변경과 분리해 검토한다.</td></tr>
+                <tr><th scope="row">SMOKE-001</th><td>열림 · 환경</td><td>HTTP smoke는 health와 strict root check를 통과했지만 <code>/api/feed</code>에서 <code>503</code>으로 중단됐다.</td><td>API prefix 자체의 실패가 아니라 로컬 DB/저장소 의존성 준비 상태를 확인할 수 없는 환경 공백으로 기록한다. DB가 준비된 환경에서 smoke를 재실행해야 한다.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="verification-evidence">
+            <h2>검증 증거</h2>
+            <p>실행 결과는 다음과 같다. 임시 suppression을 사용한 명령은 종료 후 원상 제거했다.</p>
+            <table>
+              <caption>실행 결과</caption>
+              <thead><tr><th scope="col">명령</th><th scope="col">결과</th><th scope="col">증거</th></tr></thead>
+              <tbody>
+                <tr><th scope="row"><code>npm run contracts:all</code></th><td>격리 통과</td><td>기존 validator 오류를 임시 억제한 검증에서 SDK·E2E·Swagger 생성 완료; generated API source 29개와 OpenAPI path 28개에 <code>/api</code> 반영</td></tr>
+                <tr><th scope="row"><code>npm run test:contracts</code></th><td>통과</td><td>1 suite · 6 tests passed; OpenAPI와 generated SDK route prefix 및 status expectation 확인</td></tr>
+                <tr><th scope="row">focused unit tests</th><td>통과</td><td>auth·guest feed cookie·rate limit 3 suites · 24 tests passed</td></tr>
+                <tr><th scope="row"><code>npm test</code></th><td>통과</td><td>unit 46 suites·230 tests passed; integration 2 suites passed, 3 suites skipped</td></tr>
+                <tr><th scope="row"><code>npm run format:check</code> / <code>npm run lint</code></th><td>통과</td><td>현재 작업 트리 기준 전체 format과 lint 오류 없음</td></tr>
+                <tr><th scope="row"><code>npm run typecheck</code> / <code>npm run build</code></th><td>통과</td><td>현재 working tree 기준 API·batch compile 성공</td></tr>
+                <tr><th scope="row"><code>npm run contracts:check</code></th><td>통과</td><td>SDK·E2E·Swagger 재생성, contract 6/6, generated typecheck 통과</td></tr>
+                <tr><th scope="row"><code>npm run build:api</code></th><td>격리 통과</td><td>기존 validator 오류만 임시 억제한 상태에서 build 성공; suppression 제거 후 작업 트리에는 남지 않음</td></tr>
+                <tr><th scope="row"><code>npm run test:smoke</code></th><td>부분 통과</td><td><code>/api/health=200</code>, <code>/health=404</code> 확인 후 <code>/api/feed=503</code>에서 중단</td></tr>
+                <tr><th scope="row"><code>docker compose config --quiet</code> / <code>docker build --check .</code></th><td>통과</td><td>Compose 설정 정상, Dockerfile 정적 검사 warning 없음</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="verification-gaps">
+            <h2>검증 공백</h2>
+            <ul>
+              <li>현재 typecheck·build·contracts:check는 통과했지만, <code>pipeline.validator.ts</code>와 onboarding/generated 정리 변경의 작성자·의도는 이번 prefix 변경과 분리해 확인해야 한다.</li>
+              <li>DB/저장소 준비 전까지 feed·rate-limit·Compose smoke의 완전한 HTTP 검증은 보류한다.</li>
+              <li>실제 browser cookie path-match는 Node HTTP smoke의 <code>Set-Cookie</code> 확인과 path 경계 검토로 대체되며, 브라우저 실측이 없으면 잔여 위험으로 남긴다.</li>
+              <li>외부 reverse proxy가 있다면 그 prefix rewrite는 이번 승인 범위가 아니므로 별도 운영 확인이 필요하다.</li>
+            </ul>
+          </section>
+
+          <section id="residual-risks">
+            <h2>잔여 위험과 복구</h2>
+            <dl>
+              <dt>기존 호출자 전환</dt><dd>G1-A로 legacy root는 성공하지 않는다. 배포 전 client base URL을 <code>/api</code>로 전환해야 한다.</dd>
+              <dt>생성 계약 누락</dt><dd><code>contracts:sdk</code>·<code>contracts:e2e</code>·<code>contracts:swagger</code>를 통해 생성해야 post-process가 실행된다. generated path와 OpenAPI path가 모두 <code>/api</code>인지 contract test가 감시한다.</dd>
+              <dt>cookie scope 회귀</dt><dd>auth/feed cookie가 새 route에 전송되지 않으면 Set-Cookie Path와 smoke 요청 path를 함께 비교하고 helper·fixture를 같은 변경으로 복구한다.</dd>
+            </dl>
+          </section>
+
+          <section id="implementation-control-state">
+            <h2>구현 제어 상태</h2>
+            <dl>
+              <dt>기술 상태</dt><dd>구현 완료 — strict <code>/api</code> runtime·generated contract·cookie·fixture 반영; focused gate 통과</dd>
+              <dt>설계 delta</dt><dd>public contract delta 없음. generation 구현은 runtime Nestia input 대신 deterministic post-process로 바뀌었고, GEN-001에 원인과 보완 검증을 기록했다.</dd>
+              <dt>이슈 상태</dt><dd>해결 2건 · 기존 작업 트리 2건 · 환경 공백 1건</dd>
+              <dt>개발자 운영 이해</dt><dd>아래 C1~C4 self-check를 추가했다. 브라우저 로컬 결과는 Codex에 자동 전달되지 않으므로, 오답으로 material ambiguity가 드러날 때만 별도 확인이 필요하다.</dd>
+              <dt>다음 행동</dt><dd>기존 validator 오류와 onboarding generated 불일치를 정리하고 DB/저장소가 준비된 환경에서 <code>typecheck:generated</code>·전체 smoke·integration gate를 재실행한다.</dd>
+            </dl>
+          </section>
+
+          <section id="implementation-understanding">
+            <h2>구현 후 운영 이해 self-check</h2>
+            <p>운영자가 public path, 생성 절차, cookie scope와 현재 검증 공백을 구분하는지 확인한다.</p>
+            <form id="implementation-check">
+              <div class="question">
+                <fieldset>
+                  <legend>C1. canonical health endpoint는 무엇인가?</legend>
+                  <label><input type="radio" name="c1" value="ok" required /> <code>GET /api/health</code>; <code>GET /health</code>는 성공 endpoint가 아니다.</label>
+                  <label><input type="radio" name="c1" value="bad" /> root와 <code>/api</code>를 둘 다 같은 canonical endpoint로 본다.</label>
+                </fieldset>
+              </div>
+              <div class="question">
+                <fieldset>
+                  <legend>C2. generated SDK·E2E와 OpenAPI를 갱신하는 방법은?</legend>
+                  <label><input type="radio" name="c2" value="ok" required /> package의 <code>contracts:sdk</code>·<code>contracts:e2e</code>·<code>contracts:swagger</code> 흐름을 사용한다.</label>
+                  <label><input type="radio" name="c2" value="bad" /> generated 파일의 일부 path만 수동으로 수정한다.</label>
+                </fieldset>
+              </div>
+              <div class="question">
+                <fieldset>
+                  <legend>C3. cookie path는 어느 namespace를 따라야 하는가?</legend>
+                  <label><input type="radio" name="c3" value="ok" required /> refresh는 <code>/api/auth</code>, guest feed는 <code>/api/feed</code>다.</label>
+                  <label><input type="radio" name="c3" value="bad" /> 기존 <code>/auth</code>·<code>/feed</code> scope를 유지한다.</label>
+                </fieldset>
+              </div>
+              <div class="question">
+                <fieldset>
+                  <legend>C4. 현재 전체 gate가 막힌 이유는 무엇인가?</legend>
+                  <label><input type="radio" name="c4" value="ok" required /> 기존 validator/onboarding generated 불일치와 DB 의존 smoke 환경을 먼저 정리해야 한다.</label>
+                  <label><input type="radio" name="c4" value="bad" /> strict prefix 구현이 아직 runtime에 반영되지 않았다.</label>
+                </fieldset>
+              </div>
+              <button type="submit">이해 점검 제출</button>
+              <div class="result" id="implementation-check-result" role="status" hidden>
+                <strong>상태:</strong> <span data-result="status"></span><br />
+                <strong>설명:</strong> <span data-result="explanation"></span><br />
+                <strong>다음 행동:</strong> <span data-result="next"></span>
+              </div>
+            </form>
+          </section>
+
+          <section id="review">
+            <h2>코드 리뷰</h2>
+            <p><strong>리뷰 유형:</strong> 자기 변경 · <strong>리뷰어:</strong> Codex · <strong>범위:</strong> 승인된 전역 <code>/api</code> 변경과 직접 연결된 runtime, generated contract, cookie, rate-limit, smoke, contract test</p>
+            <p><strong>리뷰 상태:</strong> 검토 완료 · RISK-001 보완 완료. DB/storage smoke 공백과 mixed working tree의 revision 분리는 병합·배포 판정과 별도로 남아 있다.</p>
+            <figure>
+              <pre>client /api/... → Nest global prefix → controller
+                       ├→ rate-limit /api route key
+                       ├→ cookie Path=/api/...
+                       └→ OpenAPI /api path + generated SDK path()</pre>
+              <figcaption>텍스트 등가: runtime과 각 소비자 경계가 같은 public namespace를 사용해야 하며, 이번 diff에서는 현재 값이 일치함을 확인했다.</figcaption>
+            </figure>
+            <table>
+              <caption>리뷰 findings</caption>
+              <thead><tr><th scope="col">ID</th><th scope="col">상태·심각도</th><th scope="col">근거와 영향</th><th scope="col">최소 보완</th></tr></thead>
+              <tbody>
+                <tr>
+                  <th scope="row">RISK-001</th>
+                  <td>fixed · non-blocking risk</td>
+                  <td><code>scripts/prefix-generated-api.mjs:24-30</code>의 후처리 결과를 기존 contract test가 직접 보장하지 않았다.</td>
+                  <td><code>test/contracts/contracts.test.mjs</code>에 generated/api 전체의 <code>@path</code>와 root-leading path literal 검사를 추가했다. 현재 SDK route comment와 path literal은 모두 <code>/api</code>로 검증된다.</td>
+                </tr>
+              </tbody>
+            </table>
+            <h3>관찰된 사실과 제외한 변경</h3>
+            <dl>
+              <dt>관찰된 사실</dt><dd><code>app.setGlobalPrefix('api')</code>, cookie Path, rate-limit key, Location header, OpenAPI path와 generated SDK path가 현재 <code>/api</code>로 정렬되어 있다.</dd>
+              <dt>검증 증거</dt><dd>contract 6/6, 전체 unit/integration 명령 통과, typecheck/build/contracts:check/format/lint 통과, Docker 정적 검사 통과. HTTP smoke는 <code>/api/health=200</code>·<code>/health=404</code> 뒤 DB/storage 의존 <code>/api/feed=503</code>에서 중단됐다.</dd>
+              <dt>제외한 변경</dt><dd>현재 작업 트리에 이미 있던 pipeline validator 타입 오류, onboarding source/generated 불일치, metadata 관련 변경은 <code>/api</code> 리뷰 finding으로 중복 판정하지 않았다.</dd>
+            </dl>
+            <aside class="issue">
+              <strong>리뷰 판단: concrete finding 없음.</strong> RISK-001은 generated SDK contract guard 추가로 해결됐다. 다만 DB/storage smoke와 mixed working tree 분리 전에는 전체 변경의 병합·배포 판정으로 해석하지 않는다.
+            </aside>
+          </section>
+        </article>
+      </main>
+    </div>
+    <script>
+      document.querySelector('#implementation-check').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const values = [...new FormData(form).values()];
+        const result = document.querySelector('#implementation-check-result');
+        const passed = values.length === 4 && values.every((value) => value === 'ok');
+        result.querySelector('[data-result="status"]').textContent = passed ? '통과' : '재확인 필요';
+        result.querySelector('[data-result="explanation"]').textContent = passed
+          ? 'runtime·생성 계약·cookie scope와 검증 공백을 올바르게 구분했다.'
+          : 'strict /api 계약과 현재 검증 공백을 다시 확인한다.';
+        result.querySelector('[data-result="next"]').textContent = passed
+          ? 'validator/onboarding 정리와 DB 준비 후 전체 gate를 재실행한다.'
+          : 'C1~C4의 기준선과 이슈 등록부를 다시 읽고 재제출한다.';
+        result.hidden = false;
+      });
+    </script>
+  </body>
+</html>

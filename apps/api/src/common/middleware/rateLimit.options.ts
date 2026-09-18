@@ -26,7 +26,7 @@ export function createRateLimitOptions(env: NodeJS.ProcessEnv = process.env): Ra
     global: rule('global-ip', globalMaxRequests, windowMs),
     overrides: new Map([
       [
-        'POST /auth/signup',
+        'POST /api/auth/signup',
         rule(
           'auth-ip',
           readPositiveInteger(env, 'RATE_LIMIT_AUTH_MAX_REQUESTS', DEFAULT_AUTH_MAX_REQUESTS),
@@ -34,7 +34,7 @@ export function createRateLimitOptions(env: NodeJS.ProcessEnv = process.env): Ra
         ),
       ],
       [
-        'POST /auth/login',
+        'POST /api/auth/login',
         rule(
           'auth-ip',
           readPositiveInteger(env, 'RATE_LIMIT_AUTH_MAX_REQUESTS', DEFAULT_AUTH_MAX_REQUESTS),
@@ -42,7 +42,7 @@ export function createRateLimitOptions(env: NodeJS.ProcessEnv = process.env): Ra
         ),
       ],
       [
-        'POST /auth/logout',
+        'POST /api/auth/logout',
         rule(
           'auth-ip',
           readPositiveInteger(env, 'RATE_LIMIT_AUTH_MAX_REQUESTS', DEFAULT_AUTH_MAX_REQUESTS),
@@ -50,7 +50,7 @@ export function createRateLimitOptions(env: NodeJS.ProcessEnv = process.env): Ra
         ),
       ],
       [
-        'POST /auth/withdraw',
+        'POST /api/auth/withdraw',
         rule(
           'auth-ip',
           readPositiveInteger(env, 'RATE_LIMIT_AUTH_MAX_REQUESTS', DEFAULT_AUTH_MAX_REQUESTS),
@@ -58,7 +58,7 @@ export function createRateLimitOptions(env: NodeJS.ProcessEnv = process.env): Ra
         ),
       ],
       [
-        'POST /auth/refresh',
+        'POST /api/auth/refresh',
         rule(
           'refresh-ip',
           readPositiveInteger(env, 'RATE_LIMIT_REFRESH_MAX_REQUESTS', DEFAULT_REFRESH_MAX_REQUESTS),
@@ -66,7 +66,7 @@ export function createRateLimitOptions(env: NodeJS.ProcessEnv = process.env): Ra
         ),
       ],
       [
-        'GET /feed',
+        'GET /api/feed',
         rule(
           'feed-ip',
           readPositiveInteger(env, 'RATE_LIMIT_FEED_MAX_REQUESTS', DEFAULT_FEED_MAX_REQUESTS),
@@ -74,7 +74,7 @@ export function createRateLimitOptions(env: NodeJS.ProcessEnv = process.env): Ra
         ),
       ],
       [
-        'POST /issues/search',
+        'POST /api/issues/search',
         rule(
           'search-ip',
           readPositiveInteger(env, 'RATE_LIMIT_SEARCH_MAX_REQUESTS', DEFAULT_SEARCH_MAX_REQUESTS),

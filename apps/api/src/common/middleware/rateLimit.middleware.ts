@@ -257,7 +257,7 @@ function notifyRejection(
 function resolveAuthAccountKey(request: Request): string | undefined {
   if (
     request.method.toUpperCase() !== 'POST' ||
-    (requestPath(request) !== '/auth/login' && requestPath(request) !== '/auth/signup')
+    (requestPath(request) !== '/api/auth/login' && requestPath(request) !== '/api/auth/signup')
   ) {
     return undefined;
   }
@@ -274,7 +274,7 @@ function resolveAuthAccountKey(request: Request): string | undefined {
 }
 
 function isHealthRequest(request: Request): boolean {
-  return request.method.toUpperCase() === 'GET' && requestPath(request) === '/health';
+  return request.method.toUpperCase() === 'GET' && requestPath(request) === '/api/health';
 }
 
 function routeKey(request: Request): string {

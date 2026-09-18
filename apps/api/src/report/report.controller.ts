@@ -49,7 +49,9 @@ export class ReportController {
   ): Promise<ReportSummaryResponse> {
     const result = await this.service.request(principal.userId, body.periodStart);
     const pending = result.status === 'QUEUED' || result.status === 'RUNNING';
-    response.status(pending ? 202 : 200).setHeader('Location', `/me/reports/${result.reportId}`);
+    response
+      .status(pending ? 202 : 200)
+      .setHeader('Location', `/api/me/reports/${result.reportId}`);
     return result;
   }
 

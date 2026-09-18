@@ -408,7 +408,7 @@ test('refresh cookie helper가 보안 속성을 적용하고 세션 쿠키를 �
 
   setRefreshCookie(response, refreshToken, options);
   assert.match(headers['Set-Cookie'] ?? '', /^newtine_refresh=r{43};/);
-  assert.match(headers['Set-Cookie'] ?? '', /Path=\/auth/);
+  assert.match(headers['Set-Cookie'] ?? '', /Path=\/api\/auth/);
   assert.match(headers['Set-Cookie'] ?? '', /HttpOnly/);
   assert.match(headers['Set-Cookie'] ?? '', /SameSite=Lax/);
   assert.match(headers['Set-Cookie'] ?? '', /Max-Age=2592000/);

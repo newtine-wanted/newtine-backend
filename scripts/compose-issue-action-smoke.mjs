@@ -40,7 +40,8 @@ async function sql(statement, params = [], mode = 'run') {
 }
 
 async function request(path, init = {}) {
-  const response = await fetch(new URL(path, baseUrl), init);
+  const publicPath = path === '/api' || path.startsWith('/api/') ? path : `/api${path}`;
+  const response = await fetch(new URL(publicPath, baseUrl), init);
   const body = await response.text();
   return { response, body, json: body === '' ? null : JSON.parse(body) };
 }

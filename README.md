@@ -30,7 +30,7 @@ npm run build
 NODE_ENV=development npm run start:api
 ```
 
-API가 실행되면 [http://127.0.0.1:3000/health](http://127.0.0.1:3000/health)에서 다음 응답을
+API가 실행되면 [http://127.0.0.1:3000/api/health](http://127.0.0.1:3000/api/health)에서 다음 응답을
 확인할 수 있습니다.
 
 ```json
@@ -84,7 +84,7 @@ docker compose up --build
 별도 터미널에서 API liveness를 확인합니다.
 
 ```bash
-curl --fail --silent --show-error http://127.0.0.1:3000/health
+curl --fail --silent --show-error http://127.0.0.1:3000/api/health
 ```
 
 `API_PORT`를 기본값 3000과 다르게 지정했다면 URL의 host port도 같은 값으로 바꿉니다.
@@ -188,7 +188,7 @@ fixture를 다시 만들 때만 대상 volume을 명시적으로 초기화합니
 docker compose config --quiet
 docker build --check .
 docker compose up -d --build --wait db migrate api
-curl --fail --silent --show-error http://127.0.0.1:3000/health
+curl --fail --silent --show-error http://127.0.0.1:3000/api/health
 docker compose --profile tools run --rm --build batch
 docker compose down
 ```
@@ -315,19 +315,19 @@ SDK·e2e·OpenAPI 산출물은 `npm run contracts:all`로 생성합니다. 생�
 범위는 [데이터·응답 계약](docs/policies/data-contracts.md)과 [백엔드 구현 컨벤션](docs/conventions/backend-conventions.md)을
 참고하세요.
 
-파이프라인은 `POST /pipeline/runs`(필수 `Idempotency-Key`, 본문은 `query`만)로 비동기 접수하고,
-`GET /pipeline/runs/:runId`로 상태를 조회합니다. 실행량 상한은 서버 내부 정책이며 API 요청·응답에
+파이프라인은 `POST /api/pipeline/runs`(필수 `Idempotency-Key`, 본문은 `query`만)로 비동기 접수하고,
+`GET /api/pipeline/runs/:runId`로 상태를 조회합니다. 실행량 상한은 서버 내부 정책이며 API 요청·응답에
 노출하지 않습니다. 프로세스 종료를 확인한 운영자는
-`POST /pipeline/runs/:runId/interrupt`에 `expectedAttempt`·`executionId`를 보내
-중단 처리한 뒤 `POST /pipeline/runs/:runId/retry`로 실패 작업을 재시도합니다. `CONTENT`
+`POST /api/pipeline/runs/:runId/interrupt`에 `expectedAttempt`·`executionId`를 보내
+중단 처리한 뒤 `POST /api/pipeline/runs/:runId/retry`로 실패 작업을 재시도합니다. `CONTENT`
 재시도는 discovery를 반복하지 않고 선택한 실패 job의 seed URL에서 본문을 다시 확보합니다.
 
 ### 인증 API
 
-`POST /auth/signup`과 `POST /auth/login`은 `{ "email": "...", "password": "..." }`를 받아
-access JWT를 JSON으로 반환하고 `newtine_refresh` HttpOnly cookie를 설정합니다. `POST /auth/refresh`는
-cookie를 회전하고 새 access JWT를 반환하며, `POST /auth/logout`은 현재 refresh session만 revoke하고
-cookie를 삭제합니다. access JWT는 `Authorization: Bearer <token>`으로 `/me/**` 요청에 사용합니다.
+`POST /api/auth/signup`과 `POST /api/auth/login`은 `{ "email": "...", "password": "..." }`를 받아
+access JWT를 JSON으로 반환하고 `newtine_refresh` HttpOnly cookie를 설정합니다. `POST /api/auth/refresh`는
+cookie를 회전하고 새 access JWT를 반환하며, `POST /api/auth/logout`은 현재 refresh session만 revoke하고
+cookie를 삭제합니다. access JWT는 `Authorization: Bearer <token>`으로 `/api/me/**` 요청에 사용합니다.
 
 signup은 모든 계정을 `USER`로 만들며, `ADMIN` role은 운영자 절차로만 부여됩니다.
 자세한 인증·인가 정책과 migration 적용 조건은
@@ -392,10 +392,10 @@ category master의 PK는 `issue_categories.code`이며 이슈·분류 선호도�
 
 ## 신청형 주간 진단보고서
 
-- `GET /me/reports`: 최근 완료 4주 슬롯과 신청 가능 기간. 조회는 생성하지 않습니다.
-- `POST /me/reports`: `{ "periodStart": "YYYY-MM-DD" }`. 지난주 월요일(KST)만 신규 신청 가능. 대기/진행은 202, 기존 성공/실패 재조회는 200입니다.
-- `GET /me/reports/:reportId`: 소유한 보고서의 상태·완료 결과. 미완료 `content: null`입니다.
-- `POST /me/reports/:reportId/retry`: 재시도 가능한 실패만, 최근 완료 4주·60초 cooldown·총 5시도 제한. 성공 결과는 재생성하지 않습니다.
+- `GET /api/me/reports`: 최근 완료 4주 슬롯과 신청 가능 기간. 조회는 생성하지 않습니다.
+- `POST /api/me/reports`: `{ "periodStart": "YYYY-MM-DD" }`. 지난주 월요일(KST)만 신규 신청 가능. 대기/진행은 202, 기존 성공/실패 재조회는 200입니다.
+- `GET /api/me/reports/:reportId`: 소유한 보고서의 상태·완료 결과. 미완료 `content: null`입니다.
+- `POST /api/me/reports/:reportId/retry`: 재시도 가능한 실패만, 최근 완료 4주·60초 cooldown·총 5시도 제한. 성공 결과는 재생성하지 않습니다.
 
 모든 경로는 Bearer JWT가 필요합니다. 사용자별/주차별 하나만 저장하며 입력은 접수 시 고정합니다. API 프로세스가 재시작해도 DB 대기 작업은 남습니다. 주요 이슈는 지난주 최다 관심 분야를 기준으로 하며 공동 1위는 함께 사용하고 후보가 없으면 다른 분야로 대체하지 않습니다.
 

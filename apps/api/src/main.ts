@@ -21,6 +21,7 @@ async function bootstrap(): Promise<void> {
     bodyParser: false,
     bufferLogs: true,
   });
+  app.setGlobalPrefix('api');
   let pinoLogger: PinoLogger | undefined;
 
   try {

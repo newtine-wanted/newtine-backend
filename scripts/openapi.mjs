@@ -10,9 +10,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const NESTIA_BIN = join(ROOT, 'node_modules/nestia/bin/index.js');
 export const OPENAPI_OUTPUT = join(ROOT, 'generated/openapi.json');
 export const PROBLEM_DETAILS_REF = '#/components/schemas/ProblemDetails';
+export const API_PREFIX = '/api';
 
 const HTTP_METHODS = new Set(['delete', 'get', 'head', 'options', 'patch', 'post', 'put', 'trace']);
-const DYNAMIC_SUCCESS_PATH = '/issues/{issueId}/detail-views/{viewId}';
+const DYNAMIC_SUCCESS_PATH = `${API_PREFIX}/issues/{issueId}/detail-views/{viewId}`;
 
 /**
  * Rewrites only directly declared ProblemDetails failure bodies. The function
@@ -35,13 +36,31 @@ export function normalizeOpenApiDocument(document) {
   }
 
   // One report per week: replay of a terminal result returns 200; queued/running returns 202.
-  const reportRequest = document.paths?.['/me/reports']?.post;
+  const reportRequest = document.paths?.[`${API_PREFIX}/me/reports`]?.post;
   if (isRecord(reportRequest?.responses?.['202'])) {
     reportRequest.responses['200'] = {
       ...structuredClone(reportRequest.responses['202']),
       description: 'Existing completed or failed report; no new work enqueued.',
     };
   }
+  return document;
+}
+
+export function prefixOpenApiDocument(document) {
+  if (!isRecord(document.paths)) return document;
+
+  const paths = {};
+  for (const [path, pathItem] of Object.entries(document.paths)) {
+    const prefixedPath =
+      path === API_PREFIX || path.startsWith(`${API_PREFIX}/`)
+        ? path
+        : `${API_PREFIX}${path === '/' ? '' : path}`;
+    if (paths[prefixedPath] !== undefined) {
+      throw new Error(`OpenAPI path collision after applying ${API_PREFIX}: ${prefixedPath}`);
+    }
+    paths[prefixedPath] = pathItem;
+  }
+  document.paths = paths;
   return document;
 }
 
@@ -139,6 +158,7 @@ export async function generateOpenApi() {
     });
   }
 
+  prefixOpenApiDocument(document);
   normalizeOpenApiDocument(document);
   await writeNormalizedDocument(document);
 }

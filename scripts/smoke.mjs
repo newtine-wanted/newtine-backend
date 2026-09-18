@@ -6,6 +6,7 @@ import { request } from 'node:http';
 
 const configuredPort = Number(process.env.API_PORT ?? 0);
 const host = process.env.API_HOST ?? '127.0.0.1';
+const API_PREFIX = '/api';
 const child = spawn(process.execPath, ['dist/apps/api/src/main.js'], {
   env: {
     ...process.env,
@@ -49,22 +50,30 @@ const ready = new Promise((resolve, reject) => {
   });
 });
 
-function get(path, headers = {}) {
+function toApiPath(path) {
+  return path === API_PREFIX || path.startsWith(`${API_PREFIX}/`) ? path : `${API_PREFIX}${path}`;
+}
+
+function get(path, headers = {}, { prefix = true } = {}) {
   return new Promise((resolve, reject) => {
     if (!apiPort) {
       reject(new Error('API port is not known yet'));
       return;
     }
 
-    const req = request({ host, port: apiPort, path, method: 'GET', headers }, (response) => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', (chunk) => {
-        body += chunk;
-      });
-      response.on('end', () => resolve({ response, body }));
-    });
-    req.setTimeout(2_000, () => req.destroy(new Error(`GET ${path} timed out`)));
+    const requestPath = prefix ? toApiPath(path) : path;
+    const req = request(
+      { host, port: apiPort, path: requestPath, method: 'GET', headers },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          body += chunk;
+        });
+        response.on('end', () => resolve({ response, body }));
+      },
+    );
+    req.setTimeout(2_000, () => req.destroy(new Error(`GET ${requestPath} timed out`)));
     req.on('error', reject);
     req.end();
   });
@@ -81,11 +90,12 @@ function postRawJson(path, body, headers = {}) {
       return;
     }
 
+    const requestPath = toApiPath(path);
     const req = request(
       {
         host,
         port: apiPort,
-        path,
+        path: requestPath,
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -102,7 +112,7 @@ function postRawJson(path, body, headers = {}) {
         response.on('end', () => resolve({ response, body: responseBody }));
       },
     );
-    req.setTimeout(2_000, () => req.destroy(new Error(`POST ${path} timed out`)));
+    req.setTimeout(2_000, () => req.destroy(new Error(`POST ${requestPath} timed out`)));
     req.on('error', reject);
     req.end(body);
   });
@@ -181,6 +191,9 @@ try {
     /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
   );
 
+  const legacyHealth = await get('/health', {}, { prefix: false });
+  assert.equal(legacyHealth.response.statusCode, 404);
+
   const search = await postJson('/issues/search', { query: '파일럿', limit: 1 });
   assert.equal(search.response.statusCode, 200);
   assert.equal(search.response.headers['content-type']?.split(';')[0], 'application/json');
@@ -237,7 +250,7 @@ try {
     guestFeed.response.headers['set-cookie']?.find((value) =>
       value.startsWith('newtine_feed_guest='),
     ) ?? '';
-  assert.match(guestCookieValue, /Path=\/feed/);
+  assert.match(guestCookieValue, /Path=\/api\/feed/);
   assert.match(guestCookieValue, /HttpOnly/);
   assert.match(guestCookieValue, /SameSite=Lax/);
 

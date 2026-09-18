@@ -33,6 +33,7 @@ dbTest(
     const { Test } = await import('@nestjs/testing');
     const module = await Test.createTestingModule({ imports: [ApiModule] }).compile();
     const app = module.createNestApplication();
+    app.setGlobalPrefix('api');
     let userId: string | undefined, otherId: string | undefined;
     const orm = app.get(MikroORM);
     const sql = orm.em.getConnection();
@@ -40,7 +41,7 @@ dbTest(
       await app.listen(0, '127.0.0.1');
       const base = await app.getUrl();
       const signup = async () => {
-        const r = await fetch(`${base}/auth/signup`, {
+        const r = await fetch(`${base}/api/auth/signup`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -63,15 +64,15 @@ dbTest(
         'content-type': 'application/json',
         authorization: `Bearer ${owner.accessToken}`,
       };
-      assert.equal((await fetch(`${base}/me/reports`)).status, 401);
-      const bad = await fetch(`${base}/me/reports`, {
+      assert.equal((await fetch(`${base}/api/me/reports`)).status, 401);
+      const bad = await fetch(`${base}/api/me/reports`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ periodStart: period.start, userId: otherId }),
       });
       assert.equal(bad.status, 400);
       assert.match(bad.headers.get('content-type') ?? '', /application\/problem\+json/);
-      const accepted = await fetch(`${base}/me/reports`, {
+      const accepted = await fetch(`${base}/api/me/reports`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ periodStart: period.start }),
@@ -80,8 +81,8 @@ dbTest(
       assert.match(accepted.headers.get('cache-control') ?? '', /private, no-store/);
       const queued = (await accepted.json()) as { reportId: string; status: string };
       assert.equal(queued.status, 'QUEUED');
-      assert.equal(accepted.headers.get('location'), `/me/reports/${queued.reportId}`);
-      const replay = await fetch(`${base}/me/reports`, {
+      assert.equal(accepted.headers.get('location'), `/api/me/reports/${queued.reportId}`);
+      const replay = await fetch(`${base}/api/me/reports`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ periodStart: period.start }),
@@ -90,13 +91,13 @@ dbTest(
       assert.equal(((await replay.json()) as { reportId: string }).reportId, queued.reportId);
       const foreignHeaders = { authorization: `Bearer ${other.accessToken}` };
       for (const suffix of ['', '/retry']) {
-        const r = await fetch(`${base}/me/reports/${queued.reportId}${suffix}`, {
+        const r = await fetch(`${base}/api/me/reports/${queued.reportId}${suffix}`, {
           method: suffix ? 'POST' : 'GET',
           headers: foreignHeaders,
         });
         assert.equal(r.status, 404);
       }
-      const pending = await fetch(`${base}/me/reports/${queued.reportId}`, { headers });
+      const pending = await fetch(`${base}/api/me/reports/${queued.reportId}`, { headers });
       const pendingBody = (await pending.json()) as Record<string, unknown>;
       assert.equal(pendingBody.content, null);
       for (const secret of ['input', 'userId', 'leaseToken', 'attempt', 'candidates'])
@@ -120,18 +121,18 @@ dbTest(
         "update weekly_reports set status='SUCCEEDED', content=?::jsonb, completed_at=now() where id=?",
         [JSON.stringify(minimal), queued.reportId],
       );
-      const successReplay = await fetch(`${base}/me/reports`, {
+      const successReplay = await fetch(`${base}/api/me/reports`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ periodStart: period.start }),
       });
       assert.equal(successReplay.status, 200);
-      const retrySuccess = await fetch(`${base}/me/reports/${queued.reportId}/retry`, {
+      const retrySuccess = await fetch(`${base}/api/me/reports/${queued.reportId}/retry`, {
         method: 'POST',
         headers,
       });
       assert.equal(retrySuccess.status, 409);
-      const list = await fetch(`${base}/me/reports`, { headers });
+      const list = await fetch(`${base}/api/me/reports`, { headers });
       const listed = (await list.json()) as {
         periods: unknown[];
         latestSucceeded: { reportId: string };

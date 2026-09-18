@@ -40,7 +40,8 @@ function databaseEnv() {
 }
 
 async function request(path, init = {}) {
-  const response = await fetch(new URL(path, baseUrl), init);
+  const publicPath = path === '/api' || path.startsWith('/api/') ? path : `/api${path}`;
+  const response = await fetch(new URL(publicPath, baseUrl), init);
   return { response, body: await response.text() };
 }
 
@@ -60,7 +61,7 @@ function guestCookie(result) {
   const token = decodeURIComponent(encodedToken);
   assert.match(token, /^v1\.\d+\.\d+\.[A-Za-z0-9_-]{43}\.[A-Za-z0-9_-]{43}$/);
   guestTokenHashes.add(createHash('sha256').update(token, 'utf8').digest('hex'));
-  assert.match(value, /Path=\/feed/);
+  assert.match(value, /Path=\/api\/feed/);
   assert.match(value, /HttpOnly/);
   assert.match(value, /SameSite=Lax/);
   return `newtine_feed_guest=${token}`;

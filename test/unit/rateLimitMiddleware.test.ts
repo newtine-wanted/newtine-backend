@@ -99,14 +99,14 @@ test('global middleware bypasses health and applies an endpoint override', () =>
   const rejections: RateLimitRejectionEvent[] = [];
   const middleware = createRateLimitMiddleware(
     store,
-    options(new Map([['POST /auth/login', authRule]])),
+    options(new Map([['POST /api/auth/login', authRule]])),
     () => 0,
     (event) => rejections.push(event),
   );
 
   let nextCalls = 0;
   const healthResponse = new TestResponse();
-  for (const path of ['/health', '/health', '/health/']) {
+  for (const path of ['/api/health', '/api/health', '/api/health/']) {
     middleware(request(path), healthResponse as unknown as Response, () => {
       nextCalls += 1;
     });
@@ -115,7 +115,7 @@ test('global middleware bypasses health and applies an endpoint override', () =>
 
   const firstLogin = new TestResponse();
   middleware(
-    request('/auth/login', '192.0.2.11', 'POST'),
+    request('/api/auth/login', '192.0.2.11', 'POST'),
     firstLogin as unknown as Response,
     () => {
       nextCalls += 1;
@@ -126,7 +126,7 @@ test('global middleware bypasses health and applies an endpoint override', () =>
 
   const rejectedLogin = new TestResponse();
   middleware(
-    request('/auth/login', '192.0.2.11', 'POST'),
+    request('/api/auth/login', '192.0.2.11', 'POST'),
     rejectedLogin as unknown as Response,
     () => {
       nextCalls += 1;
@@ -144,7 +144,7 @@ test('global middleware bypasses health and applies an endpoint override', () =>
   assert.equal(rejections.length, 1);
   assert.equal(rejections[0]?.ruleName, 'auth-ip');
   assert.equal(rejections[0]?.method, 'POST');
-  assert.equal(rejections[0]?.path, '/auth/login');
+  assert.equal(rejections[0]?.path, '/api/auth/login');
   assert.equal(Object.hasOwn(rejections[0] ?? {}, 'clientIp'), false);
 });
 
@@ -153,20 +153,20 @@ test('endpoint overrides also match routes with a trailing slash', () => {
   const store = new InMemoryRateLimitStore(20, 10_000);
   const middleware = createRateLimitMiddleware(
     store,
-    options(new Map([['POST /auth/login', authRule]])),
+    options(new Map([['POST /api/auth/login', authRule]])),
     () => 0,
   );
   let nextCalls = 0;
 
   const first = new TestResponse();
-  middleware(request('/auth/login', '192.0.2.12', 'POST'), first as unknown as Response, () => {
+  middleware(request('/api/auth/login', '192.0.2.12', 'POST'), first as unknown as Response, () => {
     nextCalls += 1;
   });
   assert.equal(first.statusCode, 200);
 
   const trailingSlash = new TestResponse();
   middleware(
-    request('/auth/login/', '192.0.2.12', 'POST'),
+    request('/api/auth/login/', '192.0.2.12', 'POST'),
     trailingSlash as unknown as Response,
     () => {
       nextCalls += 1;
@@ -183,7 +183,7 @@ test('account middleware uses the canonical email without storing its raw value'
 
   const first = new TestResponse();
   middleware(
-    request('/auth/login', '192.0.2.20', 'POST', { email: ' User@example.com ' }),
+    request('/api/auth/login', '192.0.2.20', 'POST', { email: ' User@example.com ' }),
     first as unknown as Response,
     () => {
       nextCalls += 1;
@@ -193,7 +193,7 @@ test('account middleware uses the canonical email without storing its raw value'
 
   const equivalent = new TestResponse();
   middleware(
-    request('/auth/login', '192.0.2.21', 'POST', { email: 'user@example.com' }),
+    request('/api/auth/login', '192.0.2.21', 'POST', { email: 'user@example.com' }),
     equivalent as unknown as Response,
     () => {
       nextCalls += 1;
@@ -203,7 +203,7 @@ test('account middleware uses the canonical email without storing its raw value'
 
   const different = new TestResponse();
   middleware(
-    request('/auth/login', '192.0.2.21', 'POST', { email: 'other@example.com' }),
+    request('/api/auth/login', '192.0.2.21', 'POST', { email: 'other@example.com' }),
     different as unknown as Response,
     () => {
       nextCalls += 1;
@@ -225,7 +225,7 @@ test('rate limit options expose safe defaults and reject invalid configuration',
   assert.equal(configured.global.maxRequests, 7);
   assert.equal(configured.maxKeys, 3);
   assert.equal(configured.trustProxyHops, 1);
-  assert.equal(configured.overrides.get('GET /feed')?.name, 'feed-ip');
+  assert.equal(configured.overrides.get('GET /api/feed')?.name, 'feed-ip');
 
   assert.throws(
     () => createRateLimitOptions({ RATE_LIMIT_MAX_REQUESTS: '0' }),
@@ -239,7 +239,7 @@ test('rate limit options expose safe defaults and reject invalid configuration',
 });
 
 test('client key uses Express resolved IP and never parses raw forwarded headers', () => {
-  const proxiedRequest = request('/health', '10.0.0.1');
+  const proxiedRequest = request('/api/health', '10.0.0.1');
   Object.assign(proxiedRequest, {
     ip: '198.51.100.10',
     headers: { 'x-forwarded-for': '203.0.113.9' },

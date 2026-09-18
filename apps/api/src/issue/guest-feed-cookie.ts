@@ -76,7 +76,7 @@ export function setGuestFeedCookie(
     'Set-Cookie',
     [
       `${FEED_GUEST_COOKIE_NAME}=${encodeURIComponent(token)}`,
-      'Path=/feed',
+      'Path=/api/feed',
       'HttpOnly',
       'SameSite=Lax',
       `Max-Age=${maxAge}`,

@@ -100,7 +100,7 @@ test('guest feed cookie is scoped, HttpOnly, SameSite, and Secure in production'
   setGuestFeedCookie(response as never, createGuestFeedToken(SECRET, now), true, now);
 
   assert.match(headers['Set-Cookie'] ?? '', new RegExp(`^${FEED_GUEST_COOKIE_NAME}=`));
-  assert.match(headers['Set-Cookie'] ?? '', /Path=\/feed/);
+  assert.match(headers['Set-Cookie'] ?? '', /Path=\/api\/feed/);
   assert.match(headers['Set-Cookie'] ?? '', /HttpOnly/);
   assert.match(headers['Set-Cookie'] ?? '', /SameSite=Lax/);
   assert.match(headers['Set-Cookie'] ?? '', new RegExp(`Max-Age=${FEED_GUEST_COOKIE_TTL_SECONDS}`));
