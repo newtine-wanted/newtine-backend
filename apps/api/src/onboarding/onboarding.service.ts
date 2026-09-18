@@ -3,14 +3,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import {
   ONBOARDING_REPOSITORY,
   TRANSACTION_MANAGER,
-  type OnboardingRepository,
   type TransactionManager,
+  type OnboardingRepository,
 } from '@newtine/core';
 import { OnboardingException, OnboardingExceptionCode } from '@newtine/core';
-import type {
-  CompleteOnboardingInput,
-  EntitySearchInput,
-} from '@newtine/api/onboarding/type/onboarding.input.js';
+import type { CompleteOnboardingInput } from '@newtine/api/onboarding/type/onboarding.input.js';
 
 @Injectable()
 export class OnboardingService {
@@ -20,19 +17,6 @@ export class OnboardingService {
     @Inject(TRANSACTION_MANAGER)
     private readonly transactionManager: TransactionManager,
   ) {}
-
-  async getOptions() {
-    return this.onboardingRepository.getOptions();
-  }
-
-  async searchEntities(input: EntitySearchInput) {
-    return this.onboardingRepository.searchEntities({
-      query: input.query,
-      type: input.type,
-      limit: input.limit ?? 20,
-      offset: input.offset ?? 0,
-    });
-  }
 
   async getMyOnboarding(userId: string) {
     const state = await this.onboardingRepository.findOnboarding(userId);

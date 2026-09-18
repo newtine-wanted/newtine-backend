@@ -12,6 +12,7 @@ import { OnboardingModule } from '@newtine/api/onboarding/onboarding.module.js';
 import { AuthModule } from '@newtine/api/auth/auth.module.js';
 import { ReportModule } from './report/report.module.js';
 import { InterestModule } from '@newtine/api/interest/interest.module.js';
+import { MetadataModule } from '@newtine/api/metadata/metadata.module.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { InterestModule } from '@newtine/api/interest/interest.module.js';
     PipelineModule,
     AuthModule,
     InterestModule,
+    MetadataModule,
     ReportModule,
   ],
   controllers: [HealthController],

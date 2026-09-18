@@ -124,7 +124,7 @@
   </head>
   <body>
     <header>
-      <p>설계 기준선 · 2026-09-13 · <strong class="state">설계 승인됨</strong></p>
+      <p>설계 기준선 · 2026-09-18 route delta 반영 · <strong class="state">설계 승인됨</strong></p>
       <h1>온보딩 API</h1>
       <p>
         기획 코멘트의 결정을 보존하고, ERD와 충돌하는 계약부터 확정한다. G1~G10 의사결정을 반영했고
@@ -712,7 +712,11 @@
           <h2>HTTP·상태 계약 제안</h2>
           <p>
             경로와 세부 제한은 이 설계 승인과 구현 계약에 따라 확정됐다. 실제 DB·인증 연결 공백은
-            구현 제어 문서에서 별도로 보류한다.
+            구현 제어 문서에서 별도로 보류한다. 2026-09-18 route delta에서 공개 마스터 데이터는
+            온보딩 화면의 하위 옵션이 아니라 재사용 가능한 메타데이터 리소스로 분리했다. 이 문서의
+            <code>/api</code>는 별도 전역 prefix 작업이 적용한 최종 public path이며, 이번 구현은
+            그 prefix를 중복해서 등록하지 않고 controller-relative <code>metadata/...</code> 경로만
+            소유한다.
           </p>
           <table>
             <caption>
@@ -726,15 +730,23 @@
             </thead>
             <tbody>
               <tr>
-                <td>GET /onboarding/options</td>
-                <td>관심 주제 12개·나이 4구간·지역 17개 코드와 표시명, 표시 순서</td>
+                <td>GET /api/metadata/categories</td>
+                <td>카테고리 코드·표시명·표시 순서의 공개 마스터 컬렉션</td>
               </tr>
               <tr>
-                <td>GET /onboarding/entities</td>
+                <td>GET /api/metadata/age-groups</td>
+                <td>나이대 코드·표시명·표시 순서의 공개 마스터 컬렉션</td>
+              </tr>
+              <tr>
+                <td>GET /api/metadata/regions</td>
+                <td>지역 코드·표시명·표시 순서의 공개 마스터 컬렉션</td>
+              </tr>
+              <tr>
+                <td>GET /api/metadata/political-actors</td>
                 <td>
-                  활성 대상 목록. q/name prefix 검색, type 필터, name+id 안정 정렬. q 없음은 전체
-                  목록. limit 기본 20·최대 100, offset 기본 0. 이름과 id 동률 방지, 변경 중 페이지
-                  고정 스냅샷은 보장하지 않음.
+                  정치인·정당·기관을 포괄하는 공개 마스터 컬렉션. <code>q</code> prefix,
+                  <code>type</code>, <code>limit</code>, <code>offset</code>을 지원하고
+                  <code>items</code>·<code>total</code>·페이지 정보를 반환한다.
                 </td>
               </tr>
               <tr>
@@ -856,7 +868,7 @@
             정보성 자가점검이다. 결과는 브라우저 안에만 남으며 Codex에 자동 전달되지 않는다. 결과가
             없다는 이유로 구현을 되돌리거나 승인으로 간주하지 않는다.
           </p>
-          <p id="control-progress" aria-live="polite">질문 1 / 4 · 답변 0 / 4</p>
+          <p id="control-progress" aria-live="polite">질문 1 / 5 · 답변 0 / 5</p>
           <form id="design-control-form">
             <fieldset class="control-question" data-question="1">
               <legend>Q1. 이미 COMPLETED인 회원이 다른 선택으로 complete를 다시 보내면?</legend>
@@ -918,6 +930,24 @@
                 <p class="result-next"></p>
               </div>
             </fieldset>
+            <fieldset class="control-question" data-question="5" hidden>
+              <legend>Q5. 공개 메타데이터의 경로 계약은 어떻게 분리하는가?</legend>
+              <label
+                ><input type="radio" name="q5" value="a" /> 온보딩 화면의 옵션 DTO가 아니라
+                <code>/api/metadata/categories</code>, <code>/api/metadata/age-groups</code>,
+                <code>/api/metadata/regions</code>, <code>/api/metadata/political-actors</code>라는
+                공개 마스터 컬렉션으로 제공한다.</label
+              ><br /><label
+                ><input type="radio" name="q5" value="b" /> 기존처럼
+                <code>/onboarding/options</code> 하나에 모든 선택지를 묶고 대상도
+                <code>/onboarding/entities</code>에 둔다.</label
+              >
+              <div class="control-result" hidden>
+                <strong class="result-status"></strong>
+                <p class="result-explanation"></p>
+                <p class="result-next"></p>
+              </div>
+            </fieldset>
             <div>
               <button type="button" id="control-prev">이전</button>
               <button type="button" id="control-next">다음</button>
@@ -927,7 +957,7 @@
           </form>
           <script>
             (() => {
-              const answers = { q1: 'a', q2: 'a', q3: 'a', q4: 'a' };
+              const answers = { q1: 'a', q2: 'a', q3: 'a', q4: 'a', q5: 'a' };
               const cards = [...document.querySelectorAll('.control-question')];
               const progress = document.getElementById('control-progress');
               const output = document.getElementById('control-output');
@@ -978,9 +1008,13 @@
         <section id="approval-state">
           <h2>승인 상태</h2>
           <p>
-            <strong>설계 승인됨</strong> · 2026-09-13 사용자 지시 “구현 ㄱㄱ”. 승인 범위는 옵션·대상
-            조회, 최초 complete/skip, principal seam, 지역 +1, terminal 재요청 멱등성이다. 소셜
-            로그인·설정 수정·실제 운영 대상 명단·피드 결합은 승인하지 않았다.
+            <strong>설계 승인됨</strong> · 2026-09-13 사용자 지시 “구현 ㄱㄱ”과 2026-09-18
+            메타데이터 route delta 합의. 승인 범위는 공개 메타데이터 컬렉션
+            (<code>/api/metadata/categories</code>, <code>/api/metadata/age-groups</code>,
+            <code>/api/metadata/regions</code>, <code>/api/metadata/political-actors</code>),
+            내 상태 조회, 최초 complete/skip, principal seam, 지역 +1, terminal 재요청 멱등성이다.
+            전역 <code>/api</code> prefix의 런타임 적용은 별도 설계·구현 세션의 범위다. 소셜 로그인·
+            설정 수정·실제 운영 대상 명단·피드 결합은 승인하지 않았다.
           </p>
           <ol>
             <li>승인된 범위의 구현 제어 문서 활성화</li>
@@ -992,7 +1026,7 @@
           <h2>현재 category 계약 보완</h2>
           <p>
             후속 통합 결정으로 기존 문서의 12개 uppercase topic 기록은 과거 설계 이력으로 남기고,
-            현재 API 계약은 lowercase canonical 10개로 교체했다. <code>GET /onboarding/options</code>와
+            현재 API 계약은 lowercase canonical 10개로 교체했다. <code>GET /api/metadata/categories</code>와
             complete request의 <code>topicCodes</code>는 <code>housing</code>, <code>labor</code>,
             <code>finance</code>, <code>welfare</code>, <code>education</code>, <code>health</code>,
             <code>climate</code>, <code>security</code>, <code>local</code>, <code>politics</code>만 허용하며

@@ -1,4 +1,4 @@
-import { TypedBody, TypedException, TypedQuery, TypedRoute } from '@nestia/core';
+import { TypedBody, TypedException, TypedRoute } from '@nestia/core';
 import { Controller, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import typia from 'typia';
 
@@ -8,49 +8,13 @@ import type { AuthPrincipal } from '@newtine/core';
 import { JwtAuthGuard } from '@newtine/api/auth/jwt-auth.guard.js';
 import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDetails.js';
 import { OnboardingService } from './onboarding.service.js';
-import { toEntitySearchCommand } from './type/onboarding.input.js';
-import type {
-  CompleteOnboardingRequest,
-  OnboardingEntityQuery,
-} from './type/onboarding.request.js';
-import type {
-  OnboardingEntitySearchResult,
-  OnboardingOptionsResult,
-  OnboardingStateResult,
-} from './type/onboarding.output.js';
-import { toEntitySearchResult, toOptionsResult, toStateResult } from './type/onboarding.output.js';
+import type { CompleteOnboardingRequest } from './type/onboarding.request.js';
+import type { OnboardingStateResult } from './type/onboarding.output.js';
+import { toStateResult } from './type/onboarding.output.js';
 
 @Controller()
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}
-
-  @TypedException<ProblemDetails>(ApiException.InternalError)
-  @TypedRoute.Get('onboarding/options')
-  async getOptions(): Promise<OnboardingOptionsResult> {
-    return toOptionsResult(await this.onboardingService.getOptions());
-  }
-
-  @TypedException<ProblemDetails>(ApiException.InvalidArgument)
-  @TypedException<ProblemDetails>(ApiException.InternalError)
-  @TypedRoute.Get('onboarding/entities')
-  async searchEntities(
-    @TypedQuery<OnboardingEntityQuery>({
-      type: 'validate',
-      validate: (input) => typia.http.validateQuery<OnboardingEntityQuery>(input),
-    })
-    query: OnboardingEntityQuery,
-  ): Promise<OnboardingEntitySearchResult> {
-    return toEntitySearchResult(
-      await this.onboardingService.searchEntities(
-        toEntitySearchCommand({
-          query: query.q,
-          type: query.type,
-          limit: query.limit,
-          offset: query.offset,
-        }),
-      ),
-    );
-  }
 
   /** @security bearerAuth */
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
