@@ -95,13 +95,17 @@ export function checkDraft(
     draft.impacts.some((i) => !text(i.description) || !refs(i.articleIds))
   )
     throw new Error('INVALID_GENERATION_IMPACTS');
-  // A missing viewpoint is allowed by user decision; references, when supplied, must resolve.
   if (
-    draft.viewpoints !== null &&
-    (!Array.isArray(draft.viewpoints) ||
-      draft.viewpoints.some(
-        (v) => !text(v.stakeholder) || !text(v.statement) || !refs(v.articleIds),
-      ))
+    !Array.isArray(draft.viewpoints) ||
+    draft.viewpoints.length !== 2 ||
+    draft.viewpoints.some(
+      (v) =>
+        !text(v.stakeholder) ||
+        !text(v.statement) ||
+        !refs(v.articleIds) ||
+        v.articleIds.length < 1,
+    ) ||
+    new Set(draft.viewpoints.map((v) => normalizedTitle(v.stakeholder))).size !== 2
   )
     throw new Error('INVALID_VIEWPOINTS');
   if (

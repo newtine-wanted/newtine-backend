@@ -33,7 +33,7 @@ export class GenerationOpenAiModel implements GenerationModel {
 제목은 검색 키워드가 아닌 카드 표시 제목이다. 사건의 현재 단계(발표/검토/확정/시행)를 구분한다. summaryLines는 핵심 3줄이다.
 eventAt은 이미 일어난 주요 사건의 ISO8601 시각(한국 시간대 명시)이며 eventEvidence에는 해당 시각을 뒷받침하는 본문 원문 구절을 그대로 넣는다. 시각이 불명확하거나 미래 예정이면 둘 다 null로 반환한다. 보도 시각을 사건 시각으로 추측하지 않는다.
 impacts는 제공된 4개 세대 코드 각각 하나씩 작성한다. 기사로 확인된 직접 영향이 없으면 '현재 확인된 직접적인 영향은 없어요'라고 쓰며 articleIds는 빈 배열로 둔다. 나이로 직업·소득·정치성향을 추측하지 않는다. generations는 기사에 직접적인 관련성이 확인된 세대만 복수 선택한다.
-viewpoints는 찬반이 아닌 기사에서 실제 확인되는 이해관계자 관점 2개를 목표로 작성한다. 근거가 1개뿐이면 1개, 없으면 null 또는 빈 배열을 반환한다. 입장을 꾸며내지 말고 다른 항목은 계속 생성한다. 주장의 출처 articleIds를 명시한다.
+viewpoints는 반드시 서로 다른 이해관계자 기준으로 정확히 2개 작성한다. 두 관점이 대치되거나 찬반으로 나뉠 필요는 없다. 예를 들어 지원 기관의 집행 관점과 지원 대상 주민에게 적용되는 내용의 관점으로 나눌 수 있다. 직접 발언이 없으면 기사에 확인된 해당 이해관계자의 역할·적용 대상·조치 내용을 설명하되, 그 사람이 주장하거나 느낀 것처럼 꾸며내지 않는다. 기사에 없는 사실이나 입장은 추가하지 않는다. null·빈 배열·1개는 반환하지 않는다. 각 관점에 근거 articleIds를 1개 이상 명시한다. 이해관계자 이름은 기사에서 식별되는 구체적인 인물·기관·대상 집단으로 쓰고 단순히 전문가라고 쓰지 않는다.
 llmEstimatedImportance는 기사에 근거한 공공적 중요도 0~1이며 importanceReason에 이유를 적는다. 국민 권리·생활·정책 변화의 중대성을 기준으로 평가하되 점수 자체를 사실처럼 서술하지 않는다.
 terms는 이번에 생성한 제목·요약·관점·영향 설명에 실제 쓰인 어려운 용어 최대 5개다. 아직 뜻풀이하지 않는다.
 후속 전개가 예상되면 followUp.enabled=true, days=1~${config.maxTrackingDays}, 검색어 최대 3개와 이유를 작성한다. 그렇지 않으면 false, 0, 빈 검색어 배열이다.
@@ -49,8 +49,10 @@ terms는 이번에 생성한 제목·요약·관점·영향 설명에 실제 쓰
         integratedSummary: str,
         summaryLines: { ...arr(str, 3), minItems: 3 },
         viewpoints: {
-          type: ['array', 'null'],
-          items: obj({ stakeholder: str, statement: str, articleIds: refs }),
+          type: 'array',
+          minItems: 2,
+          maxItems: 2,
+          items: obj({ stakeholder: str, statement: str, articleIds: { ...refs, minItems: 1 } }),
         },
         impacts: {
           ...arr(

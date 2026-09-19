@@ -42,7 +42,14 @@ const draft = (): Draft => ({
   eventEvidence: null,
   integratedSummary: '정부가 보증금 지원을 발표했어요.',
   summaryLines: ['정부 발표', '보증금 지원', '시행 예정'],
-  viewpoints: null,
+  viewpoints: [
+    { stakeholder: '정부', statement: '지원을 발표했어요.', articleIds: [articles[0]!.articleId] },
+    {
+      stakeholder: '지원 대상 주민',
+      statement: '보증금 지원 대상이에요.',
+      articleIds: [articles[1]!.articleId],
+    },
+  ],
   impacts: GENERATIONS.map((generation) => ({
     generation,
     description: '현재 확인된 직접적인 영향은 없어요',
@@ -128,11 +135,11 @@ function model(): GenerationModel {
 const bodies = {
   fetch: async (a: DiscoveredArticle) => articles.find((b) => b.sourceUrl === a.sourceUrl)!,
 };
-test('no viewpoints still completes generation and reuses DB glossary without a definition call', async () => {
+test('two nonopposing viewpoints complete generation and reuses DB glossary without a definition call', async () => {
   const store = new Store();
   const run = await new GenerationService(store, bodies, model()).execute('source', config, at);
   assert.equal(run.snapshot.results[0]!.status, 'GENERATED');
-  assert.equal(run.snapshot.results[0]!.draft!.viewpoints, null);
+  assert.equal(run.snapshot.results[0]!.draft!.viewpoints.length, 2);
   assert.equal(run.snapshot.results[0]!.glossary![0]!.source, 'DATABASE');
   assert.equal(run.snapshot.results[0]!.eventAtSource, 'FIRST_REPORT');
   const reused = await new GenerationService(
@@ -240,14 +247,18 @@ test('classification uses allowed codes only and does not match Seoul inside a l
     /INVALID_CLASSIFICATION/,
   );
 });
-test('draft accepts zero or one viewpoint but rejects fabricated reference ids, generation codes and scores', () => {
+test('draft requires exactly two distinct stakeholders and valid references', () => {
   const d = draft();
-  d.viewpoints = [];
   checkDraft(d, articles, config);
-  d.viewpoints = [
-    { stakeholder: '정부', statement: '지원 발표', articleIds: [articles[0]!.articleId] },
-  ];
-  checkDraft(d, articles, config);
+  for (const values of [
+    [],
+    draft().viewpoints.slice(0, 1),
+    [...draft().viewpoints, draft().viewpoints[0]!],
+  ]) {
+    d.viewpoints = values;
+    assert.throws(() => checkDraft(d, articles, config), /INVALID_VIEWPOINTS/);
+  }
+  d.viewpoints = draft().viewpoints;
   d.viewpoints[0]!.articleIds = ['unknown'];
   assert.throws(() => checkDraft(d, articles, config), /INVALID_VIEWPOINTS/);
   const bad = draft();

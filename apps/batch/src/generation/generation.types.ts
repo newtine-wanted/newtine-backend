@@ -26,7 +26,7 @@ export interface Draft {
   eventEvidence: string | null;
   integratedSummary: string;
   summaryLines: string[];
-  viewpoints: { stakeholder: string; statement: string; articleIds: string[] }[] | null;
+  viewpoints: { stakeholder: string; statement: string; articleIds: string[] }[];
   impacts: { generation: Generation; description: string; articleIds: string[] }[];
   llmEstimatedImportance: number;
   importanceReason: string;

@@ -93,7 +93,7 @@ try {
     classify = 0;
   const model = {
     usage: [],
-    generate: async () => {
+    generate: async (articles) => {
       generated++;
       return {
         title: '서울 주거 지원',
@@ -101,7 +101,10 @@ try {
         eventEvidence: null,
         integratedSummary: `${term} 지원이에요. 신규용어를 설명해요.`,
         summaryLines: ['주거 지원', '서울 발표', '확인된 내용'],
-        viewpoints: null,
+        viewpoints: [
+          { stakeholder: '정부', statement: '지원 발표', articleIds: [articles[0].articleId] },
+          { stakeholder: '주민', statement: '지원 대상', articleIds: [articles[1].articleId] },
+        ],
         impacts: GENERATIONS.map((generation) => ({
           generation,
           description: '현재 확인된 직접적인 영향은 없어요',
@@ -191,7 +194,7 @@ try {
     JSON.stringify({
       runId: run.id,
       checks:
-        'source, catalog, glossary, body shortage, null viewpoints, resume, usage, reuse, concurrency, fencing, no publishing',
+        'source, catalog, glossary, body shortage, two viewpoints, resume, usage, reuse, concurrency, fencing, no publishing',
       passed: true,
     }),
   );
