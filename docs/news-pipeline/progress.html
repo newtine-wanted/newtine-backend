@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEWTINE 뉴스 파이프라인 · 구현 현황</title>
+<meta name="description" content="direction.md 기준으로 파이프라인 5단계의 소단계별 구현 현황을 관리하는 보드">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#f4f6f9; --card:#fff; --card-2:#f2f5f9; --col:#eaeef4;
+  --line:#dfe4ec; --line-2:#c8d1de;
+  --text:#16202e; --text-2:#4e5b6d; --text-3:#7a8797;
+  --brand:#0f9d76; --blue:#2b7fd4; --amber:#a86f08; --coral:#d9503c; --violet:#6f52d9;
+  --r:14px; --r-s:9px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",Pretendard,"Noto Sans KR","Segoe UI",sans-serif;
+  line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1400px;margin:0 auto;padding:26px 18px 70px}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}
+
+header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+h1{font-size:1.45rem;margin:0 0 4px;letter-spacing:-.02em}
+.sub{color:var(--text-3);font-size:.84rem;margin:0}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:22px 0 10px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r-s);padding:11px 13px}
+.stat b{display:block;font-size:1.4rem;line-height:1.2;letter-spacing:-.02em}
+.stat span{color:var(--text-3);font-size:.74rem}
+.stat.ok b{color:var(--brand)} .stat.blue b{color:var(--blue)}
+.stat.amber b{color:var(--amber)} .stat.violet b{color:var(--violet)}
+.stat.coral b{color:var(--coral)}
+
+.bar{height:8px;border-radius:99px;background:var(--card-2);border:1px solid var(--line);overflow:hidden;margin-bottom:8px}
+.bar i{display:block;height:100%;background:var(--brand)}
+.barlabel{color:var(--text-3);font-size:.76rem;margin-bottom:26px}
+
+/* stage rail = filter */
+.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.step{background:var(--card);border:1px solid var(--line);border-radius:var(--r-s);
+  padding:10px 11px;position:relative;cursor:pointer;text-align:left;font:inherit;color:inherit}
+.step:hover{border-color:var(--line-2)}
+.step.done{border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
+.step.now{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 9%,var(--card))}
+.step.partial{border-color:var(--amber);background:color-mix(in srgb,var(--amber) 9%,var(--card))}
+.step.none{border-style:dashed}
+.step[aria-pressed="true"]{outline:2px solid var(--violet);outline-offset:1px}
+.step .no{font-family:ui-monospace,Menlo,monospace;font-size:.68rem;color:var(--text-3)}
+.step.done .no{color:var(--brand)} .step.now .no{color:var(--blue)} .step.partial .no{color:var(--amber)}
+.step b{display:block;font-size:.82rem;font-weight:650;letter-spacing:-.01em;margin:2px 0 4px}
+.step span.d{display:block;font-size:.72rem;color:var(--text-3);line-height:1.45}
+.step .mark{position:absolute;top:9px;right:10px;font-size:.72rem;color:var(--text-3)}
+.step.done .mark{color:var(--brand)} .step.now .mark{color:var(--blue)} .step.partial .mark{color:var(--amber)}
+.step .mini{display:block;width:100%;height:4px;border-radius:99px;background:var(--card-2);margin-top:7px;overflow:hidden;line-height:0}
+.step .mini i{display:block;height:4px;background:var(--brand)}
+
+.filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:22px}
+.filterbar .hint{color:var(--text-3);font-size:.75rem}
+.allbtn{font:inherit;font-size:.75rem;padding:4px 12px;border-radius:99px;cursor:pointer;
+  background:var(--card);border:1px solid var(--line-2);color:var(--text-2)}
+.allbtn[aria-pressed="true"]{background:var(--violet);border-color:var(--violet);color:#fff}
+
+/* board */
+.board{display:grid;grid-template-columns:repeat(4,minmax(270px,1fr));gap:12px;align-items:start}
+.col{background:var(--col);border:1px solid var(--line);border-radius:var(--r);padding:12px}
+.colhead{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.dot{width:8px;height:8px;border-radius:99px;flex:none}
+.colhead h3{font-size:.85rem;margin:0;font-weight:700;letter-spacing:-.01em}
+.count{margin-left:auto;font-size:.72rem;color:var(--text-3);background:var(--card);
+  border:1px solid var(--line);border-radius:99px;padding:1px 8px}
+.colnote{color:var(--text-3);font-size:.74rem;margin:-6px 0 12px}
+.empty{color:var(--text-3);font-size:.76rem;padding:10px 2px;display:none}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-s);
+  padding:11px 12px;margin-bottom:9px}
+.card:last-of-type{margin-bottom:0}
+.card.hi{border-color:color-mix(in srgb,var(--coral) 45%,var(--line))}
+.card h4{margin:0 0 5px;font-size:.9rem;font-weight:650;letter-spacing:-.01em}
+.card p{margin:0;font-size:.81rem;color:var(--text-2)}
+.card .foot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px}
+.key{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;color:var(--text-3)}
+.tag{font-size:.68rem;padding:1px 7px;border-radius:99px;border:1px solid var(--line-2);color:var(--text-3)}
+.tag.llm{color:var(--violet);border-color:color-mix(in srgb,var(--violet) 40%,transparent)}
+.tag.api{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 40%,transparent)}
+.tag.db{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent)}
+.tag.rule{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 40%,transparent)}
+.stepchip{font-size:.66rem;color:var(--text-3);background:var(--card-2);border-radius:5px;padding:1px 6px}
+.who{margin-left:auto;font-size:.68rem;border-radius:99px;padding:1px 8px;border:1px solid var(--line-2);color:var(--text-3)}
+
+/* sub-steps */
+.subs{margin-top:9px;padding:8px 0 0;border-top:1px dashed var(--line);display:grid;gap:5px}
+.subs li{list-style:none;font-size:.77rem;color:var(--text-2);padding-left:18px;position:relative;line-height:1.5}
+.subs{padding-left:0;margin-bottom:0}
+.subs li::before{position:absolute;left:0;font-size:.75rem}
+.subs li.d::before{content:"\2713";color:var(--brand)}
+.subs li.p::before{content:"\25D1";color:var(--amber)}
+.subs li.n::before{content:"\25CB";color:var(--text-3)}
+.subs li.x::before{content:"\00D7";color:var(--coral)}
+.subs li em{font-style:normal;color:var(--text-3);font-size:.94em}
+.subprog{display:flex;align-items:center;gap:7px;margin-top:8px}
+.subprog .bar2{display:block;flex:1;height:5px;border-radius:99px;background:var(--card-2);border:1px solid var(--line);overflow:hidden;line-height:0}
+.subprog .bar2 i{display:block;height:3px;background:var(--brand)}
+.subprog span{font-size:.68rem;color:var(--text-3);font-family:ui-monospace,Menlo,monospace}
+
+h2{font-size:1rem;margin:38px 0 12px;display:flex;align-items:center;gap:8px}
+h2::before{content:"";width:3px;height:15px;background:var(--brand);border-radius:2px}
+
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+.rule{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--brand);
+  border-radius:var(--r-s);padding:11px 13px}
+.rule b{display:block;font-size:.85rem;margin-bottom:3px}
+.rule span{font-size:.79rem;color:var(--text-2)}
+
+table{width:100%;border-collapse:collapse;font-size:.82rem;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r-s);overflow:hidden}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--text-3);font-weight:600;font-size:.73rem;background:var(--card-2)}
+tr:last-child td{border-bottom:none}
+td.ok{color:var(--brand);font-weight:600}
+td.warn{color:var(--amber);font-weight:600}
+td.no{color:var(--coral);font-weight:600}
+.scroll{overflow-x:auto}
+
+footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--text-3);font-size:.75rem}
+@media (max-width:1100px){.board{grid-template-columns:repeat(2,minmax(260px,1fr))}.steps{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:620px){.board{grid-template-columns:1fr}.steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div>
+    <h1>뉴스 파이프라인 — 구현 현황 보드</h1>
+    <p class="sub"><code>direction/direction.md</code>의 5단계 설계 기준 · 코드 확인일 2026-09-19 · 상태 표기는 <code>README.md</code> 규칙을 따름</p>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat ok"><b>13</b><span>구현 완료 소단계</span></div>
+  <div class="stat amber"><b>6</b><span>부분 구현</span></div>
+  <div class="stat coral"><b>12</b><span>미착수</span></div>
+  <div class="stat blue"><b>0</b><span>로컬 실행 검증</span></div>
+  <div class="stat violet"><b>31</b><span>전체 소단계</span></div>
+  <div class="stat"><b>0</b><span>저장된 이슈</span></div>
+</div>
+
+<div class="bar"><i style="width:52%"></i></div>
+<p class="barlabel">뼈대는 <b>끝에서 끝까지 연결</b>돼 있습니다 — 검색 → 후보 분류 → 본문 확보 → 생성 → 2중 검증 → 공개. 다만 <b>탐색 단계(1)의 세 가지 수집 경로</b>와 <b>평가 점수 계산</b>, <b>후속 보도 추적</b>은 설계만 있고 코드가 없습니다. 아직 <b>첫 실제 수집 실행이 한 번도 성공하지 않아</b> 전 구간이 <code>IMPLEMENTED</code> 이하입니다.</p>
+
+<div class="steps" id="rail">
+  <button class="step partial" aria-pressed="false" data-stage="1">
+    <span class="mark">◑</span><span class="no">1단계</span><b>대상 이슈 탐색</b>
+    <span class="d">트렌드·카테고리·후속보도 3경로 중 1개만 단순 형태로</span>
+    <span class="mini"><i style="width:20%"></i></span></button>
+  <button class="step partial" aria-pressed="false" data-stage="2">
+    <span class="mark">◑</span><span class="no">2단계</span><b>기사 수집·선별</b>
+    <span class="d">중복 비교·검색·최소본문 확보는 됨 · 선별 기준 미구현</span>
+    <span class="mini"><i style="width:60%"></i></span></button>
+  <button class="step partial" aria-pressed="false" data-stage="3">
+    <span class="mark">◑</span><span class="no">3단계</span><b>파생 데이터 생성</b>
+    <span class="d">본문·관점·영향·용어는 생성 · 분류/평가/추적 미구현</span>
+    <span class="mini"><i style="width:45%"></i></span></button>
+  <button class="step partial" aria-pressed="false" data-stage="4">
+    <span class="mark">◑</span><span class="no">4단계</span><b>생성 결과 검증</b>
+    <span class="d">규칙+LLM 2중 검증 작동 · 모순·UX 검증 미구현</span>
+    <span class="mini"><i style="width:65%"></i></span></button>
+  <button class="step done" aria-pressed="false" data-stage="5">
+    <span class="mark">✔</span><span class="no">5단계</span><b>저장 및 공개</b>
+    <span class="d">공개 상태 전환·조회 차단까지 완결</span>
+    <span class="mini"><i style="width:100%"></i></span></button>
+  <button class="step none" aria-pressed="false" data-stage="6">
+    <span class="mark">⏸</span><span class="no">운영</span><b>실행 주기</b>
+    <span class="d">수동 실행만 가능 · 일 1회 자동 실행 없음</span>
+    <span class="mini"><i style="width:15%"></i></span></button>
+</div>
+
+<div class="filterbar">
+  <button class="allbtn" id="allbtn" aria-pressed="true">전체 보기</button>
+  <span class="hint">위 단계 카드를 누르면 그 단계의 작업만 보입니다</span>
+</div>
+
+<div class="board" id="board">
+
+  <div class="col" data-col="done">
+    <div class="colhead"><span class="dot" style="background:var(--brand)"></span><h3>구현 완료</h3><span class="count">0</span></div>
+    <p class="colnote">코드가 있고 단위/통합 테스트가 있는 것 · <code>IMPLEMENTED</code></p>
+
+    <div class="card" data-stage="2">
+      <h4>이슈 후보 중복 판정</h4>
+      <p>기존 이슈 목록과 새 후보를 LLM이 비교해 <code>NEW / DUPLICATE / UNCERTAIN</code>으로 판정하고, 판정 후에도 제목 정규화로 한 번 더 거릅니다.</p>
+      <ul class="subs">
+        <li class="d">LLM 후보 추출 + 중복 판정 <em>· openAi.provider</em></li>
+        <li class="d">제목 정규화 2차 중복 차단 <em>· worker</em></li>
+        <li class="d"><code>maxNewIssues</code> 한도 초과분 집계</li>
+        <li class="p">비교 범위가 <b>최근 100건</b> — 설계의 "지난 일주일"과 다름</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:75%"></i></span><span>3/4</span></div>
+      <div class="foot"><span class="key">NP-2.1</span><span class="stepchip">2단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="2">
+      <h4>이슈별 관련 기사 검색</h4>
+      <p>이슈 제목과 씨드 기사 제목을 검색어로 네이버 뉴스를 추가 검색해 후보 기사를 넓힙니다.</p>
+      <ul class="subs">
+        <li class="d">이슈 기준 재검색 <em>· issueSearchQueries 한도</em></li>
+        <li class="d">URL 기준 중복 제거</li>
+        <li class="d"><code>articles.article_url</code> UNIQUE로 DB 레벨 재유입 차단</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:100%"></i></span><span>3/3</span></div>
+      <div class="foot"><span class="key">NP-2.2</span><span class="stepchip">2단계</span><span class="tag api">네이버</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="2">
+      <h4>본문 확보와 최소 근거 기준</h4>
+      <p>기사 원문을 실제로 가져오고, <b>유효 본문이 2건 미만이면 이슈를 버립니다.</b> 설계의 "1개 이하 검색된 이슈는 버림"에 해당합니다.</p>
+      <ul class="subs">
+        <li class="d">본문 fetch + 응답이 요청한 기사와 같은지 대조</li>
+        <li class="d"><code>validBodiesTarget</code> 도달 시 조기 중단</li>
+        <li class="d">2건 미만이면 <code>INSUFFICIENT_EVIDENCE</code>로 실패 분류</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:100%"></i></span><span>3/3</span></div>
+      <div class="foot"><span class="key">NP-2.4</span><span class="stepchip">2단계</span><span class="tag api">네이버</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="3">
+      <h4>핵심 정보 · 세부 정보 생성</h4>
+      <p>확보한 본문만 근거로 통합 요약·요약 3줄·관점·세대별 영향을 한 번에 생성합니다.</p>
+      <ul class="subs">
+        <li class="d">통합 요약 본문 <code>integratedSummary</code></li>
+        <li class="d">요약 줄 <b>정확히 3개</b> 강제 <em>· JSON 스키마</em></li>
+        <li class="d">관점별 정리 <code>viewpoints</code></li>
+        <li class="d">세대별 영향 <code>impacts</code> <em>· 4개 연령대 코드</em></li>
+        <li class="x">사건 주요 시각(<code>event_at</code>) 생성 — <b>스키마에만 있고 채우지 않음</b></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:80%"></i></span><span>4/5</span></div>
+      <div class="foot"><span class="key">NP-3.1</span><span class="stepchip">3단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="3">
+      <h4>용어 설명 생성</h4>
+      <p>생성된 내용에서 어려운 용어를 뽑아 짧은 설명을 붙입니다. 최대 5개로 제한됩니다.</p>
+      <ul class="subs">
+        <li class="d">용어·설명·근거기사 구조 생성</li>
+        <li class="d">최대 5개 제한 + 빈 문자열 거부</li>
+        <li class="x">기존 용어 테이블 재사용 — <b>용어 테이블 자체가 없음</b></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:67%"></i></span><span>2/3</span></div>
+      <div class="foot"><span class="key">NP-3.5</span><span class="stepchip">3단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="4">
+      <h4>규칙 기반 구조 검증</h4>
+      <p>LLM을 부르기 전에 형식부터 기계로 검사합니다. 여기서 떨어지면 LLM 검증 비용이 아예 안 듭니다.</p>
+      <ul class="subs">
+        <li class="d">필수값·타입·배열 형태 검증</li>
+        <li class="d">DB 코드값 검증 <em>· 카테고리·연령대 enum</em></li>
+        <li class="d"><b>근거 기사 id가 실제 확보한 기사인지</b> 대조 — 출처 위조 차단</li>
+        <li class="d">용어 5개·요약 3줄 등 개수 제약</li>
+        <li class="x">점수 범위 검증 — 점수 생성 자체가 없어 해당 없음</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:80%"></i></span><span>4/5</span></div>
+      <div class="foot"><span class="key">NP-4.1</span><span class="stepchip">4단계</span><span class="tag rule">규칙</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="4">
+      <h4>LLM 의미 검증</h4>
+      <p>규칙 검증을 통과한 것만 별도 LLM에게 "이 내용이 기사 근거와 일치하는가"를 다시 묻습니다. 환각 차단 장치입니다.</p>
+      <ul class="subs">
+        <li class="d">생성물 ↔ 선정 기사 일치 검증</li>
+        <li class="d"><code>PASS / FAIL / UNCERTAIN</code> 판정 저장</li>
+        <li class="d">거절 사유 <code>validation_reason</code> 기록</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:100%"></i></span><span>3/3</span></div>
+      <div class="foot"><span class="key">NP-4.2</span><span class="stepchip">4단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="4">
+      <h4>실패 기록과 선택적 재시도</h4>
+      <p>실패를 5종으로 분류해 남기고, 일부 이슈만 실패했으면 그 작업들만 다시 돌립니다.</p>
+      <ul class="subs">
+        <li class="d">실패 종류 5종 <em>· INTERRUPTED / INSUFFICIENT_EVIDENCE / INVALID_OUTPUT / SOURCE_UNAVAILABLE / UPSTREAM_ERROR</em></li>
+        <li class="d"><code>CONTENT</code> 범위 재시도 — 실패한 job만 재실행</li>
+        <li class="d">외부 호출 비용·토큰을 <code>ai_usage_records</code>에 기록</li>
+        <li class="p">"재실패하면 보류" 상태가 별도로 없음 — FAILED로만 남음</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:75%"></i></span><span>3/4</span></div>
+      <div class="foot"><span class="key">NP-4.5</span><span class="stepchip">4단계</span><span class="tag rule">운영</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="5">
+      <h4>이슈 저장 및 공개 전환</h4>
+      <p>두 검증을 모두 통과한 이슈만 <code>PUBLISHED</code>로 바뀝니다. 조회 쿼리 전부에 공개 조건이 걸려 있어 미검증 이슈는 노출되지 않습니다.</p>
+      <ul class="subs">
+        <li class="d">본문·기사·영향 저장 <em>· issue_details / issue_articles / issue_impacts</em></li>
+        <li class="d"><code>UNPUBLISHED → PUBLISHED</code> 전환 <em>· WITHDRAWN은 전환 제외</em></li>
+        <li class="d">피드·상세·검색 쿼리에 공개 조건 강제</li>
+        <li class="d">임베딩 작업 큐잉 + 수동 보완 잡</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:100%"></i></span><span>4/4</span></div>
+      <div class="foot"><span class="key">NP-5.1</span><span class="stepchip">5단계</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="6">
+      <h4>중복 실행 방지와 작업 점유</h4>
+      <p>같은 요청이 두 번 실행되지 않고, 워커가 여러 개거나 죽었다 살아나도 같은 일을 두 번 하지 않습니다.</p>
+      <ul class="subs">
+        <li class="d"><code>Idempotency-Key</code> UNIQUE로 중복 접수 차단</li>
+        <li class="d"><code>execution_id</code> 기반 run/job 점유</li>
+        <li class="d">임베딩 <code>claim_token</code> — RUNNING이면 점유자 필수 (CHECK)</li>
+        <li class="d">시간 경과만으로 작업을 탈취하지 않음 <em>· 수동 reclaim</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:100%"></i></span><span>4/4</span></div>
+      <div class="foot"><span class="key">NP-0.1</span><span class="stepchip">운영</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+    <p class="empty">이 단계에 해당하는 작업이 없습니다</p>
+  </div>
+
+  <div class="col" data-col="partial">
+    <div class="colhead"><span class="dot" style="background:var(--amber)"></span><h3>부분 구현</h3><span class="count">0</span></div>
+    <p class="colnote">동작은 하지만 설계가 요구한 조건을 아직 다 만족하지 않음</p>
+
+    <div class="card hi" data-stage="1">
+      <h4>카테고리 기반 네이버 탐색</h4>
+      <p>현재는 <b>운영자가 넣은 검색어 하나</b>로만 검색합니다. 설계가 요구한 카테고리 자동 변환·순환·시간 필터가 없습니다.</p>
+      <ul class="subs">
+        <li class="d">네이버 뉴스 API 검색 + 개수 한도</li>
+        <li class="d">URL·제목 기준 중복 제거</li>
+        <li class="x">DB 카테고리를 검색어로 자동 변환</li>
+        <li class="x">지역·인물 순환 검색</li>
+        <li class="x">최근 24시간 기사만 필터</li>
+        <li class="x">활성 상태 항목만 검색 대상으로 선택</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:33%"></i></span><span>2/6</span></div>
+      <div class="foot"><span class="key">NP-1.2</span><span class="stepchip">1단계</span><span class="tag api">네이버</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="2">
+      <h4>기사 선별 기준</h4>
+      <p>현재는 <b>먼저 잡힌 순서대로</b> 본문을 시도합니다. 설계의 "무관 기사 제거 + 언론사 저명도 기준 최대 5개"가 빠져 있습니다.</p>
+      <ul class="subs">
+        <li class="d">개수 상한 <code>maxBodyAttempts</code> 적용</li>
+        <li class="x">무관 기사 제거 (LLM 또는 규칙)</li>
+        <li class="x">언론사 저명도 순위 — <code>publishers</code> 테이블에 저명도 컬럼 없음</li>
+        <li class="x">최대 5개 기사 선정 규칙</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:25%"></i></span><span>1/4</span></div>
+      <div class="foot"><span class="key">NP-2.3</span><span class="stepchip">2단계</span><span class="tag rule">규칙</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="3">
+      <h4>분류 정보 생성</h4>
+      <p>카테고리 하나만 LLM이 고릅니다. 설계가 요구한 "규칙으로 먼저 매칭하고 애매한 것만 LLM"은 적용되지 않았습니다.</p>
+      <ul class="subs">
+        <li class="d">카테고리 선택 <em>· DB 등록 코드 enum 강제</em></li>
+        <li class="x">지역 매칭 — <code>regions</code> 17개는 있으나 이슈에 연결 안 함</li>
+        <li class="x">인물·기관 매칭 — <code>issue_entities</code> 테이블 비어 있음</li>
+        <li class="x">규칙 우선 매칭 → 애매한 것만 LLM</li>
+        <li class="p">관련 세대는 <code>issue_impacts</code>로 복수 저장 가능 <em>· 분류가 아닌 영향으로만</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:20%"></i></span><span>1/5</span></div>
+      <div class="foot"><span class="key">NP-3.2</span><span class="stepchip">3단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="4">
+      <h4>남은 검증 항목</h4>
+      <p>일치 검증까지는 되지만, 파생 데이터 간 모순과 UX 라이팅 기준 검증은 아직 없습니다.</p>
+      <ul class="subs">
+        <li class="d">생성물 ↔ 기사 일치 검증</li>
+        <li class="x">파생 데이터 사이 모순 검증</li>
+        <li class="x">UX 라이팅 기준 검증 <em>· 기준 문서 자체가 "추가예정"</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:33%"></i></span><span>1/3</span></div>
+      <div class="foot"><span class="key">NP-4.3</span><span class="stepchip">4단계</span><span class="tag rule">규칙</span><span class="who">사람+AI</span></div>
+    </div>
+    <p class="empty">이 단계에 해당하는 작업이 없습니다</p>
+  </div>
+
+  <div class="col" data-col="next">
+    <div class="colhead"><span class="dot" style="background:var(--blue)"></span><h3>다음 차례</h3><span class="count">0</span></div>
+    <p class="colnote">지금 막혀 있는 것부터 · 위가 우선</p>
+
+    <div class="card hi" data-stage="5">
+      <h4>첫 로컬 수집 실행 성공시키기</h4>
+      <p>지금까지 <b>실제 수집이 한 번도 성공한 적이 없습니다.</b> 저장된 이슈 0건. 이게 되기 전까지 나머지 작업의 검증은 전부 추정입니다.</p>
+      <ul class="subs">
+        <li class="n">워커 1회 실행 <em>· <code>PIPELINE_WORKER_ONCE=1</code></em></li>
+        <li class="n">기사 메타데이터 저장 확인</li>
+        <li class="n">이슈 1건 이상 생성 확인</li>
+        <li class="n">같은 입력 재실행 시 중복 없음 확인</li>
+        <li class="n">결과를 <code>runs/</code>에 기록 → <code>LOCAL_VERIFIED</code>로 승격</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/5</span></div>
+      <div class="foot"><span class="key">NP-V1</span><span class="stepchip">전체</span><span class="tag rule">검증</span><span class="who">사람+AI</span></div>
+    </div>
+
+    <div class="card hi" data-stage="3">
+      <h4>평가 정보(중요도·최신성) 계산</h4>
+      <p>컬럼은 있는데 <b>아무도 채우지 않아 전부 0</b>입니다. 피드 정렬이 사실상 무작위에 가깝다는 뜻입니다. 설계상 LLM이 아니라 <b>계산식</b>으로 해야 합니다.</p>
+      <ul class="subs">
+        <li class="n">기사 수·언론사 수 집계</li>
+        <li class="n">영향범위 LLM 추정값 반영</li>
+        <li class="n">중요도 산식 → <code>importance_score</code> (0~1)</li>
+        <li class="n">사건 시각 기준 최신성 → <code>freshness_score</code> (0~1)</li>
+        <li class="n">선행 조건: <code>event_at</code> 생성 <em>· NP-3.1</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/5</span></div>
+      <div class="foot"><span class="key">NP-3.3</span><span class="stepchip">3단계</span><span class="tag rule">계산</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="2">
+      <h4>중복 비교 범위를 일주일로 제한</h4>
+      <p>지금은 최근 100건과 비교합니다. 데이터가 쌓이면 비교 비용이 계속 커지므로, 설계대로 <b>기간 기준</b>으로 바꿔야 합니다.</p>
+      <ul class="subs">
+        <li class="n">조회 조건을 <code>published_at &gt;= now() - 7일</code>로 변경</li>
+        <li class="n">기간 인덱스 확인</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/2</span></div>
+      <div class="foot"><span class="key">NP-2.1b</span><span class="stepchip">2단계</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="1">
+      <h4>검색 카테고리 목록 확정</h4>
+      <p><code>direction.md</code>에 <b>"검색할 카테고리는 작성 후 검토받을 것"</b>으로 남아 있습니다. 1단계 자동화의 선행 조건입니다.</p>
+      <ul class="subs">
+        <li class="n">카테고리 → 검색어 변환 규칙 초안</li>
+        <li class="n">사람 검토·승인</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/2</span></div>
+      <div class="foot"><span class="key">NP-1.0</span><span class="stepchip">1단계</span><span class="tag rule">기획</span><span class="who">사람</span></div>
+    </div>
+    <p class="empty">이 단계에 해당하는 작업이 없습니다</p>
+  </div>
+
+  <div class="col" data-col="none">
+    <div class="colhead"><span class="dot" style="background:var(--text-3)"></span><h3>미착수</h3><span class="count">0</span></div>
+    <p class="colnote">설계만 있고 코드가 없는 것 · <code>PLANNED</code></p>
+
+    <div class="card" data-stage="1">
+      <h4>Google Trends 수집</h4>
+      <p>코드가 전혀 없습니다. 한국 Trending Now CSV를 하루 한 번 받아 정치 관련 용어를 뽑는 경로입니다.</p>
+      <ul class="subs">
+        <li class="n">Trending Now CSV 일 1회 수집</li>
+        <li class="n">카테고리 필터 <em>· Law and Government, Politics</em></li>
+        <li class="n">수집 용어를 네이버 뉴스로 재탐색</li>
+        <li class="n">RSS는 카테고리 지정 불가로 제외 <em>· 결정 완료</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/4</span></div>
+      <div class="foot"><span class="key">NP-1.1</span><span class="stepchip">1단계</span><span class="tag api">외부</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="1">
+      <h4>후속 보도 탐색</h4>
+      <p><code>issue_relations</code> 테이블과 <code>FOLLOW_UP</code> 타입은 만들어져 있지만 <b>채우는 코드가 없습니다.</b> 설계의 핵심 차별점인데 비어 있는 상태입니다.</p>
+      <ul class="subs">
+        <li class="n">추적 대상 이슈만 선별해 검색</li>
+        <li class="n">이슈명·인물·기관 기반 검색어 구성</li>
+        <li class="n">마지막 확인 시각 이후 기사만 수집</li>
+        <li class="n">후속 이슈 생성 + 기존 이슈와 연결</li>
+        <li class="n">추적 기한 만료 시 검색 중단</li>
+        <li class="d">저장 구조는 준비됨 <em>· issue_relations</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:17%"></i></span><span>1/6</span></div>
+      <div class="foot"><span class="key">NP-1.3</span><span class="stepchip">1단계</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="3">
+      <h4>후속 보도 추적 설정</h4>
+      <p>이슈를 만들 때 "이건 후속이 나올 것 같다"를 판단하고 추적 기간·검색어를 정해 두는 단계. 저장할 컬럼조차 아직 없습니다.</p>
+      <ul class="subs">
+        <li class="n">후속 예상 여부 판단</li>
+        <li class="n">추적 기간·검색어 결정</li>
+        <li class="n">저장 컬럼 신설 <em>· 스키마 변경 필요</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/3</span></div>
+      <div class="foot"><span class="key">NP-3.6</span><span class="stepchip">3단계</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="6">
+      <h4>일 1회 정기 자동 실행</h4>
+      <p>지금은 사람이 직접 명령을 쳐야 합니다. 설계는 하루 한 번 자동 실행을 권장하고, 실행 시각은 서버 환경 확인 후 결정하기로 돼 있습니다.</p>
+      <ul class="subs">
+        <li class="n">스케줄러 도입 <em>· 배포 환경 결정 선행</em></li>
+        <li class="n">실행 시각 확정</li>
+        <li class="n">실행 중복·겹침 방지 <em>· 점유 구조는 이미 있음</em></li>
+        <li class="n">실패 알림 경로</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/4</span></div>
+      <div class="foot"><span class="key">NP-0.2</span><span class="stepchip">운영</span><span class="tag rule">운영</span><span class="who">사람+AI</span></div>
+    </div>
+
+    <div class="card" data-stage="3">
+      <h4>UX 라이팅 기준 수립</h4>
+      <p><code>direction.md</code>에 <b>"(추가예정)"</b>으로만 적혀 있습니다. 생성 프롬프트와 4단계 검증 양쪽이 이 문서를 기다리고 있습니다.</p>
+      <ul class="subs">
+        <li class="n">기준 문서 작성 <em>· 사람</em></li>
+        <li class="n">생성 프롬프트에 반영</li>
+        <li class="n">검증 규칙으로 변환</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/3</span></div>
+      <div class="foot"><span class="key">NP-3.0</span><span class="stepchip">3단계</span><span class="tag rule">기획</span><span class="who">사람</span></div>
+    </div>
+    <p class="empty">이 단계에 해당하는 작업이 없습니다</p>
+  </div>
+
+</div>
+
+<h2>단계별 요약</h2>
+<div class="scroll">
+<table>
+  <tr><th>단계</th><th>설계가 요구한 것</th><th>지금 되는 것</th><th>빠진 것</th><th>상태</th></tr>
+  <tr><td>1. 대상 이슈 탐색</td><td>트렌드 + 카테고리 + 후속보도 3경로</td><td>검색어 1개 직접 입력</td><td>Trends 수집, 카테고리 순환, 후속 추적</td><td class="no">PLANNED 가까움</td></tr>
+  <tr><td>2. 기사 수집·선별</td><td>중복 비교·검색·선별·최소 기준</td><td>중복 판정, 재검색, 본문 2건 기준</td><td>저명도 선별, 일주일 비교 범위</td><td class="warn">IMPLEMENTED</td></tr>
+  <tr><td>3. 파생 데이터 생성</td><td>핵심·분류·평가·세부·용어·추적</td><td>핵심·세부·용어, 카테고리</td><td>지역/인물 분류, 점수 계산, 사건 시각, 추적 설정</td><td class="warn">IMPLEMENTED</td></tr>
+  <tr><td>4. 생성 결과 검증</td><td>규칙 → LLM 2중 + 모순·UX</td><td>규칙 검증, LLM 일치 검증, 실패 분류</td><td>모순 검증, UX 라이팅 검증</td><td class="warn">IMPLEMENTED</td></tr>
+  <tr><td>5. 저장 및 공개</td><td>검증 통과분만 공개</td><td>공개 전환 + 조회 차단 완결</td><td>—</td><td class="ok">IMPLEMENTED</td></tr>
+  <tr><td>운영. 실행 주기</td><td>하루 1회 자동 실행</td><td>수동 실행, 중복 방지 구조</td><td>스케줄러, 실행 시각 확정</td><td class="no">PLANNED</td></tr>
+</table>
+</div>
+
+<h2>지금 가장 중요한 것</h2>
+<div class="rules">
+  <div class="rule"><b>아직 한 번도 안 돌아봤다</b><span>저장된 이슈 0건. 코드가 있다는 것과 실제로 수집이 된다는 것은 다릅니다 — 첫 실행 성공이 다른 모든 작업의 선행 조건입니다.</span></div>
+  <div class="rule"><b>점수가 전부 0이다</b><span><code>importance_score</code>·<code>freshness_score</code>가 채워지지 않아 피드 정렬이 사실상 의미가 없습니다. 계산식은 LLM 없이 만들 수 있어 비용도 안 듭니다.</span></div>
+  <div class="rule"><b>후속 보도가 통째로 비었다</b><span>설계에서 내세운 차별점인데 테이블만 있고 코드가 없습니다. 탐색(1단계)과 설정(3단계) 양쪽이 같이 필요합니다.</span></div>
+  <div class="rule"><b>사람 결정 2건이 막고 있다</b><span>검색 카테고리 목록과 UX 라이팅 기준 — 둘 다 문서에 "검토받을 것 / 추가예정"으로 남아 있어 AI가 임의로 정하면 안 되는 항목입니다.</span></div>
+</div>
+
+<h2>기록 규칙</h2>
+<div class="rules">
+  <div class="rule"><b>구현과 실행은 따로 적는다</b><span><code>PLANNED → IMPLEMENTED → LOCAL_VERIFIED → PRODUCTION_VERIFIED</code>. 코드를 썼다고 <code>LOCAL_VERIFIED</code>로 올리지 않습니다.</span></div>
+  <div class="rule"><b>direction은 사람 것이다</b><span><code>direction/</code> 폴더는 사용자가 직접 씁니다. AI는 수정하지 않고, 이 보드에서 "설계가 요구한 것"의 기준으로만 인용합니다.</span></div>
+  <div class="rule"><b>실행 결과는 runs/에</b><span>수집을 돌릴 때마다 결과와 검증 내용을 <code>runs/</code>에 남기고, 그 기록이 있어야 이 보드의 상태를 올립니다.</span></div>
+</div>
+
+<footer>
+  근거: <code>direction/direction.md</code>(설계) · <code>implementation/news-collection.md</code>(현황) ·
+  <code>apps/batch/src/pipeline/</code>, <code>libs/core/src/pipeline/</code> 실제 코드 확인 ·
+  마이그레이션 16개 기준 스키마 · 2026-09-19
+</footer>
+
+</div>
+
+<script>
+(function () {
+  var rail = document.getElementById('rail');
+  var allbtn = document.getElementById('allbtn');
+  var board = document.getElementById('board');
+  var active = null;
+
+  function apply() {
+    var cards = board.querySelectorAll('.card');
+    for (var i = 0; i < cards.length; i++) {
+      var show = active === null || cards[i].getAttribute('data-stage') === active;
+      cards[i].style.display = show ? '' : 'none';
+    }
+    var cols = board.querySelectorAll('.col');
+    for (var j = 0; j < cols.length; j++) {
+      var visible = cols[j].querySelectorAll('.card:not([style*="none"])').length;
+      cols[j].querySelector('.count').textContent = visible;
+      cols[j].querySelector('.empty').style.display = visible === 0 ? 'block' : 'none';
+    }
+    var steps = rail.querySelectorAll('.step');
+    for (var k = 0; k < steps.length; k++) {
+      steps[k].setAttribute('aria-pressed', steps[k].getAttribute('data-stage') === active ? 'true' : 'false');
+    }
+    allbtn.setAttribute('aria-pressed', active === null ? 'true' : 'false');
+  }
+
+  rail.addEventListener('click', function (e) {
+    var btn = e.target.closest('.step');
+    if (!btn) return;
+    var stage = btn.getAttribute('data-stage');
+    active = active === stage ? null : stage;
+    apply();
+  });
+  allbtn.addEventListener('click', function () { active = null; apply(); });
+  apply();
+})();
+</script>
+</body>
+</html>
