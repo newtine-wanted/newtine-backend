@@ -23,6 +23,7 @@ export interface TrackingIssue {
 }
 export interface Candidate {
   id: string;
+  /** Concise news search phrase for stage 2, not an article headline or display title. */
   title: string;
   articles: DiscoveredArticle[];
   queries: string[];

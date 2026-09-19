@@ -1,6 +1,8 @@
 import { generateUuidV7, type DiscoveredArticle } from '@newtine/core';
 import {
   checkedIndexes,
+  parseDiscoveryConfig,
+  MAX_CANDIDATE_SEARCH_TITLE_LENGTH,
   filterArticles,
   mergeCandidates,
   mergeQueries,
@@ -31,7 +33,7 @@ export class DiscoveryService {
     at = new Date(),
     signal?: AbortSignal,
   ): Promise<DiscoveryRun> {
-    const run = await this.store.claim(at, config);
+    const run = await this.store.claim(at, parseDiscoveryConfig(config));
     if (run.completed) return run;
     let heartbeatError: unknown;
     let beating = false;
@@ -54,7 +56,7 @@ export class DiscoveryService {
     try {
       const snapshot = run.snapshot;
       // Retry uses the original time window, config and persisted results.
-      const limits = snapshot.config;
+      const limits = parseDiscoveryConfig(snapshot.config);
       const since = new Date(Date.parse(snapshot.at) - 24 * 3600_000).toISOString();
       check();
       if (!snapshot.queries) {
@@ -93,7 +95,9 @@ export class DiscoveryService {
         if (!Array.isArray(extracted) || extracted.length > limits.candidatesPerQuery)
           throw new Error('INVALID_CANDIDATE_COUNT');
         let candidates: Candidate[] = extracted.map((c) => {
-          if (typeof c?.title !== 'string' || !c.title.trim() || c.title.length > 200)
+          const searchTitle =
+            typeof c?.title === 'string' ? c.title.trim().replace(/\s+/g, ' ') : '';
+          if (!searchTitle || searchTitle.length > MAX_CANDIDATE_SEARCH_TITLE_LENGTH)
             throw new Error('INVALID_CANDIDATE_TITLE');
           // Repeated evidence references are harmless; preserve each article only once.
           const indices = checkedIndexes(
@@ -103,7 +107,7 @@ export class DiscoveryService {
           const id = generateUuidV7();
           return {
             id,
-            title: c.title.trim(),
+            title: searchTitle,
             articles: indices.map((i) => articles[i]!),
             queries: [query.text],
             origins: query.origins,

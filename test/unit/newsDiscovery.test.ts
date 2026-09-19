@@ -426,3 +426,56 @@ test('extraction schema bounds evidence indices to the actual title count', asyn
   assert.equal(indexes.items.minimum, 0);
   assert.equal(indexes.items.maximum, 1);
 });
+
+test('candidate limit cannot exceed five in configuration, direct model calls, or generated output', async () => {
+  assert.throws(() => parseDiscoveryConfig({ ...config, candidatesPerQuery: 6 }));
+  const client = new DiscoveryOpenAiModel('test', (async () => {
+    throw new Error('MUST_NOT_CALL');
+  }) as typeof fetch);
+  await assert.rejects(client.extract(['뉴스'], 6), /INVALID_CANDIDATE_LIMIT/);
+  const store = new Store();
+  store.catalogQueries = [query()];
+  await assert.rejects(
+    new DiscoveryService(
+      store,
+      { search: async () => [article('기사')] },
+      model({
+        extract: async () =>
+          Array.from({ length: 6 }, (_, i) => ({ title: `후보 ${i}`, titleIndexes: [0] })),
+      }),
+    ).execute(config, at),
+    /INVALID_CANDIDATE_COUNT/,
+  );
+  assert.equal(store.saved!.snapshot.results.length, 0);
+});
+
+test('candidate search phrase is normalized and an overlong headline is rejected', async () => {
+  const store = new Store();
+  store.catalogQueries = [query()];
+  const run = await new DiscoveryService(
+    store,
+    {
+      search: async () => [
+        article('행안부, 8월 호우 피해 이재민 주거 안정 지원… 복구비 2,308억 원 투입'),
+      ],
+    },
+    model({
+      extract: async () => [{ title: ' 행안부  8월\n이재민 주거 지원 ', titleIndexes: [0] }],
+    }),
+  ).execute(config, at);
+  assert.equal(run.snapshot.candidates![0]!.title, '행안부 8월 이재민 주거 지원');
+  assert.equal(
+    run.snapshot.candidates![0]!.articles[0]!.title,
+    '행안부, 8월 호우 피해 이재민 주거 안정 지원… 복구비 2,308억 원 투입',
+  );
+  const invalid = new Store();
+  invalid.catalogQueries = [query()];
+  await assert.rejects(
+    new DiscoveryService(
+      invalid,
+      { search: async () => [article('기사')] },
+      model({ extract: async () => [{ title: '가'.repeat(61), titleIndexes: [0] }] }),
+    ).execute(config, at),
+    /INVALID_CANDIDATE_TITLE/,
+  );
+});

@@ -1,12 +1,15 @@
 import { generateUuidV7, normalizePipelineArticleUrl, type DiscoveredArticle } from '@newtine/core';
 import type { Candidate, DiscoveryConfig, SearchQuery } from './discovery.types.js';
 
+export const MAX_CANDIDATES_PER_QUERY = 5;
+export const MAX_CANDIDATE_SEARCH_TITLE_LENGTH = 60;
+
 export function parseDiscoveryConfig(value: unknown): DiscoveryConfig {
   if (!value || typeof value !== 'object') throw new Error('INVALID_DISCOVERY_CONFIG');
   const config = value as DiscoveryConfig;
   for (const [key, max] of Object.entries({
     articlesPerQuery: 100,
-    candidatesPerQuery: 10,
+    candidatesPerQuery: MAX_CANDIDATES_PER_QUERY,
     maxQueries: 1000,
     maxCandidates: 2000,
   })) {
