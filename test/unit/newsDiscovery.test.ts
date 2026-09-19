@@ -75,7 +75,9 @@ class Store implements DiscoveryStore {
 }
 function model(overrides: Partial<DiscoveryModel> = {}): DiscoveryModel {
   return {
-    extract: async (titles) => [{ title: titles[0]!, titleIndexes: [0] }],
+    extract: async (titles) => [
+      { title: titles[0]!, titleIndexes: [0], representativeTitleIndex: 0 },
+    ],
     groups: async (titles) => titles.map((_, i) => [i]),
     newDevelopments: async () => [0],
     ...overrides,
@@ -141,7 +143,7 @@ test('each query sends titles only and global semantic merge preserves provenanc
     model({
       extract: async (titles) => {
         calls.push(titles);
-        return [{ title: titles[0]!, titleIndexes: [0] }];
+        return [{ title: titles[0]!, titleIndexes: [0], representativeTitleIndex: 0 }];
       },
       groups: async (titles) => [titles.map((_, i) => i)],
     }),
@@ -191,7 +193,9 @@ test('unknown evidence indices, incomplete groups and query limits fail without 
     new DiscoveryService(
       store,
       { search: async () => [article('A')] },
-      model({ extract: async () => [{ title: 'fake', titleIndexes: [99] }] }),
+      model({
+        extract: async () => [{ title: 'fake', titleIndexes: [99], representativeTitleIndex: 99 }],
+      }),
     ).execute(config, at),
     /INVALID_TITLE_INDEXES/,
   );
@@ -272,7 +276,7 @@ test('OpenAI request uses fixed model and only the title array as extraction inp
     );
   }) as typeof fetch);
   await client.extract(['제목만 전송'], 5);
-  assert.deepEqual(JSON.parse(String(payload.input)), ['제목만 전송']);
+  assert.deepEqual(JSON.parse(String(payload.input)), [{ index: 0, title: '제목만 전송' }]);
   assert.equal(payload.model, 'gpt-5.4-mini-2026-03-17');
   assert.equal(payload.store, false);
   assert.equal(client.usage[0]!.inputTokens, 1);
@@ -441,7 +445,11 @@ test('candidate limit cannot exceed five in configuration, direct model calls, o
       { search: async () => [article('기사')] },
       model({
         extract: async () =>
-          Array.from({ length: 6 }, (_, i) => ({ title: `후보 ${i}`, titleIndexes: [0] })),
+          Array.from({ length: 6 }, (_, i) => ({
+            title: `후보 ${i}`,
+            titleIndexes: [0],
+            representativeTitleIndex: 0,
+          })),
       }),
     ).execute(config, at),
     /INVALID_CANDIDATE_COUNT/,
@@ -460,7 +468,13 @@ test('candidate search phrase is normalized and an overlong headline is rejected
       ],
     },
     model({
-      extract: async () => [{ title: ' 행안부  8월\n이재민 주거 지원 ', titleIndexes: [0] }],
+      extract: async () => [
+        {
+          title: ' 행안부  8월\n이재민 주거 지원 ',
+          titleIndexes: [0],
+          representativeTitleIndex: 0,
+        },
+      ],
     }),
   ).execute(config, at);
   assert.equal(run.snapshot.candidates![0]!.title, '행안부 8월 이재민 주거 지원');
@@ -474,8 +488,59 @@ test('candidate search phrase is normalized and an overlong headline is rejected
     new DiscoveryService(
       invalid,
       { search: async () => [article('기사')] },
-      model({ extract: async () => [{ title: '가'.repeat(61), titleIndexes: [0] }] }),
+      model({
+        extract: async () => [
+          { title: '가'.repeat(61), titleIndexes: [0], representativeTitleIndex: 0 },
+        ],
+      }),
     ).execute(config, at),
     /INVALID_CANDIDATE_TITLE/,
   );
+});
+
+test('chosen representative can differ from first evidence and survives candidate merging', async () => {
+  const store = new Store();
+  const run = await new DiscoveryService(
+    store,
+    {
+      search: async (q) => [
+        article(`${q} 부가 보도`, `https://example.com/${q}/a`),
+        article(`${q} 구체적 대표 사건`, `https://example.com/${q}/b`),
+      ],
+    },
+    model({
+      extract: async (titles) => [
+        { title: titles[1]!, titleIndexes: [0, 1], representativeTitleIndex: 1 },
+      ],
+      groups: async () => [[1, 0]],
+    }),
+  ).execute(config, at);
+  assert.equal(run.snapshot.candidates!.length, 1);
+  assert.equal(run.snapshot.candidates![0]!.representativeArticle!.title, '국회 구체적 대표 사건');
+  assert.ok(
+    run.snapshot.candidates![0]!.articles.some(
+      (a) => a.id === run.snapshot.candidates![0]!.representativeArticle!.id,
+    ),
+  );
+});
+
+test('representative must be an evidence index, not merely an existing article', async () => {
+  for (const representativeTitleIndex of [1, -1, 99]) {
+    const store = new Store();
+    await assert.rejects(
+      new DiscoveryService(
+        store,
+        {
+          search: async () => [
+            article('A', 'https://example.com/a'),
+            article('B', 'https://example.com/b'),
+          ],
+        },
+        model({
+          extract: async () => [{ title: '사건', titleIndexes: [0], representativeTitleIndex }],
+        }),
+      ).execute(config, at),
+      /INVALID_REPRESENTATIVE_INDEX/,
+    );
+  }
 });

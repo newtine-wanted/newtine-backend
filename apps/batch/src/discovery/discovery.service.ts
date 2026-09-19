@@ -104,10 +104,16 @@ export class DiscoveryService {
             Array.isArray(c.titleIndexes) ? [...new Set(c.titleIndexes)] : c.titleIndexes,
             articles.length,
           );
+          if (
+            !Number.isSafeInteger(c.representativeTitleIndex) ||
+            !indices.includes(c.representativeTitleIndex)
+          )
+            throw new Error('INVALID_REPRESENTATIVE_INDEX');
           const id = generateUuidV7();
           return {
             id,
             title: searchTitle,
+            representativeArticle: articles[c.representativeTitleIndex]!,
             articles: indices.map((i) => articles[i]!),
             queries: [query.text],
             origins: query.origins,

@@ -25,6 +25,8 @@ export interface Candidate {
   id: string;
   /** Concise news search phrase for stage 2, not an article headline or display title. */
   title: string;
+  /** Explicit event anchor chosen by the model; absent only in legacy snapshots. */
+  representativeArticle?: DiscoveredArticle;
   articles: DiscoveredArticle[];
   queries: string[];
   origins: string[];
@@ -63,7 +65,10 @@ export interface DiscoveryStore {
 }
 export interface DiscoveryModel {
   usage?: DiscoverySnapshot['usage'];
-  extract(titles: string[], limit: number): Promise<{ title: string; titleIndexes: number[] }[]>;
+  extract(
+    titles: string[],
+    limit: number,
+  ): Promise<{ title: string; titleIndexes: number[]; representativeTitleIndex: number }[]>;
   groups(titles: string[]): Promise<number[][]>;
   newDevelopments(knownTitles: string[], titles: string[]): Promise<number[]>;
 }

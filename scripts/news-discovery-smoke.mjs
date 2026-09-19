@@ -95,7 +95,9 @@ try {
     },
   };
   const model = {
-    extract: async (titles) => [{ title: titles[0], titleIndexes: [0] }],
+    extract: async (titles) => [
+      { title: titles[0], titleIndexes: [0], representativeTitleIndex: 0 },
+    ],
     groups: async (titles) => [titles.map((_, i) => i)],
     newDevelopments: async () => [0],
   };
@@ -122,6 +124,12 @@ try {
   assert.equal(run.id, runId);
   assert.equal(run.completed, true);
   assert.equal(run.snapshot.candidates.length, 1);
+  assert.ok(run.snapshot.candidates[0].representativeArticle?.title);
+  assert.ok(
+    run.snapshot.candidates[0].articles.some(
+      (a) => a.id === run.snapshot.candidates[0].representativeArticle.id,
+    ),
+  );
   assert.ok(run.snapshot.candidates[0].parentIssueIds.includes(issueId));
   const completedCalls = calls;
   await service.execute(config, at);
