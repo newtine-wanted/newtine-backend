@@ -286,19 +286,24 @@ test('OpenAI request uses fixed model and only the title array as extraction inp
 
 test('failed semantic validation records usage and preserves original query checkpoints', async () => {
   const store = new Store();
-  const usage = [
-    { stage: 'deduplicate', model: 'gpt-5.4-mini-2026-03-17', inputTokens: 10, outputTokens: 2 },
-  ];
+  const usage: NonNullable<DiscoveryModel['usage']> = [];
   const client = model({
     usage,
     groups: async () => {
+      usage.push({
+        stage: 'deduplicate',
+        model: 'gpt-5.4-mini-2026-03-17',
+        inputTokens: 10,
+        outputTokens: 2,
+      });
       throw new Error('OPENAI_HTTP_429');
     },
   });
   const service = new DiscoveryService(store, { search: async (q) => [article(q)] }, client);
   await assert.rejects(service.execute(config, at), /OPENAI_HTTP_429/);
   assert.equal(store.saved!.snapshot.results.length, 2);
-  assert.ok(store.saved!.snapshot.usage.some((u) => u.inputTokens === 10));
+  assert.equal(store.saved!.snapshot.usage.length, 1);
+  assert.equal(store.saved!.snapshot.usage[0]!.inputTokens, 10);
   assert.equal(store.saved!.completed, false);
 });
 
@@ -353,4 +358,71 @@ test('abort after search does not call the LLM or advance the checkpoint', async
   );
   assert.equal(store.saved!.snapshot.results.length, 0);
   assert.equal(store.failed, true);
+});
+
+test('duplicate-only response keeps one representative and preserves unmentioned candidates', async () => {
+  const response = (duplicates: unknown) =>
+    new Response(
+      JSON.stringify({
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            content: [{ type: 'output_text', text: JSON.stringify({ duplicates }) }],
+          },
+        ],
+      }),
+    );
+  const client = new DiscoveryOpenAiModel('test', (async () =>
+    response([
+      { keepIndex: 1, duplicateIndexes: [0] },
+      { keepIndex: 2, duplicateIndexes: [3] },
+    ])) as typeof fetch);
+  assert.deepEqual(await client.groups(['A', 'A 보도', 'B', 'B 보도', 'C']), [[1, 0], [2, 3], [4]]);
+  const unique = new DiscoveryOpenAiModel('test', (async () => response([])) as typeof fetch);
+  assert.deepEqual(await unique.groups(['A', 'B']), [[0], [1]]);
+  const overlap = new DiscoveryOpenAiModel('test', (async () =>
+    response([
+      { keepIndex: 0, duplicateIndexes: [1] },
+      { keepIndex: 1, duplicateIndexes: [2] },
+    ])) as typeof fetch);
+  await assert.rejects(overlap.groups(['A', 'B', 'C']), /INVALID_DUPLICATE_INDEX/);
+  const outOfRange = new DiscoveryOpenAiModel('test', (async () =>
+    response([{ keepIndex: 0, duplicateIndexes: [9] }])) as typeof fetch);
+  await assert.rejects(outOfRange.groups(['A', 'B']), /INVALID_DUPLICATE_INDEX/);
+});
+
+test('extraction schema bounds evidence indices to the actual title count', async () => {
+  let payload: Record<string, unknown> = {};
+  const client = new DiscoveryOpenAiModel('test', (async (_url, init) => {
+    payload = JSON.parse(String(init?.body));
+    return new Response(
+      JSON.stringify({
+        status: 'completed',
+        output: [
+          { type: 'message', content: [{ type: 'output_text', text: '{"candidates":[]}' }] },
+        ],
+      }),
+    );
+  }) as typeof fetch);
+  await client.extract(['A', 'B'], 5);
+  const text = payload.text as {
+    format: {
+      schema: {
+        properties: {
+          candidates: {
+            items: {
+              properties: {
+                titleIndexes: { minItems: number; items: { minimum: number; maximum: number } };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+  const indexes = text.format.schema.properties.candidates.items.properties.titleIndexes;
+  assert.equal(indexes.minItems, 1);
+  assert.equal(indexes.items.minimum, 0);
+  assert.equal(indexes.items.maximum, 1);
 });
