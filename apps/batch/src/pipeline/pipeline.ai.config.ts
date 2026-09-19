@@ -5,7 +5,10 @@ import { isAbsolute, resolve } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { parse } from 'yaml';
 
+import { DEFAULT_OPENAI_TEXT_MODEL } from '@newtine/batch/ai/ai-model.defaults.js';
+
 export const PIPELINE_AI_CONFIG_ENV = 'PIPELINE_AI_CONFIG_PATH';
+export const PIPELINE_AI_MODEL_ENV = 'PIPELINE_AI_MODEL';
 export const DEFAULT_PIPELINE_AI_CONFIG_PATH = 'config/pipeline-ai.yml';
 
 export const PIPELINE_AI_STAGES = ['candidate', 'content', 'validation', 'embedding'] as const;
@@ -41,12 +44,15 @@ export interface PipelineAiConfigSnapshot {
 export class PipelineAiConfiguration {
   readonly snapshot: PipelineAiConfigSnapshot;
 
-  constructor(filePath?: string) {
-    const configuredPath = filePath ?? process.env[PIPELINE_AI_CONFIG_ENV];
+  constructor(filePath?: string, env: NodeJS.ProcessEnv = process.env) {
+    const configuredPath = filePath ?? env[PIPELINE_AI_CONFIG_ENV];
     const resolvedPath = isAbsolute(configuredPath ?? DEFAULT_PIPELINE_AI_CONFIG_PATH)
       ? (configuredPath ?? DEFAULT_PIPELINE_AI_CONFIG_PATH)
       : resolve(process.cwd(), configuredPath ?? DEFAULT_PIPELINE_AI_CONFIG_PATH);
-    this.snapshot = loadPipelineAiConfig(resolvedPath);
+    this.snapshot = loadPipelineAiConfig(
+      resolvedPath,
+      optionalNonEmptyString(env[PIPELINE_AI_MODEL_ENV]),
+    );
   }
 
   stage(stage: PipelineAiStage): PipelineAiStageConfig {
@@ -67,7 +73,10 @@ export class PipelineAiConfiguration {
   }
 }
 
-export function loadPipelineAiConfig(filePath: string): PipelineAiConfigSnapshot {
+export function loadPipelineAiConfig(
+  filePath: string,
+  modelOverride?: string,
+): PipelineAiConfigSnapshot {
   let source: string;
   try {
     source = readFileSync(filePath, 'utf8');
@@ -86,9 +95,9 @@ export function loadPipelineAiConfig(filePath: string): PipelineAiConfigSnapshot
   const version = positiveInteger(record.version, 'version');
   const rawStages = asRecord(record.stages, 'stages');
   const stages = {
-    candidate: parseLlmStage(rawStages.candidate, 'candidate'),
-    content: parseLlmStage(rawStages.content, 'content'),
-    validation: parseLlmStage(rawStages.validation, 'validation'),
+    candidate: parseLlmStage(rawStages.candidate, 'candidate', modelOverride),
+    content: parseLlmStage(rawStages.content, 'content', modelOverride),
+    validation: parseLlmStage(rawStages.validation, 'validation', modelOverride),
     embedding: parseEmbeddingStage(rawStages.embedding),
   } satisfies Record<PipelineAiStage, PipelineAiStageConfig>;
 
@@ -98,9 +107,13 @@ export function loadPipelineAiConfig(filePath: string): PipelineAiConfigSnapshot
 function parseLlmStage(
   value: unknown,
   stage: Exclude<PipelineAiStage, 'embedding'>,
+  modelOverride?: string,
 ): PipelineAiStageConfig {
   const record = asRecord(value, `stages.${stage}`);
-  const model = nonEmptyString(record.model, `stages.${stage}.model`);
+  const model =
+    modelOverride ??
+    optionalConfigString(record.model, `stages.${stage}.model`) ??
+    DEFAULT_OPENAI_TEXT_MODEL;
   const prompt = asRecord(record.prompt, `stages.${stage}.prompt`);
   const schemaName = nonEmptyString(record.schemaName, `stages.${stage}.schemaName`);
   const promptConfig = parsePrompt(prompt, `stages.${stage}.prompt`);
@@ -140,6 +153,20 @@ function nonEmptyString(value: unknown, path: string): string {
     throw new Error(`Pipeline AI config field must be a non-empty string: ${path}`);
   }
   return value.trim();
+}
+
+function optionalConfigString(value: unknown, path: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    throw new Error(`Pipeline AI config field must be a string: ${path}`);
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
+function optionalNonEmptyString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
 function positiveInteger(value: unknown, path: string): number {

@@ -7,8 +7,10 @@ import { PipelineException, PipelineExceptionCode } from '@newtine/core';
 
 test('OpenAI Responses payload uses the stage snapshot and records provider usage metadata', async () => {
   const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousPipelineModel = process.env.PIPELINE_AI_MODEL;
   const previousFetch = globalThis.fetch;
   process.env.OPENAI_API_KEY = 'test-key';
+  process.env.PIPELINE_AI_MODEL = 'env-pipeline-model';
   let requestBody: Record<string, unknown> | undefined;
   globalThis.fetch = async (_input, init) => {
     requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -43,7 +45,7 @@ test('OpenAI Responses payload uses the stage snapshot and records provider usag
     assert.equal(result.usage?.outputTokens, 4);
 
     const text = requestBody?.text as { format: { name: string; schema: Record<string, unknown> } };
-    assert.equal(requestBody?.model, 'gpt-5.4-mini-2026-03-17');
+    assert.equal(requestBody?.model, 'env-pipeline-model');
     assert.equal(requestBody?.store, false);
     assert.equal(requestBody?.input, 'typed-input');
     assert.equal(text.format.name, 'pipeline_content');
@@ -57,6 +59,8 @@ test('OpenAI Responses payload uses the stage snapshot and records provider usag
     globalThis.fetch = previousFetch;
     if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousApiKey;
+    if (previousPipelineModel === undefined) delete process.env.PIPELINE_AI_MODEL;
+    else process.env.PIPELINE_AI_MODEL = previousPipelineModel;
   }
 });
 
