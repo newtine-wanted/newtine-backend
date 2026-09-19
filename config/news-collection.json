@@ -1,0 +1,27 @@
+{
+  "articlesPerQuery": 50,
+  "publishers": [
+    { "name": "연합뉴스", "domains": ["yna.co.kr"], "priority": 10 },
+    { "name": "뉴시스", "domains": ["newsis.com"], "priority": 10 },
+    { "name": "뉴스1", "domains": ["news1.kr"], "priority": 10 },
+    { "name": "KBS", "domains": ["kbs.co.kr"], "priority": 10 },
+    { "name": "MBC", "domains": ["imbc.com"], "priority": 10 },
+    { "name": "SBS", "domains": ["sbs.co.kr"], "priority": 10 },
+    { "name": "YTN", "domains": ["ytn.co.kr"], "priority": 10 },
+    { "name": "JTBC", "domains": ["jtbc.co.kr"], "priority": 10 },
+    { "name": "연합뉴스TV", "domains": ["yonhapnewstv.co.kr"], "priority": 10 },
+    { "name": "조선일보", "domains": ["chosun.com"], "priority": 10 },
+    { "name": "중앙일보", "domains": ["joongang.co.kr"], "priority": 10 },
+    { "name": "동아일보", "domains": ["donga.com"], "priority": 10 },
+    { "name": "한겨레", "domains": ["hani.co.kr"], "priority": 10 },
+    { "name": "경향신문", "domains": ["khan.co.kr"], "priority": 10 },
+    { "name": "한국일보", "domains": ["hankookilbo.com"], "priority": 10 },
+    { "name": "서울신문", "domains": ["seoul.co.kr"], "priority": 10 },
+    { "name": "국민일보", "domains": ["kmib.co.kr"], "priority": 10 },
+    { "name": "세계일보", "domains": ["segye.com"], "priority": 10 },
+    { "name": "문화일보", "domains": ["munhwa.com"], "priority": 10 },
+    { "name": "매일경제", "domains": ["mk.co.kr"], "priority": 10 },
+    { "name": "한국경제", "domains": ["hankyung.com"], "priority": 10 },
+    { "name": "서울경제", "domains": ["sedaily.com"], "priority": 10 }
+  ]
+}
