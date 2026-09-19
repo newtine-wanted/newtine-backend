@@ -154,7 +154,7 @@ test('new development survives duplicate check; filters dates, URL/title duplica
         assert.equal(limit, 50);
         return [
           ...articles,
-          article(8, 'x.com', '2026-09-18T00:00:00Z'),
+          article(8, 'x.com', '2026-09-12T00:00:00Z'),
           article(9, 'x.com', '2026-09-21T00:00:00Z'),
           articles[1]!,
           { ...articles[2]!, sourceUrl: 'https://another.com/2' },
@@ -338,4 +338,52 @@ test('model normalizes repeated valid references but still rejects out-of-range 
       );
     else assert.deepEqual(await m.relevant(candidate(), [article(0), article(1)]), [0, 1]);
   }
+});
+
+test('collection accepts last seven days including boundary, excludes older and future articles', async () => {
+  const store = new Store();
+  const times = [
+    '2026-09-20T03:00:00Z',
+    '2026-09-18T03:00:00Z',
+    '2026-09-13T03:00:00Z',
+    '2026-09-13T02:59:59Z',
+    '2026-09-20T03:00:01Z',
+  ];
+  const run = await new CollectionService(
+    store,
+    { search: async () => times.map((t, i) => article(i, 'example.com', t)) },
+    model(),
+  ).execute('source', config, at);
+  const result = run.snapshot.results[0]!;
+  assert.equal(result.articles!.length, 3);
+  assert.equal(result.selectedArticles!.length, 3);
+  assert.deepEqual(
+    result.articles!.map((a) => a.publishedAt),
+    times.slice(0, 3),
+  );
+});
+
+test('relevance receives only the explicit representative title, with first evidence fallback for legacy candidates', async () => {
+  const inputs: { representativeArticleTitle: string; evidenceTitles?: string[] }[] = [];
+  const m = new CollectionOpenAiModel('key', async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { input: string };
+    inputs.push(JSON.parse(body.input));
+    return new Response(
+      JSON.stringify({
+        status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: '{"indices":[0]}' }] }],
+      }),
+    );
+  });
+  const c = candidate();
+  c.representativeArticle = { ...article(2), title: '대표 사건 기사' };
+  await m.relevant(c, [article(3)]);
+  await m.relevant(candidate(), [article(3)]);
+  assert.equal(inputs[0]!.representativeArticleTitle, '대표 사건 기사');
+  assert.equal(inputs[0]!.evidenceTitles, undefined);
+  assert.equal(inputs[1]!.representativeArticleTitle, candidate().articles[0]!.title);
+  await assert.rejects(
+    m.relevant({ ...candidate(), articles: [] }, [article(3)]),
+    /REPRESENTATIVE_ARTICLE_REQUIRED/,
+  );
 });

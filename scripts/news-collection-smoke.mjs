@@ -24,7 +24,7 @@ try {
   const at = new Date(Date.parse(`${dates[0].day}T03:00:00Z`) + 10 * 86400_000);
   const iso = at.toISOString();
   const articleTime = new Date(at.getTime() - 3600_000).toISOString();
-  const issueTitle = '국회 검증용 주거 지원 법안 통과';
+  const issueTitle = `국회 검증용 주거 지원 법안 통과 ${generateUuidV7()}`;
   const issueIds = [];
   for (let i = 0; i < 12; i++) {
     const id = generateUuidV7();
@@ -69,23 +69,25 @@ try {
   // Inclusive lower boundary, and published time rather than recently-created rows.
   const boundaryAt = new Date(at.getTime() - 7 * 86400_000).toISOString();
   const boundaryId = generateUuidV7();
+  const boundaryTitle = `경계 검증 유일 제목 ${boundaryId}`;
   await sql(
     em,
-    "insert into issues (id, category_code, title, publication_status, published_at) values ($1, 'politics', '경계 검증 유일 제목', 'PUBLISHED', $2)",
-    [boundaryId, boundaryAt],
+    "insert into issues (id, category_code, title, publication_status, published_at) values ($1, 'politics', $3, 'PUBLISHED', $2)",
+    [boundaryId, boundaryAt, boundaryTitle],
   );
-  assert.equal((await store.similar('경계 검증 유일 제목', iso))[0].id, boundaryId);
+  assert.equal((await store.similar(boundaryTitle, iso))[0].id, boundaryId);
   const article = (i, title) => ({
     title: `${title} 관련 보도 ${i}`,
     description: '검증 요약',
     sourceUrl: `https://${i === 6 ? 'yna.co.kr' : 'example.com'}/${encodeURIComponent(title)}/${i}`,
     publisherName: 'fixture',
-    publishedAt: articleTime,
+    publishedAt: i === 1 ? new Date(at.getTime() - 2 * 86400_000).toISOString() : articleTime,
   });
   const candidates = ['중복', '새 전개', '기사 부족', '검색 없음'].map((title) => ({
     id: generateUuidV7(),
     title,
     articles: [article(0, title)],
+    representativeArticle: article(0, title),
     queries: ['국회'],
     origins: ['TOPIC:politics'],
     parentIssueIds: [issueIds[0]],
@@ -158,6 +160,15 @@ try {
     ['DUPLICATE', 'SELECTED', 'INSUFFICIENT_ARTICLES', 'INSUFFICIENT_ARTICLES'],
   );
   assert.equal(run.snapshot.results[1].selectedArticles.length, 5);
+  assert.equal(
+    run.snapshot.results[1].candidate.representativeArticle.title,
+    candidates[1].representativeArticle.title,
+  );
+  assert.ok(
+    run.snapshot.results[1].articles.some(
+      (a) => a.publishedAt === new Date(at.getTime() - 2 * 86400_000).toISOString(),
+    ),
+  );
   assert.ok(run.snapshot.results[1].selectedArticles[0].sourceUrl.startsWith('https://yna.co.kr/'));
   assert.deepEqual(run.snapshot.results[1].candidate.parentIssueIds, [issueIds[0]]);
   assert.equal(searches, 3);

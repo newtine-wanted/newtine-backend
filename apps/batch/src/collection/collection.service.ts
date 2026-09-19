@@ -52,7 +52,7 @@ export class CollectionService {
     try {
       const snapshot = run.snapshot;
       const limits = parseCollectionConfig(snapshot.config);
-      const since = new Date(Date.parse(snapshot.at) - 86400_000).toISOString();
+      const since = new Date(Date.parse(snapshot.at) - 7 * 86400_000).toISOString();
       for (const result of snapshot.results) {
         check();
         if (result.status) continue;
