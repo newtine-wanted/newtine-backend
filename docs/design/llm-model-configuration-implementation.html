@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="승인된 LLM 모델 환경변수 우선·fallback 설계를 코드와 운영 설정에 구현하고 검증">
+  <meta name="audience" content="NEWTINE 백엔드 개발자와 batch 운영자">
+  <meta name="problem" content="pipeline과 report worker의 모델 선택 경로를 env-first로 바꾸면서 실제 요청·사용량·기동 실패 의미를 검증 가능하게 기록">
+  <meta name="core-flow" content="승인 기준선 확인 → resolver·기본값 구현 → env·Compose·문서 연결 → focused regression → typecheck·build·lint·format 검증">
+  <title>LLM 모델 설정 구현 제어</title>
+  <style>
+    :root{color-scheme:light;--ink:#213047;--line:#d8e0ea;--panel:#fff;--bg:#f5f7fb;--accent:#176b75;--warn:#8a541f}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    header,nav,main{max-width:1080px;margin:auto;padding:24px}header,section{background:var(--panel);border:1px solid var(--line);border-radius:12px}header{margin-top:24px}nav{display:flex;gap:16px;flex-wrap:wrap;padding-top:16px;padding-bottom:8px}nav a{color:var(--accent)}section{padding:24px;margin:18px 0}h1,h2,h3{line-height:1.3}h1{margin-top:0}dt{font-weight:700}dd{margin:0 0 10px 0}table{border-collapse:collapse;width:100%;margin:12px 0}caption{text-align:left;font-weight:700;margin-bottom:8px}th,td{border:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{background:#eef5f6}aside{padding:14px;background:#fff7e8;border-left:4px solid var(--warn)}code{background:#eef1f5;padding:1px 4px;border-radius:4px}pre{overflow:auto;background:#172333;color:#f4f7fb;padding:14px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <header>
+    <p>구현 제어 문서 · 강도: Standard · 상태: 운영 제어 보류 · 기술 구현 완료 · 개발자 이해 점검: 미실시</p>
+    <h1>LLM 모델 설정 구현·검증</h1>
+    <dl>
+      <dt>baseline-reference</dt><dd><a href="llm-model-configuration-design.html">llm-model-configuration-design.html</a> · 승인됨 · 2026-09-19 KST</dd>
+      <dt>목적</dt><dd>승인된 env-first 모델 선택과 공통 fallback을 구현하고 pipeline·report worker의 실제 요청·운영 설정을 검증한다.</dd>
+      <dt>사용자</dt><dd>NEWTINE 백엔드 개발자와 batch 운영자</dd>
+      <dt>문제</dt><dd>모델 선택이 pipeline YAML과 report 필수 env로 분리되어 있어 환경별 모델 교체와 기본 실행이 일관되지 않다.</dd>
+      <dt>핵심 흐름</dt><dd>기준선 확인 → resolver·default 구현 → 운영 설정 연결 → focused 회귀 → 전체 정적·빌드 게이트</dd>
+    </dl>
+    <p><strong>승인된 범위:</strong> <code>PIPELINE_AI_MODEL</code>과 <code>REPORT_AI_MODEL</code>의 precedence/fallback, 공통 기본값, 관련 문서·Compose·테스트. API 계약·embedding·DB·실제 OpenAI 호출은 범위 밖이다.</p>
+  </header>
+  <nav aria-label="구현 제어 탐색"><a href="#baseline-reference">기준선</a><a href="#current-implementation">구현</a><a href="#implementation-status">상태</a><a href="#issue-register">이슈</a><a href="#verification-evidence">검증</a><a href="#verification-gaps">공백</a><a href="#residual-risks">잔여 위험</a><a href="#implementation-understanding">이해 점검</a><a href="#implementation-control-state">제어 상태</a></nav>
+  <main>
+    <article>
+      <section id="baseline-reference"><h2>1. 기준선·Execution Contract</h2><dl><dt>Goal</dt><dd>pipeline text는 env → stage YAML → 공통 기본값, report text는 env → 공통 기본값 순서로 모델을 결정한다.</dd><dt>Invariants</dt><dd>공백 env는 미설정, 실제 provider payload와 usage model은 resolved model 기준, API key·embedding 정책 유지.</dd><dt>검증 명령</dt><dd><code>npm run test:jest -- test/unit/reportOptions.test.ts test/unit/pipelineAiConfiguration.test.ts test/unit/openAiProvider.test.ts test/unit/reportProvider.test.ts</code> 후 <code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm run build</code></dd><dt>금지</dt><dd>사용자 <code>.env</code> 값 변경, API body model 추가, embedding 정책 변경, DB migration, 실제 OpenAI 호출, unrelated generated artifact 수정.</dd></dl></section>
+
+      <section id="current-implementation"><h2>2. 현재 구현 · as-built</h2><table><caption>변경 경계와 실제 결과</caption><thead><tr><th>경계</th><th>구현 내용</th><th>근거</th></tr></thead><tbody><tr><td>공통 default</td><td><code>DEFAULT_OPENAI_TEXT_MODEL</code>을 <code>gpt-5.4-mini-2026-03-17</code>으로 신설하고 pipeline usage fallback·report config가 공유한다.</td><td><code>apps/batch/src/ai/ai-model.defaults.ts</code></td></tr><tr><td>Pipeline</td><td><code>PIPELINE_AI_MODEL</code>이 비어 있지 않으면 candidate/content/validation에 적용하고, 없으면 stage YAML, YAML도 없으면 공통 default를 사용한다. embedding은 별도 모델로 유지한다.</td><td><code>pipeline.ai.config.ts</code>, <code>openAiProvider.test.ts</code></td></tr><tr><td>Report</td><td><code>REPORT_AI_MODEL</code>이 비어 있으면 공통 default를 사용한다. <code>OPENAI_API_KEY</code> 검증은 그대로 남아 있다.</td><td><code>report.ai.config.ts</code>, <code>reportOptions.test.ts</code></td></tr><tr><td>운영 설정</td><td><code>.env.example</code>·Compose·README에 pipeline env와 report fallback을 반영했다. 사용자 <code>.env</code>는 변경하지 않았다.</td><td><code>.env.example</code>, <code>compose.yaml</code>, <code>README.md</code></td></tr></tbody></table><p><strong>design-delta:</strong> 없음. 승인된 G1-B·G2-A, embedding 분리, credential 경계를 그대로 구현했다.</p></section>
+
+      <section id="implementation-status"><h2>3. 구현 상태</h2><p><strong>기술 구현 완료.</strong> 승인된 코드·운영 설정·focused regression 범위를 구현했고 전체 unit suite, format·lint·typecheck·build까지 통과했다. 실제 OpenAI 호출은 실행하지 않았다.</p></section>
+
+      <section id="issue-register"><h2>4. 이슈 기록</h2><table><caption>구현 이슈 ledger</caption><thead><tr><th>ID·상태</th><th>증상·원인</th><th>조치·검증</th><th>잔여 위험</th></tr></thead><tbody><tr><td>I-01 · 해결됨</td><td>focused 변경 직후 <code>no-regex-spaces</code>가 YAML fixture 정규식의 literal 공백을 지적했다.</td><td>정규식 대신 명시적 줄 필터로 fixture를 작성했고 lint와 focused tests를 재실행해 통과했다.</td><td>없음</td></tr><tr><td>없음 · 해당 없음</td><td>그 외 구현 이슈는 관찰되지 않았다.</td><td>아래 verification evidence 참조</td><td>외부 모델 유효성은 별도 위험으로 남김</td></tr></tbody></table></section>
+
+      <section id="verification-evidence"><h2>5. 검증 증거</h2><table><caption>실행 결과</caption><thead><tr><th>명령</th><th>결과</th><th>근거</th></tr></thead><tbody><tr><td><code>npm run test:jest -- test/unit/reportOptions.test.ts test/unit/pipelineAiConfiguration.test.ts test/unit/openAiProvider.test.ts test/unit/reportProvider.test.ts</code></td><td>통과</td><td>4 suites, 17 tests passed</td></tr><tr><td><code>npm run test:unit</code></td><td>통과</td><td>46 suites, 233 tests passed</td></tr><tr><td><code>npm run format:check</code></td><td>통과</td><td>All matched files use Prettier code style</td></tr><tr><td><code>npm run lint</code></td><td>통과</td><td>ESLint exit 0</td></tr><tr><td><code>npm run typecheck</code></td><td>통과</td><td>ttsc --noEmit exit 0</td></tr><tr><td><code>npm run build</code></td><td>통과</td><td>build:api와 build:batch exit 0</td></tr><tr><td><code>git diff --check</code></td><td>통과</td><td>whitespace error 없음</td></tr></tbody></table></section>
+
+      <section id="verification-gaps"><h2>6. 검증 공백</h2><ul><li>실제 OpenAI endpoint와 실제 모델명 유효성은 외부 호출 금지 범위라 검증하지 않았다.</li><li>integration suite와 Compose acceptance는 이번 설정 변경의 범위를 넘어 실행하지 않았다.</li><li>운영 배포 환경에서 env 주입이 실제로 적용되는지는 별도 운영 preflight가 필요하다.</li><li>개발자 이해 점검 결과는 아직 관찰되지 않았다.</li></ul></section>
+
+      <section id="residual-risks"><h2>7. 잔여 위험</h2><aside>사용자가 존재하지 않는 모델명을 env에 넣으면 fallback하지 않고 provider에 전달되어 upstream 오류가 발생한다. 이는 env override를 존중하기 위한 의도된 동작이며, 모델명 유효성 검사는 이번 범위에 포함하지 않는다.</aside></section>
+
+      <section id="implementation-understanding"><h2>8. 구현 이해 점검 · 미실시</h2><p>아래는 as-built 동작을 운영자가 예측할 수 있는지 확인하는 비차단 점검이다. 결과는 이 브라우저에만 남으며, 미실시 상태는 기술 구현을 무효화하지 않는다.</p><table><caption>점검 범위</caption><thead><tr><th>축</th><th>문항</th></tr></thead><tbody><tr><td>경계·precedence</td><td>IC1·IC2</td></tr><tr><td>실패·복구</td><td>IC3</td></tr><tr><td>운영·검증</td><td>IC4</td></tr></tbody></table><p id="ic-progress" aria-live="polite"></p><div class="ic-question" id="IC1"><fieldset><legend>IC1 · pipeline env와 YAML이 모두 있으면 어떤 모델을 요청하나?</legend><label><input type="radio" name="IC1" value="env"> <code>PIPELINE_AI_MODEL</code>의 비공백 값</label><label><input type="radio" name="IC1" value="yaml"> stage YAML 값</label></fieldset><button type="button" class="ic-submit" data-index="0">답안 확인</button><div class="ic-result" hidden><p>상태: <span class="ic-status"></span></p><p>설명: <span class="ic-explanation"></span></p><p>다음 행동: <span class="ic-next"></span></p></div></div><div class="ic-question" id="IC2" hidden><fieldset><legend>IC2 · report 모델 env가 비어 있으면?</legend><label><input type="radio" name="IC2" value="default"> 공통 기본 모델을 사용한다.</label><label><input type="radio" name="IC2" value="fail"> 모델 누락으로 worker가 실패한다.</label></fieldset><button type="button" class="ic-submit" data-index="1">답안 확인</button><div class="ic-result" hidden><p>상태: <span class="ic-status"></span></p><p>설명: <span class="ic-explanation"></span></p><p>다음 행동: <span class="ic-next"></span></p></div></div><div class="ic-question" id="IC3" hidden><fieldset><legend>IC3 · env에 오타 모델명이 들어가면?</legend><label><input type="radio" name="IC3" value="upstream"> fallback하지 않고 provider 오류로 관찰한다.</label><label><input type="radio" name="IC3" value="fallback"> 공통 기본 모델로 자동 교체한다.</label></fieldset><button type="button" class="ic-submit" data-index="2">답안 확인</button><div class="ic-result" hidden><p>상태: <span class="ic-status"></span></p><p>설명: <span class="ic-explanation"></span></p><p>다음 행동: <span class="ic-next"></span></p></div></div><div class="ic-question" id="IC4" hidden><fieldset><legend>IC4 · 장애 조사에서 먼저 확인할 것은?</legend><label><input type="radio" name="IC4" value="env"> worker의 env 주입값·resolved model과 provider payload/usage 기록</label><label><input type="radio" name="IC4" value="db"> DB migration을 먼저 실행한다.</label></fieldset><button type="button" class="ic-submit" data-index="3">답안 확인</button><div class="ic-result" hidden><p>상태: <span class="ic-status"></span></p><p>설명: <span class="ic-explanation"></span></p><p>다음 행동: <span class="ic-next"></span></p></div></div><button type="button" id="ic-prev" disabled>이전</button> <button type="button" id="ic-next">다음</button><output id="ic-result" aria-live="polite"></output></section>
+
+      <section id="implementation-control-state"><h2>9. 구현 제어 상태</h2><dl><dt>implementation-control-state</dt><dd>운영 제어 보류</dd><dt>기술 상태</dt><dd>승인된 범위 구현 및 focused/static/build 검증 완료</dd><dt>이슈 상태</dt><dd>I-01 해결됨, 열린 구현 이슈 없음</dd><dt>개발자 운영 이해</dt><dd>미실시</dd><dt>다음 행동</dt><dd>운영 preflight에서 env 주입·resolved model을 확인하고 필요하면 구현 이해 점검을 수행한다.</dd></dl></section>
+    </article>
+  </main>
+  <script>
+    const icCards=[...document.querySelectorAll('.ic-question')];
+    const icAnswers=['env','default','upstream','env'];
+    let icCurrent=0;
+    const icProgress=document.getElementById('ic-progress');
+    const icPrev=document.getElementById('ic-prev');
+    const icNext=document.getElementById('ic-next');
+    function icRefresh(){icCards.forEach((card,i)=>{card.hidden=i!==icCurrent;});const answered=document.querySelectorAll('.ic-question input:checked').length;icProgress.textContent=`${icCurrent+1} / ${icCards.length} 문항 · ${answered}개 응답`;icPrev.disabled=icCurrent===0;icNext.disabled=icCurrent===icCards.length-1;}
+    icPrev.onclick=()=>{icCurrent-=1;icRefresh();};
+    icNext.onclick=()=>{icCurrent+=1;icRefresh();};
+    document.querySelectorAll('.ic-submit').forEach(button=>button.onclick=()=>{const index=Number(button.dataset.index),card=icCards[index],selected=card.querySelector('input:checked'),result=card.querySelector('.ic-result');result.hidden=false;const valid=selected?.value===icAnswers[index];card.querySelector('.ic-status').textContent=!selected?'미실시':valid?'확립':'보류';card.querySelector('.ic-explanation').textContent=!selected?'선택 후 다시 확인하세요.':valid?'as-built 동작과 일치합니다.':'구현 제어 기록의 실제 동작과 다릅니다.';card.querySelector('.ic-next').textContent=valid?'다음 문항으로 이동하세요.':'관련 구현 경계를 다시 확인하세요.';document.getElementById('ic-result').textContent='점검 결과는 이 브라우저에만 표시됩니다.';});
+    document.querySelectorAll('.ic-question input').forEach(input=>input.onchange=()=>{input.closest('.ic-question').querySelector('.ic-result').hidden=true;icRefresh();});
+    icRefresh();
+  </script>
+</body>
+</html>

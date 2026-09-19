@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="파이프라인·진단보고서 LLM 모델 선택을 환경변수 우선과 안전한 기본값으로 통일">
+  <meta name="audience" content="NEWTINE 백엔드 개발자와 batch 운영자">
+  <meta name="problem" content="파이프라인은 설정 파일에 모델이 고정되고 보고서는 모델 환경변수가 비어 있으면 worker가 실패하여 모델 설정 경로와 운영 기본값이 일관되지 않다">
+  <meta name="core-flow" content="환경변수 읽기·정규화 → 설정 파일 또는 기본 모델 fallback → LLM provider payload 구성 → 사용량 모델 기록">
+  <title>LLM 모델 설정 경로 개선 설계</title>
+  <style>
+    :root{color-scheme:light;--ink:#213047;--muted:#5b6b80;--line:#d8e0ea;--panel:#fff;--bg:#f5f7fb;--accent:#176b75;--warn:#8a541f}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    header,nav,main{max-width:1080px;margin:auto;padding:24px}header,section{background:var(--panel);border:1px solid var(--line);border-radius:12px}header{margin-top:24px}nav{display:flex;gap:16px;flex-wrap:wrap;padding-top:16px;padding-bottom:8px}nav a{color:var(--accent)}section{padding:24px;margin:18px 0}h1,h2,h3{line-height:1.3}h1{margin-top:0}dt{font-weight:700}dd{margin:0 0 10px 0}table{border-collapse:collapse;width:100%;margin:12px 0}caption{text-align:left;font-weight:700;margin-bottom:8px}th,td{border:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{background:#eef5f6}figure{margin:16px 0;padding:16px;background:#eef5f6;border-left:4px solid var(--accent)}aside{padding:14px;background:#fff7e8;border-left:4px solid var(--warn)}code{background:#eef1f5;padding:1px 4px;border-radius:4px}pre{overflow:auto;background:#172333;color:#f4f7fb;padding:14px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <header>
+    <p>설계 기준 문서 · 강도: Standard · 상태: 설계 승인됨 · 승인: 승인됨</p>
+    <h1>LLM 모델 설정 경로 개선</h1>
+    <dl>
+      <dt>목적</dt><dd>파이프라인과 진단보고서의 텍스트 LLM 모델을 환경변수 우선으로 선택하고, 미설정 시 현재 모델을 안전한 기본값으로 사용한다.</dd>
+      <dt>사용자</dt><dd>NEWTINE 백엔드 개발자와 batch 운영자</dd>
+      <dt>문제</dt><dd>파이프라인 모델은 <code>config/pipeline-ai.yml</code>에 고정되어 있고 보고서 모델은 <code>REPORT_AI_MODEL</code>이 비어 있으면 worker가 시작되지 않는다.</dd>
+      <dt>핵심 흐름</dt><dd>환경변수 읽기·정규화 → 설정 파일 또는 기본 모델 fallback → OpenAI 요청 payload → 사용량 원장</dd>
+      <dt>추적</dt><dd>현재 대화의 “env 값 기준, 없으면 기존 모델 fallback” 요청을 위한 후속 설계. 기존 콘텐츠 파이프라인 설계 문서는 더 넓은 목적의 기준선이므로 이 설정 목적의 동료 문서를 사용한다.</dd>
+    </dl>
+  </header>
+  <nav aria-label="설계 탐색">
+    <a href="#goal">목표</a><a href="#system-model">구조</a><a href="#grilling-state">의사결정</a><a href="#failure-recovery">실패·복구</a><a href="#verification-plan">검증</a><a href="#design-control-state">이해 점검</a><a href="#approval-state">승인</a>
+  </nav>
+  <main>
+    <article>
+      <section id="goal">
+        <h2>1. 목표·범위</h2>
+        <ul>
+          <li>환경변수에 공백이 아닌 모델명이 있으면 실제 OpenAI 요청에 그 값을 사용한다.</li>
+          <li>환경변수가 없거나 빈 값이면 현재 모델 <code>gpt-5.4-mini-2026-03-17</code>을 기본값으로 사용한다.</li>
+          <li>보고서 worker가 모델 미설정만으로 실패하지 않도록 하되, <code>OPENAI_API_KEY</code> 필수 조건은 유지한다.</li>
+          <li>프롬프트·JSON schema·embedding 모델·API 요청 계약은 범위 밖으로 둔다.</li>
+        </ul>
+        <aside><strong>현재 근거:</strong> 파이프라인 text stage는 YAML의 <code>model</code>을 payload에 넣고, 보고서는 <code>REPORT_AI_MODEL</code>을 필수로 읽는다. <code>pipeline.worker.ts</code>의 hardcoded 모델은 주로 사용량 기록 fallback이므로 실제 호출 설정과 분리해 다뤄야 한다.</aside>
+      </section>
+
+      <section id="system-model">
+        <h2>2. 시스템 모델</h2>
+        <figure>
+          <p><strong>환경변수</strong> → 정규화된 모델 선택 → <strong>pipeline/report configuration</strong> → <strong>OpenAI Responses payload.model</strong> → 사용량 기록</p>
+          <figcaption>텍스트 등가: 환경변수는 실제 요청 모델을 결정하고, 값이 없을 때만 승인된 기본 모델을 사용한다. 임베딩은 별도 모델 계열로 유지한다.</figcaption>
+        </figure>
+        <table>
+          <caption>영향 경계</caption>
+          <thead><tr><th>경계</th><th>현재</th><th>제안</th></tr></thead>
+          <tbody>
+            <tr><td>Pipeline text stages</td><td>stage YAML의 모델을 필수로 사용</td><td><code>PIPELINE_AI_MODEL</code> 우선, 없으면 stage YAML, 마지막으로 공통 기본값</td></tr>
+            <tr><td>Report worker</td><td><code>REPORT_AI_MODEL</code> 필수, 없으면 구성 오류</td><td><code>REPORT_AI_MODEL</code> 우선, 없으면 공통 기본값</td></tr>
+            <tr><td>Embedding</td><td><code>text-embedding-3-small</code> 설정·fallback</td><td>텍스트 LLM 변경과 분리하여 이번 범위에서 유지</td></tr>
+            <tr><td>Credentials</td><td><code>OPENAI_API_KEY</code>가 없으면 외부 호출 실패</td><td>모델 fallback과 무관하게 기존 credential 검증 유지</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="grilling-state">
+        <h2>3. 설계 의사결정 · grilling 완료</h2>
+        <p><strong>결정 반영:</strong> 사용자는 권고안대로 G1-B·G2-A를 선택했다. material frontier는 닫혔으며, 아래 결정은 구현 승인과 별개인 설계 기준선이다.</p>
+        <table>
+          <caption>확정된 설계 결정</caption>
+          <thead><tr><th>ID</th><th>결정</th><th>확인된 근거·선택지</th><th>권고와 트레이드오프</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>G1</td>
+              <td>환경변수 우선 적용 범위</td>
+              <td>A: 보고서의 <code>REPORT_AI_MODEL</code>만 fallback 처리한다.<br>B: pipeline text와 report를 각각 <code>PIPELINE_AI_MODEL</code>·<code>REPORT_AI_MODEL</code>로 제어한다.<br>C: 하나의 공통 <code>OPENAI_MODEL</code>로 두 경로를 묶는다.</td>
+              <td><strong>G1-B 확정</strong> — 운영 환경별 독립 rollout을 유지하면서 두 경로 모두 env-first가 된다. C는 보고서와 뉴스 파이프라인의 변경을 불필요하게 결합하고, A는 pipeline의 기존 고정 설정 문제를 남긴다.</td>
+            </tr>
+            <tr>
+              <td>G2</td>
+              <td>Pipeline env가 없을 때의 우선순위</td>
+              <td>A: stage YAML 모델을 유지하고, YAML까지 비면 공통 기본값을 사용한다.<br>B: env가 없으면 YAML 모델을 무시하고 곧바로 공통 기본값을 사용한다.</td>
+              <td><strong>G2-A 확정</strong> — 현재 stage별 모델 설정과 향후 stage별 분리를 보존하면서, 설정 파일 누락에도 안전한 fallback을 추가한다. 공통 env가 있으면 모든 text stage에 우선 적용한다.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p><strong>공통 기본값:</strong> <code>gpt-5.4-mini-2026-03-17</code>. 공백 문자열은 미설정으로 취급하고, 임의의 비공백 모델명은 그대로 전달하여 공급자 검증 결과를 보존한다.</p>
+      </section>
+
+      <section id="invariants">
+        <h2>4. 불변식·비범위</h2>
+        <ul>
+          <li>실제 provider payload의 <code>model</code>과 성공·실패 사용량 기록의 모델은 동일한 resolved model을 기준으로 한다.</li>
+          <li>환경변수 값이 유효한 비공백 문자열이면 hardcoded 기본값이 이를 덮어쓰지 않는다.</li>
+          <li><code>OPENAI_API_KEY</code> 누락은 모델 fallback으로 완화하지 않는다.</li>
+          <li>embedding 모델과 <code>REPORT_AI_MODEL</code>·<code>PIPELINE_AI_MODEL</code>의 의미를 혼용하지 않는다.</li>
+          <li>API request body에 model 필드를 추가하지 않는다. 모델은 worker 운영 설정으로만 결정한다.</li>
+        </ul>
+      </section>
+
+      <section id="decisions">
+        <h2>5. 최종 설계 요약</h2>
+        <dl>
+          <dt>공통 기본값</dt><dd><code>gpt-5.4-mini-2026-03-17</code>을 코드의 단일 기본값으로 둔다.</dd>
+          <dt>Pipeline text</dt><dd><code>PIPELINE_AI_MODEL</code>이 비어 있지 않으면 candidate·content·validation 모두에 적용한다. 없으면 각 stage YAML의 모델을 사용하고, YAML 모델도 없으면 공통 기본값을 사용한다.</dd>
+          <dt>Report text</dt><dd><code>REPORT_AI_MODEL</code>이 비어 있지 않으면 사용하고, 없으면 공통 기본값을 사용한다. 모델이 없다는 이유로 report worker를 실패시키지 않는다.</dd>
+          <dt>Embedding</dt><dd><code>text-embedding-3-small</code>과 현재 embedding 설정 경계는 유지한다. 이번 변경에서 text LLM 환경변수와 혼용하지 않는다.</dd>
+          <dt>Credentials</dt><dd><code>OPENAI_API_KEY</code> 검증과 외부 호출 실패 분류는 변경하지 않는다.</dd>
+        </dl>
+      </section>
+
+      <section id="failure-recovery">
+        <h2>6. 실패·복구·운영</h2>
+        <table>
+          <caption>설정 상태별 동작</caption>
+          <thead><tr><th>상태</th><th>동작</th><th>운영 확인</th></tr></thead>
+          <tbody>
+            <tr><td>env 비어 있음</td><td>공통 기본 모델 또는 pipeline YAML 모델을 사용</td><td>로그·사용량에 resolved model을 기록</td></tr>
+            <tr><td>env에 알 수 없는 모델명</td><td>그 값을 provider에 전달하고 upstream 오류를 기존 정책으로 처리</td><td>모델명 오타를 환경 설정에서 수정</td></tr>
+            <tr><td>API key 없음</td><td>기존 credential 오류로 호출하지 않거나 worker가 실패</td><td>모델 fallback과 별개로 key를 설정</td></tr>
+            <tr><td>config YAML stage 누락</td><td>prompt/schema 등 필수 설정은 기존대로 batch bootstrap에서 실패</td><td>모델 fallback이 설정 파일 전체 누락을 숨기지 않음</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="verification-plan">
+        <h2>7. 검증 계획</h2>
+        <ol>
+          <li>report: env 모델 사용, env 미설정·빈 문자열 fallback, API key 검증 유지.</li>
+          <li>pipeline: <code>PIPELINE_AI_MODEL</code> override, env 미설정 시 YAML 모델, YAML model 누락 시 공통 fallback.</li>
+          <li>provider payload: resolved model이 실제 request body와 usage metadata에 반영되는지 확인.</li>
+          <li>focused command: <code>npm run test:jest -- test/unit/reportOptions.test.ts test/unit/pipelineAiConfiguration.test.ts test/unit/openAiProvider.test.ts test/unit/reportProvider.test.ts</code></li>
+          <li>applicable gates: <code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm run build</code></li>
+        </ol>
+      </section>
+
+      <section id="design-control-state">
+        <h2>8. 설계 이해·통제 점검 · 미실시</h2>
+        <p><strong>상태: 미실시.</strong> 비차단 self-check이며 결과는 이 브라우저에만 남는다. 설계 승인과 별개이고 구현 승인을 대신하지 않는다. 모든 material 축을 점검한다.</p>
+        <table>
+          <caption>점검 범위</caption>
+          <thead><tr><th>축</th><th>문항</th><th>이유</th></tr></thead>
+          <tbody>
+            <tr><td>목표·범위</td><td>DC1</td><td>text LLM과 embedding의 설정 경계를 구분</td></tr>
+            <tr><td>주요 결정·불변식</td><td>DC2</td><td>pipeline precedence 예측</td></tr>
+            <tr><td>경계·상태</td><td>DC3</td><td>report worker의 resolved model과 기동 상태 예측</td></tr>
+            <tr><td>실패·복구</td><td>DC4·DC5</td><td>빈 값·오류 모델·API key 실패 구분</td></tr>
+            <tr><td>운영·관측</td><td>DC6</td><td>payload와 사용량 모델의 일치 확인</td></tr>
+            <tr><td>검증·잔여 위험</td><td>DC7</td><td>focused test와 외부 호출 미실행 범위 확인</td></tr>
+          </tbody>
+        </table>
+        <p id="dc-progress" aria-live="polite"></p>
+        <div class="dc-question" id="DC1">
+          <fieldset><legend>DC1 · 이번 변경에서 환경변수로 제어하지 않는 것은?</legend>
+            <label><input type="radio" name="DC1" value="embedding"> embedding 모델은 별도 경계로 유지한다.</label>
+            <label><input type="radio" name="DC1" value="all"> 모든 OpenAI 모델을 하나의 text 모델 환경변수로 바꾼다.</label>
+          </fieldset>
+          <button type="button" class="dc-submit" data-index="0">답안 확인</button>
+          <div class="dc-result" hidden><p>상태: <span class="dc-status"></span></p><p>설명: <span class="dc-explanation"></span></p><p>다음 행동: <span class="dc-next"></span></p></div>
+        </div>
+        <div class="dc-question" id="DC2" hidden>
+          <fieldset><legend>DC2 · PIPELINE_AI_MODEL이 비어 있을 때 pipeline text 모델 순서는?</legend>
+            <label><input type="radio" name="DC2" value="yaml"> stage YAML 모델 → YAML도 없으면 공통 기본값</label>
+            <label><input type="radio" name="DC2" value="default"> 공통 기본값만 사용하고 stage YAML은 무시</label>
+          </fieldset>
+          <button type="button" class="dc-submit" data-index="1">답안 확인</button>
+          <div class="dc-result" hidden><p>상태: <span class="dc-status"></span></p><p>설명: <span class="dc-explanation"></span></p><p>다음 행동: <span class="dc-next"></span></p></div>
+        </div>
+        <div class="dc-question" id="DC3" hidden>
+          <fieldset><legend>DC3 · REPORT_AI_MODEL이 비어 있으면 report worker는?</legend>
+            <label><input type="radio" name="DC3" value="fallback"> 공통 기본값으로 실행을 준비한다.</label>
+            <label><input type="radio" name="DC3" value="fail"> 모델 미설정 오류로 시작하지 않는다.</label>
+          </fieldset>
+          <button type="button" class="dc-submit" data-index="2">답안 확인</button>
+          <div class="dc-result" hidden><p>상태: <span class="dc-status"></span></p><p>설명: <span class="dc-explanation"></span></p><p>다음 행동: <span class="dc-next"></span></p></div>
+        </div>
+        <div class="dc-question" id="DC4" hidden>
+          <fieldset><legend>DC4 · 모델 env가 공백뿐이면?</legend>
+            <label><input type="radio" name="DC4" value="fallback"> 미설정으로 정규화하고 fallback을 사용한다.</label>
+            <label><input type="radio" name="DC4" value="send"> 공백을 모델명으로 provider에 보낸다.</label>
+          </fieldset>
+          <button type="button" class="dc-submit" data-index="3">답안 확인</button>
+          <div class="dc-result" hidden><p>상태: <span class="dc-status"></span></p><p>설명: <span class="dc-explanation"></span></p><p>다음 행동: <span class="dc-next"></span></p></div>
+        </div>
+        <div class="dc-question" id="DC5" hidden>
+          <fieldset><legend>DC5 · 모델 fallback이 완화하지 않는 실패는?</legend>
+            <label><input type="radio" name="DC5" value="key"> OPENAI_API_KEY 누락</label>
+            <label><input type="radio" name="DC5" value="model"> 모델 env 누락</label>
+          </fieldset>
+          <button type="button" class="dc-submit" data-index="4">답안 확인</button>
+          <div class="dc-result" hidden><p>상태: <span class="dc-status"></span></p><p>설명: <span class="dc-explanation"></span></p><p>다음 행동: <span class="dc-next"></span></p></div>
+        </div>
+        <div class="dc-question" id="DC6" hidden>
+          <fieldset><legend>DC6 · 실제 요청과 사용량 기록의 모델은 어떻게 맞추나?</legend>
+            <label><input type="radio" name="DC6" value="resolved"> 같은 resolved model을 기준으로 기록한다.</label>
+            <label><input type="radio" name="DC6" value="hardcoded"> 사용량 기록은 항상 기존 hardcoded 값을 쓴다.</label>
+          </fieldset>
+          <button type="button" class="dc-submit" data-index="5">답안 확인</button>
+          <div class="dc-result" hidden><p>상태: <span class="dc-status"></span></p><p>설명: <span class="dc-explanation"></span></p><p>다음 행동: <span class="dc-next"></span></p></div>
+        </div>
+        <div class="dc-question" id="DC7" hidden>
+          <fieldset><legend>DC7 · 구현 후 무엇을 확인해야 하나?</legend>
+            <label><input type="radio" name="DC7" value="focused"> 설정 precedence·fallback·payload를 focused test로 확인하고, 실제 OpenAI 호출은 하지 않는다.</label>
+            <label><input type="radio" name="DC7" value="external"> 실제 OpenAI 호출만 하면 설정 테스트는 필요 없다.</label>
+          </fieldset>
+          <button type="button" class="dc-submit" data-index="6">답안 확인</button>
+          <div class="dc-result" hidden><p>상태: <span class="dc-status"></span></p><p>설명: <span class="dc-explanation"></span></p><p>다음 행동: <span class="dc-next"></span></p></div>
+        </div>
+        <button type="button" id="dc-prev" disabled>이전</button>
+        <button type="button" id="dc-next">다음</button>
+        <output id="dc-result" aria-live="polite"></output>
+      </section>
+
+      <section id="approval-state">
+        <h2>9. 승인 상태</h2>
+        <p><strong>설계 승인됨.</strong> <time datetime="2026-09-19">2026-09-19 KST</time> 사용자 “ㄱ”을 이 설계의 구현 승인으로 기록한다. 승인 범위는 <a href="llm-model-configuration-implementation.html">구현 제어 문서</a>의 Execution Contract와 동일하다.</p>
+        <p>설계 이해·통제 점검은 비차단 정보이며, 결과가 Codex에 자동 전달되지 않아도 승인 의미에는 영향을 주지 않는다.</p>
+      </section>
+
+      <section id="execution-contract">
+        <h2>10. Execution Contract · 승인됨</h2>
+        <dl>
+          <dt>Goal</dt><dd>pipeline text와 report text 모델을 env-first로 resolve하고, 미설정 시 <code>gpt-5.4-mini-2026-03-17</code>을 사용한다.</dd>
+          <dt>Observed evidence</dt><dd>pipeline stage 모델은 <code>config/pipeline-ai.yml</code>에서 읽고, report 모델은 <code>REPORT_AI_MODEL</code>을 필수로 읽는다. 현재 <code>.env</code>의 report 모델 값은 비어 있다.</dd>
+          <dt>Files and symbols in scope</dt><dd><code>apps/batch/src/ai/ai-model.defaults.ts</code>(신규), <code>apps/batch/src/pipeline/pipeline.ai.config.ts</code>, <code>apps/batch/src/pipeline/pipeline.worker.ts</code>, <code>apps/batch/src/report/report.ai.config.ts</code>, 관련 4개 unit test, <code>.env.example</code>, <code>compose.yaml</code>, <code>README.md</code>. 구현 제어 기록은 <a href="llm-model-configuration-implementation.html">동료 문서</a>에서 관리한다.</dd>
+          <dt>Invariants</dt><dd>env non-empty override, pipeline env→YAML→default precedence, report env→default precedence, embedding 분리, API key 검증 유지, resolved model과 provider payload·usage metadata 정합성.</dd>
+          <dt>Implementation steps</dt><dd>공통 default 상수 추가 → pipeline/report resolver 수정 → usage fallback 정합화 → env 예시·Compose·README 갱신 → focused regression test 추가 → typecheck/build/lint/format 검증.</dd>
+          <dt>Acceptance criteria</dt><dd>네 가지 precedence/fallback 경우와 blank env가 테스트되고, provider request body에 resolved model이 들어가며, report model 미설정만으로 worker가 실패하지 않는다.</dd>
+          <dt>Verification commands</dt><dd><code>npm run test:jest -- test/unit/reportOptions.test.ts test/unit/pipelineAiConfiguration.test.ts test/unit/openAiProvider.test.ts test/unit/reportProvider.test.ts</code>, 이후 <code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm run build</code></dd>
+          <dt>Forbidden changes</dt><dd>API body에 model 추가, embedding 모델 정책 변경, DB migration, 실제 OpenAI 호출, 사용자 <code>.env</code> 값 변경, unrelated generated artifacts 수정.</dd>
+          <dt>Escalate when</dt><dd>stage별 env를 별도로 둘 필요가 생기거나, embedding도 env-first로 바꾸거나, report·pipeline을 하나의 모델 env로 묶어야 한다는 요구가 추가될 때.</dd>
+        </dl>
+      </section>
+    </article>
+  </main>
+  <script>
+    const dcCards=[...document.querySelectorAll('.dc-question')];
+    const dcAnswers=['embedding','yaml','fallback','fallback','key','resolved','focused'];
+    let dcCurrent=0;
+    const dcProgress=document.getElementById('dc-progress');
+    const dcPrev=document.getElementById('dc-prev');
+    const dcNext=document.getElementById('dc-next');
+    function dcRefresh(){
+      dcCards.forEach((card,i)=>{card.hidden=i!==dcCurrent;});
+      const answered=document.querySelectorAll('.dc-question input:checked').length;
+      dcProgress.textContent=`${dcCurrent+1} / ${dcCards.length} 문항 · ${answered}개 응답`;
+      dcPrev.disabled=dcCurrent===0;
+      dcNext.disabled=dcCurrent===dcCards.length-1;
+    }
+    dcPrev.onclick=()=>{dcCurrent-=1;dcRefresh();};
+    dcNext.onclick=()=>{dcCurrent+=1;dcRefresh();};
+    document.querySelectorAll('.dc-submit').forEach(button=>button.onclick=()=>{
+      const index=Number(button.dataset.index);
+      const card=dcCards[index];
+      const selected=card.querySelector('input:checked');
+      const result=card.querySelector('.dc-result');
+      result.hidden=false;
+      const valid=selected?.value===dcAnswers[index];
+      card.querySelector('.dc-status').textContent=!selected?'미실시':valid?'확립':'보류';
+      card.querySelector('.dc-explanation').textContent=!selected?'선택 후 다시 확인하세요.':valid?'선택한 설계 기준과 일치합니다.':'설계 기준과 다릅니다. 위 최종 설계 요약을 다시 확인하세요.';
+      card.querySelector('.dc-next').textContent=valid?'다음 문항으로 이동하세요.':'해당 경계를 다시 확인한 뒤 재응답하세요.';
+      document.getElementById('dc-result').textContent='자가 점검 결과는 이 브라우저에만 표시되며 구현 승인과 별개입니다.';
+    });
+    document.querySelectorAll('.dc-question input').forEach(input=>input.onchange=()=>{input.closest('.dc-question').querySelector('.dc-result').hidden=true;dcRefresh();});
+    dcRefresh();
+  </script>
+</body>
+</html>
