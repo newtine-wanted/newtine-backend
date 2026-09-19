@@ -605,6 +605,58 @@ dbTest(
 );
 
 dbTest(
+  'expired claims reject every claim-bound write before the next claim recovers them',
+  async () => {
+    const fixture = await createFixture();
+    try {
+      const report = await repository().request(fixture.userId, period, fixedNow);
+      const claim = await repository().claim(fixedNow, 180_000);
+      assert.ok(claim);
+      await sql(`update weekly_reports set lease_expires_at = ?, heartbeat_at = ? where id = ?`, [
+        new Date(fixedNow.getTime() - 1),
+        new Date(fixedNow.getTime() - 2),
+        report.id,
+      ]);
+
+      await assert.rejects(
+        () => repository().captureCandidates(claim, fixedNow),
+        (error: unknown) => error instanceof ReportException && error.code === 'STALE_CLAIM',
+      );
+      assert.equal(await repository().heartbeat(claim, fixedNow, 180_000), false);
+
+      const emptyCandidates: ReportCandidates = {
+        capturedAt: fixedNow.toISOString(),
+        related: [],
+        major: [],
+        majorCategoryCodes: [],
+        relatedUnavailable: true,
+      };
+      assert.equal(
+        await repository().complete(
+          claim,
+          contentFor(claim.input.issues, emptyCandidates),
+          fixedNow,
+        ),
+        false,
+      );
+      assert.equal(await repository().fail(claim, 'provider_timeout', true, fixedNow), false);
+
+      const unchanged = await repository().findOwned(fixture.userId, report.id);
+      assert.equal(unchanged?.status, 'RUNNING');
+      assert.equal(unchanged?.attempt, 1);
+      assert.equal(unchanged?.content, null);
+
+      const recovered = await repository().claim(fixedNow, 180_000);
+      assert.ok(recovered);
+      assert.equal(recovered.attempt, 2);
+    } finally {
+      await cleanup(fixture);
+    }
+  },
+  60_000,
+);
+
+dbTest(
   'completion rejects a withdrawn input issue before atomically publishing content',
   async () => {
     const fixture = await createFixture();

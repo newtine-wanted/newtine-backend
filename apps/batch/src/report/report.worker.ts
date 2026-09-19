@@ -163,7 +163,7 @@ export class ReportWorker implements OnModuleDestroy {
       // second visibility read gives a safe error for withdrawn source issues
       // before attempting that update and keeps hidden source text out of a
       // completed result.
-      await this.filterVisibleCandidates(claim, candidates);
+      candidates = await this.filterVisibleCandidates(claim, candidates);
       const content = buildReportContent(claim.input, candidates, draft, new Date());
       const saved = await this.repository.complete(claim, content, new Date());
       if (!saved) {

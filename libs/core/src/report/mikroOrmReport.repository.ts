@@ -430,6 +430,7 @@ export class MikroOrmReportRepository implements ReportRepository {
           and status = 'RUNNING'
           and attempt_count = $2
           and lease_token = $5::uuid
+          and lease_expires_at > $3::timestamptz
         returning id`,
       [claim.id, claim.attempt, now, new Date(now.getTime() + leaseMs), claim.leaseToken],
     );
@@ -445,8 +446,9 @@ export class MikroOrmReportRepository implements ReportRepository {
             and status = 'RUNNING'
             and attempt_count = $2
             and lease_token = $3::uuid
+            and lease_expires_at > $4::timestamptz
           for update`,
-        [claim.id, claim.attempt, claim.leaseToken],
+        [claim.id, claim.attempt, claim.leaseToken, now],
       );
       const report = reportRows[0];
       if (report === undefined) throw new ReportException('STALE_CLAIM');
@@ -673,6 +675,7 @@ export class MikroOrmReportRepository implements ReportRepository {
             and attempt_count = $2
             and lease_token = $3::uuid
             and candidates is null
+            and lease_expires_at > $5::timestamptz
           returning candidates`,
         [claim.id, claim.attempt, claim.leaseToken, JSON.stringify(candidates), now],
       );
@@ -716,8 +719,9 @@ export class MikroOrmReportRepository implements ReportRepository {
            and r.status = 'RUNNING'
            and r.attempt_count = $2
            and r.lease_token = $3::uuid
+           and r.lease_expires_at > $4::timestamptz
          for update of r`,
-        [claim.id, claim.attempt, claim.leaseToken],
+        [claim.id, claim.attempt, claim.leaseToken, now],
       );
       const row = rows[0];
       if (row === undefined) return false;
@@ -765,6 +769,7 @@ export class MikroOrmReportRepository implements ReportRepository {
             and attempt_count = $2
             and lease_token = $3::uuid
             and content is null
+            and lease_expires_at > $5::timestamptz
           returning id`,
         [claim.id, claim.attempt, claim.leaseToken, JSON.stringify(content), now],
       );
@@ -797,6 +802,7 @@ export class MikroOrmReportRepository implements ReportRepository {
           and status = 'RUNNING'
           and attempt_count = $2
           and lease_token = $7::uuid
+          and lease_expires_at > $8::timestamptz
         returning id`,
       [
         claim.id,
