@@ -35,7 +35,8 @@
     "contracts:all": "npm run contracts:sdk && npm run contracts:e2e && npm run contracts:swagger",
     "contracts:check": "npm run contracts:all && npm run test:contracts && npm run typecheck:generated",
     "news:discovery": "node scripts/news-discovery.mjs",
-    "news:collection": "node scripts/news-collection.mjs"
+    "news:collection": "node scripts/news-collection.mjs",
+    "news:generation": "node scripts/news-generation.mjs"
   },
   "dependencies": {
     "@mikro-orm/core": "7.2.0",
