@@ -43,7 +43,7 @@ dbTest(
       const signup = async () => {
         const r = await fetch(`${base}/api/auth/signup`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', Origin: base },
           body: JSON.stringify({
             email: `report-${generateUuidV7()}@example.com`,
             password: 'report-http-test-passphrase',

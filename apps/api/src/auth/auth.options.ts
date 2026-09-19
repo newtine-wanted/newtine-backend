@@ -44,6 +44,11 @@ export function createAuthOptions(env: NodeJS.ProcessEnv = process.env): AuthOpt
 
   const cookieSecure = parseCookieSecure(env, env.NODE_ENV === 'production');
   const allowedOrigins = parseAllowedOrigins(env.AUTH_ALLOWED_ORIGINS);
+  if (!allowDevelopmentDefaults && allowedOrigins.length === 0) {
+    throw new AuthenticationConfigurationException(
+      'AUTH_ALLOWED_ORIGINS must contain at least one origin outside development/test',
+    );
+  }
 
   return {
     jwtSecret,

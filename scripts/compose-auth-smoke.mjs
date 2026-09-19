@@ -66,7 +66,7 @@ async function refresh(token) {
 
 const signup = await request('/auth/signup', {
   method: 'POST',
-  headers: { 'content-type': 'application/json' },
+  headers: { 'content-type': 'application/json', Origin: origin },
   body: JSON.stringify({ email, password }),
 });
 assert.equal(signup.response.status, 201);
@@ -160,7 +160,7 @@ assert.equal(parseJson(userPipelineResponse).code, 'FORBIDDEN');
 
 const login = await request('/auth/login', {
   method: 'POST',
-  headers: { 'content-type': 'application/json' },
+  headers: { 'content-type': 'application/json', Origin: origin },
   body: JSON.stringify({ email: `  ${email.toUpperCase()}  `, password }),
 });
 assert.equal(login.response.status, 200);
@@ -183,7 +183,7 @@ assert.equal(replacementAfterReuse.response.status, 401);
 
 const freshLogin = await request('/auth/login', {
   method: 'POST',
-  headers: { 'content-type': 'application/json' },
+  headers: { 'content-type': 'application/json', Origin: origin },
   body: JSON.stringify({ email, password }),
 });
 assert.equal(freshLogin.response.status, 200);

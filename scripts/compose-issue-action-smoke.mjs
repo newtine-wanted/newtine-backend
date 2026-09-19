@@ -49,7 +49,7 @@ async function request(path, init = {}) {
 async function signup() {
   const result = await request('/auth/signup', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', Origin: baseUrl.origin },
     body: JSON.stringify({ email: `issue-action-${randomUUID()}@example.com`, password }),
   });
   assert.equal(result.response.status, 201, result.body);

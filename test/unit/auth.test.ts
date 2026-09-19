@@ -34,7 +34,7 @@ import {
   PasswordService,
 } from '@newtine/api/auth/password.service.js';
 import { RolesGuard } from '@newtine/api/auth/roles.guard.js';
-import { assertAllowedOrigin } from '@newtine/api/auth/auth.origin.js';
+import { assertAllowedOrigin, authOriginHeadersValidator } from '@newtine/api/auth/auth.origin.js';
 
 const SECRET = 'test-jwt-secret-that-is-longer-than-32-bytes';
 const immediateTransactionManager = {
@@ -68,6 +68,10 @@ test('createAuthOptions가 운영 환경의 secret을 요구하고 Secure 쿠키
   assert.equal(options.refreshTokenTtlSeconds, 2_592_000);
 
   assert.throws(() => createAuthOptions({ NODE_ENV: 'production' }), /JWT_SECRET must be set/);
+  assert.throws(
+    () => createAuthOptions({ NODE_ENV: 'production', JWT_SECRET: SECRET }),
+    /AUTH_ALLOWED_ORIGINS must contain at least one origin/,
+  );
   assert.throws(
     () =>
       createAuthOptions({
@@ -388,12 +392,33 @@ test('Origin 검증이 same-origin 요청을 허용하고 cross-origin 쿠키 �
   } as never;
   assert.doesNotThrow(() => assertAllowedOrigin(sameOrigin, options));
 
+  const missingOrigin = { headers: {} } as never;
+  assert.throws(() => assertAllowedOrigin(missingOrigin, options), ForbiddenException);
+
+  const duplicateOrigin = {
+    headers: { origin: ['http://localhost:3000', 'https://evil.example'] },
+  } as never;
+  assert.throws(() => assertAllowedOrigin(duplicateOrigin, options), ForbiddenException);
+
   const crossOrigin = {
     headers: { origin: 'https://evil.example' },
     protocol: 'http',
     get: () => 'localhost:3000',
   } as never;
   assert.throws(() => assertAllowedOrigin(crossOrigin, options), ForbiddenException);
+});
+
+test('generated Origin header contract는 누락을 guard의 403 경로로 남긴다', () => {
+  assert.deepEqual(authOriginHeadersValidator.is({}), { origin: undefined });
+  assert.deepEqual(authOriginHeadersValidator.is({ origin: 'http://localhost:3000' }), {
+    origin: 'http://localhost:3000',
+  });
+  assert.equal(
+    authOriginHeadersValidator.is({
+      origin: ['http://localhost:3000', 'https://evil.example'],
+    }),
+    null,
+  );
 });
 
 test('refresh cookie helper가 보안 속성을 적용하고 세션 쿠키를 삭제할 수 있다', () => {
