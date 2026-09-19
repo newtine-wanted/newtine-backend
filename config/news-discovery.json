@@ -1,0 +1,7 @@
+{
+  "articlesPerQuery": 50,
+  "candidatesPerQuery": 5,
+  "maxQueries": 300,
+  "maxCandidates": 1500,
+  "entityTypes": ["POLITICIAN", "INSTITUTION", "PARTY"]
+}
