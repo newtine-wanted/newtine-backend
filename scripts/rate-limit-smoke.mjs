@@ -9,6 +9,7 @@ const child = spawn(process.execPath, ['dist/apps/api/src/main.js'], {
     NODE_ENV: 'test',
     API_HOST: '127.0.0.1',
     API_PORT: '0',
+    AUTH_ALLOWED_ORIGINS: '',
     API_SMOKE_READY: '1',
     RATE_LIMIT_WINDOW_MS: '1000',
     RATE_LIMIT_MAX_REQUESTS: '2',
@@ -108,7 +109,7 @@ try {
 
   const firstAccountAttempt = await request('/auth/login', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', Origin: baseUrl },
     body: JSON.stringify({ email: 'rate-limit@example.com', password: 'not-a-real-password' }),
   });
   assert.notEqual(firstAccountAttempt.status, 429);
@@ -116,7 +117,7 @@ try {
 
   const accountRejected = await request('/auth/login/', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', Origin: baseUrl },
     body: JSON.stringify({ email: 'rate-limit@example.com', password: 'not-a-real-password' }),
   });
   assertRateLimited(

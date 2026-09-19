@@ -31,6 +31,7 @@ export type { TransactionManager } from './common/transaction/transaction.manage
 export { PipelineRunService } from './pipeline/application/pipeline.run.service.js';
 export {
   DEFAULT_PIPELINE_LIMITS,
+  MAX_FAILED_JOB_IDS,
   normalizePipelineLimits,
 } from './pipeline/domain/pipeline.limits.js';
 export {

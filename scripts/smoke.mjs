@@ -13,6 +13,7 @@ const child = spawn(process.execPath, ['dist/apps/api/src/main.js'], {
     NODE_ENV: 'test',
     API_PORT: String(configuredPort),
     API_HOST: host,
+    AUTH_ALLOWED_ORIGINS: '',
     API_SMOKE_READY: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -201,10 +202,11 @@ try {
   assert.equal(searchBody.query, '파일럿');
   assert.ok(Array.isArray(searchBody.items));
 
-  const invalidSignup = await postJson('/auth/signup', {
-    email: 'not-an-email',
-    password: 'short',
-  });
+  const invalidSignup = await postJson(
+    '/auth/signup',
+    { email: 'not-an-email', password: 'short' },
+    { Origin: `http://${host}:${apiPort}` },
+  );
   assert.equal(invalidSignup.response.statusCode, 400);
   assert.equal(
     invalidSignup.response.headers['content-type']?.split(';')[0],
@@ -217,18 +219,26 @@ try {
     'title',
   ]);
 
+  const missingOriginSignup = await postJson('/auth/signup', {
+    email: `missing-origin-${Date.now()}@example.com`,
+    password: 'valid-smoke-password',
+  });
+  assert.equal(missingOriginSignup.response.statusCode, 403);
+  assert.equal(JSON.parse(missingOriginSignup.body).code, 'FORBIDDEN');
+  assert.equal(missingOriginSignup.response.headers['set-cookie'], undefined);
+
   const unauthenticatedMe = await get('/me/onboarding');
   assert.equal(unauthenticatedMe.response.statusCode, 401);
   assert.equal(JSON.parse(unauthenticatedMe.body).code, 'UNAUTHORIZED');
 
   const missingRefresh = await postRawJson('/auth/refresh', '{}');
-  assert.equal(missingRefresh.response.statusCode, 401);
-  assert.equal(JSON.parse(missingRefresh.body).code, 'UNAUTHORIZED');
+  assert.equal(missingRefresh.response.statusCode, 403);
+  assert.equal(JSON.parse(missingRefresh.body).code, 'FORBIDDEN');
+  assert.equal(missingRefresh.response.headers['set-cookie'], undefined);
 
   const logout = await postRawJson('/auth/logout', '{}');
-  assert.equal(logout.response.statusCode, 204);
-  assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /newtine_refresh=;/);
-  assert.match(logout.response.headers['set-cookie']?.[0] ?? '', /Max-Age=0/);
+  assert.equal(logout.response.statusCode, 403);
+  assert.equal(logout.response.headers['set-cookie'], undefined);
 
   function assertFeedPage(result) {
     assert.equal(result.response.statusCode, 200);

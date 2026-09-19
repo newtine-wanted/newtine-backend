@@ -48,6 +48,18 @@ NODE_ENV=development npm run start:batch -- databaseCheck
 Compose는 local-only disposable base-schema fixture와 one-shot migration service를 사용해 fresh
 volume의 재현 가능한 인증 검증 환경을 구성합니다.
 
+운영 DB를 배포하기 전에 PostgreSQL 드라이버의 실제 TLS 연결과 `select 1`을 확인하려면 배포 환경의
+환경변수를 주입한 상태에서 다음 명령을 실행합니다. 이 명령은 migration을 실행하지 않고,
+`NODE_ENV=staging|production`, `DB_SSL_MODE=verify-full`, 읽을 수 있는 `DB_SSL_CA_PATH`를 먼저
+검증한 뒤 CA 검증이 포함된 실제 DB 연결을 한 번 수행합니다.
+
+```bash
+NODE_ENV=production npm run db:tls:preflight
+```
+
+스테이징 DB가 없는 현재 로컬 환경에서는 이 검증을 실행할 대상이 없으므로, 배포 파이프라인 또는
+운영 DB 접근이 가능한 일회성 작업에서 수행해야 합니다.
+
 파이프라인 워커는 별도 장기 실행 프로세스로 시작합니다. 운영자가 이전 프로세스 종료를 확인한
 뒤 API로 접수한 실행을 처리합니다. 로컬에서 한 번만 확인하려면
 `PIPELINE_WORKER_ONCE=1 npm run start:batch -- pipelineWorker`를 사용합니다.
@@ -146,9 +158,9 @@ NODE_ENV=development DB_HOST=127.0.0.1 node --env-file=.env dist/apps/batch/src/
 
 Compose에서 `.env`는 interpolation 입력으로만 사용됩니다. `DB_NAME`, `DB_USER`, `DB_PASSWORD`와
 선택적인 `LOG_LEVEL`, `HTTP_SLOW_THRESHOLD_MS`, `RATE_LIMIT_*`는 각 서비스의 `environment`에 명시적으로
-전달되며 `.env` 파일 자체는 image에 복사되지 않습니다. API 컨테이너의 `NODE_ENV`는
-`production`, `AUTH_COOKIE_SECURE`는 `true`로 고정하여 `.env.example`의 호스트 개발 설정이
-production runtime에 잘못 전달되지 않게 합니다. 따라서 Docker API는 stdout JSON을 사용하고,
+전달되며 `.env` 파일 자체는 image에 복사되지 않습니다. API·batch·report-worker 컨테이너는 `NODE_ENV=development`와
+`LOG_FORMAT=json`을 사용해 local-only 평문 DB와 production dependency-only runtime을 함께 지원하고,
+`AUTH_COOKIE_SECURE`는 `true`로 고정합니다. 따라서 Docker API는 stdout JSON을 사용하고,
 호스트 Node 실행은 `node --env-file=.env ...`로 개발 설정을 사용할 수 있습니다. `API_PORT`와
 `DB_PORT`는 host에 publish할 포트를 정하고, 컨테이너 내부 API·PostgreSQL 포트는 각각
 `3000`·`5432`로 고정됩니다. rate limit 상태는 Cloud Run 인스턴스별 API 프로세스 메모리에만
@@ -215,6 +227,8 @@ node --env-file=.env dist/apps/api/src/main.js
 | `DB_NAME`                 | `newtine`                 | 필수                    |
 | `DB_USER`                 | `postgres`                | 필수                    |
 | `DB_PASSWORD`             | `postgres`                | 필수                    |
+| `DB_SSL_MODE`             | `disable`                 | `verify-full` 필수      |
+| `DB_SSL_CA_PATH`          | 없음                      | `verify-full` 인증서 파일 경로 필수 |
 | `LOG_LEVEL`               | `debug`                   | 기본 `info`             |
 | `HTTP_SLOW_THRESHOLD_MS`  | `1000`                    | 필요에 따라 지정        |
 | `RATE_LIMIT_WINDOW_MS`    | `60000`                   | 공통 quota window(ms)   |
@@ -244,13 +258,6 @@ node --env-file=.env dist/apps/api/src/main.js
 | `INTEREST_ANALYSIS_WINDOW_DAYS` | `7` | 마이페이지 관심 분석 rolling 기간(일), 1~365 |
 | `INTEREST_ANALYSIS_MINIMUM_SAMPLE_SIZE` | `10` | 저표본 경고 임계값, 1~100000 |
 
-DB 기본값은 `NODE_ENV=development` 또는 `test`일 때만 적용됩니다. 그 외 환경에서는 DB 변수
-누락·빈 값·잘못된 포트가 ORM 초기화 단계에서 실패합니다. 로컬 예시는 [.env.example](.env.example)을
-참고하세요. `PIPELINE_AI_CONFIG_PATH`와 `PIPELINE_AI_MODEL`은 batch worker가 시작할 때 한 번
-읽습니다. pipeline text 모델은 `PIPELINE_AI_MODEL` → stage YAML →
-`gpt-5.4-mini-2026-03-17` 순서로 결정합니다. YAML 또는 env를 변경하면 worker를 재시작해야
-다음 실행부터 적용되며, API 프로세스는 이 파일을 읽지 않습니다.
-
 ### 뉴스 검색 자격증명
 
 `.env.example`을 참고해 로컬 `.env` 또는 배포 환경의 `NAVER_CLIENT_ID`와
@@ -277,6 +284,7 @@ Client ID와 Client Secret을 직접 입력하세요. 예제에는 실제 값을
 | `npm run build`                                                | API와 batch 빌드                               |
 | `npm run start:api`                                            | 빌드된 API 실행                                |
 | `npm run start:batch -- databaseCheck`                         | 빌드된 batch의 DB 확인 작업 실행               |
+| `npm run db:tls:preflight`                                    | staging/production 실제 PostgreSQL TLS 연결 사전검증 |
 | `PIPELINE_WORKER_ONCE=1 npm run start:batch -- pipelineWorker` | 파이프라인 worker 1회 실행                     |
 | `npm run start:batch -- pipelineEmbeddingRepair`              | 공개 후 임베딩 pending 작업 수동 보완(최대 100건) |
 | `PIPELINE_EMBEDDING_REPAIR_RECLAIM_OWNER=<id> npm run start:batch -- pipelineEmbeddingRepair` | 종료 확인된 repair claim 재큐잉 후 수동 보완 |
@@ -324,14 +332,19 @@ SDK·e2e·OpenAPI 산출물은 `npm run contracts:all`로 생성합니다. 생�
 노출하지 않습니다. 프로세스 종료를 확인한 운영자는
 `POST /api/pipeline/runs/:runId/interrupt`에 `expectedAttempt`·`executionId`를 보내
 중단 처리한 뒤 `POST /api/pipeline/runs/:runId/retry`로 실패 작업을 재시도합니다. `CONTENT`
-재시도는 discovery를 반복하지 않고 선택한 실패 job의 seed URL에서 본문을 다시 확보합니다.
+재시도는 discovery를 반복하지 않고 선택한 실패 job의 seed URL에서 본문을 다시 확보합니다. 재시도 요청의
+`failedJobIds`는 최대 100개입니다.
 
 ### 인증 API
 
 `POST /api/auth/signup`과 `POST /api/auth/login`은 `{ "email": "...", "password": "..." }`를 받아
 access JWT를 JSON으로 반환하고 `newtine_refresh` HttpOnly cookie를 설정합니다. `POST /api/auth/refresh`는
 cookie를 회전하고 새 access JWT를 반환하며, `POST /api/auth/logout`은 현재 refresh session만 revoke하고
-cookie를 삭제합니다. access JWT는 `Authorization: Bearer <token>`으로 `/api/me/**` 요청에 사용합니다.
+cookie를 삭제합니다. 브라우저 cookie 세션을 만드는 signup/login과 세션을 변경하는 refresh/logout/withdraw에는
+허용 목록과 일치하는 `Origin` 헤더가 필요하며, 누락되거나 일치하지 않으면 `403`으로 거부하고 cookie
+부작용을 만들지 않습니다. 현재 릴리스는 웹 브라우저 흐름만 지원하므로 비브라우저 login/signup은
+지원하지 않습니다. 향후 Bearer/OAuth 비브라우저 인증은 별도 설계로 추가합니다. access JWT는
+`Authorization: Bearer <token>`으로 `/api/me/**` 요청에 사용합니다.
 
 signup은 모든 계정을 `USER`로 만들며, `ADMIN` role은 운영자 절차로만 부여됩니다.
 자세한 인증·인가 정책과 migration 적용 조건은

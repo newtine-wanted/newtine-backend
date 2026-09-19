@@ -6,6 +6,7 @@ import {
   PipelineException,
   PipelineExceptionCode,
 } from '@newtine/core/pipeline/domain/pipeline.exception.js';
+import { MAX_FAILED_JOB_IDS } from '@newtine/core/pipeline/domain/pipeline.limits.js';
 import {
   validateGeneratedContent,
   validateSemanticResult,
@@ -92,6 +93,12 @@ export class InMemoryPipelineRepository implements PipelineRunRepository {
   }
 
   async retry(input: RetryPipelineRunInput): Promise<PipelineRunSnapshot> {
+    if (input.failedJobIds !== undefined && input.failedJobIds.length > MAX_FAILED_JOB_IDS) {
+      throw new PipelineException(
+        PipelineExceptionCode.RetryNotAllowed,
+        `failedJobIds는 최대 ${MAX_FAILED_JOB_IDS}개까지 지정할 수 있습니다.`,
+      );
+    }
     if (
       input.scope === 'CONTENT' &&
       (!Array.isArray(input.failedJobIds) || input.failedJobIds.length === 0)

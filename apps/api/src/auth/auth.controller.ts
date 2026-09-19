@@ -1,4 +1,4 @@
-import { TypedBody, TypedException, TypedRoute } from '@nestia/core';
+import { TypedBody, TypedException, TypedHeaders, TypedRoute } from '@nestia/core';
 import { Controller, HttpCode, HttpStatus, Inject, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import typia from 'typia';
@@ -7,7 +7,11 @@ import type { AuthPrincipal } from '@newtine/core';
 import { ApiException } from '@newtine/api/common/exception/api.exception.js';
 import type { ProblemDetails } from '@newtine/api/common/filter/type/problemDetails.js';
 
-import { assertAllowedOrigin } from './auth.origin.js';
+import {
+  assertAllowedOrigin,
+  authOriginHeadersValidator,
+  type AuthOriginHeaders,
+} from './auth.origin.js';
 import { clearRefreshCookie, readRefreshToken, setRefreshCookie } from './auth.cookie.js';
 import { CurrentUser } from './auth.decorator.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
@@ -35,6 +39,7 @@ export class AuthController {
 
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
   @TypedException<ProblemDetails>(ApiException.Conflict)
+  @TypedException<ProblemDetails>(ApiException.Forbidden)
   @TypedException<ProblemDetails>(ApiException.InternalError)
   @HttpCode(HttpStatus.CREATED)
   @TypedRoute.Post('signup')
@@ -44,14 +49,19 @@ export class AuthController {
       validate: (input) => typia.validateEquals<AuthCredentialsRequest>(input),
     })
     body: AuthCredentialsRequest,
+    @TypedHeaders<AuthOriginHeaders>(authOriginHeadersValidator)
+    _headers: AuthOriginHeaders,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
+    assertAllowedOrigin(request, this.options);
     const session = await this.signupUseCase.execute(body);
     return this.writeSession(response, session);
   }
 
   @TypedException<ProblemDetails>(ApiException.InvalidArgument)
   @TypedException<ProblemDetails>(ApiException.Unauthorized)
+  @TypedException<ProblemDetails>(ApiException.Forbidden)
   @TypedException<ProblemDetails>(ApiException.InternalError)
   @HttpCode(HttpStatus.OK)
   @TypedRoute.Post('login')
@@ -61,8 +71,12 @@ export class AuthController {
       validate: (input) => typia.validateEquals<AuthCredentialsRequest>(input),
     })
     body: AuthCredentialsRequest,
+    @TypedHeaders<AuthOriginHeaders>(authOriginHeadersValidator)
+    _headers: AuthOriginHeaders,
+    @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
+    assertAllowedOrigin(request, this.options);
     const session = await this.loginUseCase.execute(body);
     return this.writeSession(response, session);
   }
@@ -73,6 +87,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @TypedRoute.Post('refresh')
   async refresh(
+    @TypedHeaders<AuthOriginHeaders>(authOriginHeadersValidator)
+    _headers: AuthOriginHeaders,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<AuthSessionResponse> {
@@ -86,6 +102,8 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @TypedRoute.Post('logout')
   async logout(
+    @TypedHeaders<AuthOriginHeaders>(authOriginHeadersValidator)
+    _headers: AuthOriginHeaders,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
@@ -105,6 +123,8 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @TypedRoute.Post('withdraw')
   async withdraw(
+    @TypedHeaders<AuthOriginHeaders>(authOriginHeadersValidator)
+    _headers: AuthOriginHeaders,
     @Req() request: Request,
     @CurrentUser() principal: AuthPrincipal,
     @Res({ passthrough: true }) response: Response,

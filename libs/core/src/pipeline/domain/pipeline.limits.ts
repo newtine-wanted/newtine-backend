@@ -1,6 +1,8 @@
 import { PipelineException } from './pipeline.exception.js';
 import type { PipelineLimits } from './pipeline.types.js';
 
+export const MAX_FAILED_JOB_IDS = 100;
+
 export const DEFAULT_PIPELINE_LIMITS: Readonly<PipelineLimits> = Object.freeze({
   discoveryQueries: 1,
   discoveryNews: 20,

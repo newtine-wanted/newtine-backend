@@ -21,9 +21,10 @@ services:
     build:
       context: .
     environment:
-      # The runtime image omits devDependencies, so the container follows the
-      # production logger contract and emits structured JSON.
-      NODE_ENV: production
+      # The runtime image omits devDependencies, so local development uses
+      # explicit JSON logging instead of the optional pino-pretty transport.
+      NODE_ENV: development
+      LOG_FORMAT: json
       API_HOST: 0.0.0.0
       API_PORT: "3000"
       DB_HOST: db
@@ -31,6 +32,7 @@ services:
       DB_NAME: ${DB_NAME:-newtine}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_SSL_MODE: disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_SLOW_THRESHOLD_MS: ${HTTP_SLOW_THRESHOLD_MS:-1000}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
@@ -46,7 +48,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env or the environment}
       JWT_ISSUER: ${JWT_ISSUER:-newtine-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-newtine-client}
-      # Production authentication must never issue a non-secure cookie.
+      # Local Compose still exercises the secure-cookie setting explicitly.
       AUTH_COOKIE_SECURE: "true"
       AUTH_ALLOWED_ORIGINS: ${AUTH_ALLOWED_ORIGINS:-}
     ports:
@@ -74,12 +76,13 @@ services:
       context: .
     command: ["node", "scripts/migrate.mjs", "up"]
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-newtine}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_SSL_MODE: disable
     depends_on:
       db:
         condition: service_healthy
@@ -92,12 +95,14 @@ services:
       context: .
     command: ["node", "dist/apps/batch/src/main.js", "databaseCheck"]
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
+      LOG_FORMAT: json
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-newtine}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_SSL_MODE: disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_SLOW_THRESHOLD_MS: ${HTTP_SLOW_THRESHOLD_MS:-1000}
       NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
@@ -122,12 +127,14 @@ services:
       context: .
     command: ["node", "dist/apps/batch/src/main.js", "reportWorker"]
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
+      LOG_FORMAT: json
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-newtine}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_SSL_MODE: disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       REPORT_AI_MODEL: ${REPORT_AI_MODEL:-}

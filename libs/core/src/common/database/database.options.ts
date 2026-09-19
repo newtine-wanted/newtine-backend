@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { REPORT_PERSISTENCE_ENTITIES } from '../../report/persistence/report.persistence.entity.js';
 import { Migration20260916000000DiagnosticReport } from '../../report/migrations/Migration20260916000000DiagnosticReport.js';
 import type { MikroOrmModuleOptions } from '@mikro-orm/nestjs';
@@ -54,6 +56,7 @@ export function createDatabaseOptions(
   if (!/^\d+$/.test(portValue) || !Number.isInteger(port) || port < 1 || port > 65535) {
     throw new DatabaseConfigurationException('DB_PORT', 'must be an integer from 1 to 65535');
   }
+  const driverOptions = createDatabaseDriverOptions(env, allowDefaults);
 
   return {
     driver: PostgreSqlDriver,
@@ -62,6 +65,7 @@ export function createDatabaseOptions(
     dbName: required('DB_NAME', 'newtine'),
     user: required('DB_USER', 'postgres'),
     password: required('DB_PASSWORD', 'postgres'),
+    driverOptions,
     entities: [...PERSISTENCE_ENTITIES, ...ISSUE_QUERY_PERSISTENCE_ENTITIES],
     entitiesTs: [...PERSISTENCE_ENTITIES, ...ISSUE_QUERY_PERSISTENCE_ENTITIES],
     extensions: [Migrator],
@@ -101,4 +105,57 @@ export function createDatabaseOptions(
     registerRequestContext: true,
     debug: env.NODE_ENV === 'development',
   };
+}
+
+function createDatabaseDriverOptions(
+  env: NodeJS.ProcessEnv,
+  allowDefaults: boolean,
+): { ssl: false | { ca: string; rejectUnauthorized: true } } {
+  const mode = env.DB_SSL_MODE ?? (allowDefaults ? 'disable' : undefined);
+  if (mode === undefined || mode.trim() === '') {
+    throw new DatabaseConfigurationException(
+      'DB_SSL_MODE',
+      'must be set to verify-full outside development/test',
+    );
+  }
+
+  if (mode === 'disable') {
+    if (!allowDefaults) {
+      throw new DatabaseConfigurationException(
+        'DB_SSL_MODE',
+        'disable is only allowed in development/test',
+      );
+    }
+    return { ssl: false };
+  }
+
+  if (mode !== 'verify-full') {
+    throw new DatabaseConfigurationException('DB_SSL_MODE', 'must be disable or verify-full');
+  }
+
+  const caPath = env.DB_SSL_CA_PATH;
+  if (caPath === undefined || caPath.trim() === '') {
+    throw new DatabaseConfigurationException(
+      'DB_SSL_CA_PATH',
+      'a readable CA certificate path is required for verify-full',
+    );
+  }
+
+  let ca: string;
+  try {
+    ca = readFileSync(caPath, 'utf8');
+  } catch {
+    throw new DatabaseConfigurationException(
+      'DB_SSL_CA_PATH',
+      'the CA certificate could not be read',
+    );
+  }
+  if (ca.trim() === '') {
+    throw new DatabaseConfigurationException(
+      'DB_SSL_CA_PATH',
+      'the CA certificate must be non-empty',
+    );
+  }
+
+  return { ssl: { ca, rejectUnauthorized: true } };
 }

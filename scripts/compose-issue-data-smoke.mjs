@@ -274,7 +274,7 @@ try {
 
   const signup = await request('/auth/signup', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', Origin: baseUrl.origin },
     body: JSON.stringify({ email, password }),
   });
   assert.equal(signup.response.status, 201);
