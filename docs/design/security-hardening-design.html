@@ -1,0 +1,896 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="purpose"
+      content="백엔드 브라우저·API 보안 경계의 출시 차단 이슈를 수정하기 위한 보안 강화 설계"
+    />
+    <meta
+      name="audience"
+      content="NEWTINE 백엔드 개발자·운영 담당자·보안 정책 결정자"
+    />
+    <meta
+      name="problem"
+      content="로그인·회원가입의 CSRF 경계, 원격 DB TLS 강제, 분산 rate limit, 관리자 입력 상한과 외부 데이터 전송 정책이 완전히 확정되지 않음"
+    />
+    <meta
+      name="core-flow"
+      content="요청 Origin·입력 검증 → 인증·세션 발급 → DB·외부 호출 경계 → 실패 차단·관측·복구"
+    />
+    <title>백엔드 보안 강화 설계 · 설계 승인됨</title>
+    <style>
+      :root {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        color: #172b36;
+        background: #f2f5f7;
+        line-height: 1.7;
+      }
+      body {
+        max-width: 1180px;
+        margin: auto;
+        padding: 28px;
+      }
+      header,
+      section {
+        background: white;
+        border: 1px solid #d9e3e8;
+        border-radius: 12px;
+        padding: 24px;
+        margin: 18px 0;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      h1 {
+        font-size: 30px;
+      }
+      h2 {
+        font-size: 22px;
+      }
+      h3 {
+        font-size: 18px;
+      }
+      a {
+        color: #075d9b;
+      }
+      nav {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 8px 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid #cbd8df;
+        text-align: left;
+        padding: 10px;
+        vertical-align: top;
+      }
+      caption {
+        text-align: left;
+        font-weight: 700;
+        margin: 10px 0;
+      }
+      dt {
+        font-weight: 700;
+      }
+      dd {
+        margin: 0 0 10px;
+      }
+      aside {
+        padding: 16px;
+        background: #fff4db;
+        border-left: 4px solid #cc8700;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      li {
+        margin: 8px 0;
+      }
+      figure {
+        margin: 20px 0;
+      }
+      svg {
+        width: 100%;
+        height: auto;
+        background: #f7fafb;
+        border: 1px solid #d9e3e8;
+        border-radius: 8px;
+      }
+      figcaption {
+        color: #435865;
+        margin-top: 8px;
+      }
+      .state {
+        font-weight: 700;
+        color: #9b3b00;
+      }
+      .open {
+        color: #9b3b00;
+        font-weight: 700;
+      }
+      .recommended {
+        color: #146b43;
+        font-weight: 700;
+      }
+      .muted {
+        color: #435865;
+      }
+      .control-slide {
+        display: none;
+        border: 1px solid #cbd8df;
+        border-radius: 10px;
+        padding: 18px;
+        margin-top: 16px;
+      }
+      .control-slide.is-active {
+        display: block;
+      }
+      .control-slide fieldset {
+        border: 0;
+        padding: 0;
+        margin: 0;
+      }
+      .control-slide legend {
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+      .control-slide label {
+        display: block;
+        padding: 8px 0;
+      }
+      .control-nav {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 14px;
+      }
+      .control-nav button {
+        border: 1px solid #17627c;
+        border-radius: 6px;
+        background: #f2f8fa;
+        color: #172b36;
+        padding: 7px 12px;
+        cursor: pointer;
+      }
+      .control-nav button:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .control-progress {
+        margin-left: auto;
+        font-weight: 700;
+      }
+      .control-result {
+        margin-top: 16px;
+        padding: 12px 14px;
+        border-radius: 8px;
+        background: #eef7ee;
+        border-left: 4px solid #3b7d3b;
+      }
+      .control-result.is-pending {
+        background: #fff4db;
+        border-left-color: #cc8700;
+      }
+      .control-result p {
+        margin: 4px 0;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      pre {
+        white-space: pre-wrap;
+        background: #f2f5f8;
+        border-radius: 8px;
+        padding: 14px;
+        overflow-x: auto;
+      }
+      @media (max-width: 700px) {
+        body {
+          padding: 10px;
+        }
+        section,
+        header {
+          padding: 16px;
+        }
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>
+        설계 baseline · <time datetime="2026-09-19">2026-09-19</time> ·
+        워크트리 <code>/Users/hyunseok/.codex/worktrees/security-hardening-design/newtine-backend</code> ·
+        강도 <strong>High-risk</strong> · <strong class="state">설계 승인됨</strong>
+      </p>
+      <h1>백엔드 보안 강화 설계</h1>
+      <p>
+        현재 보안 리뷰에서 확인된 로그인·회원가입 CSRF 경계, 원격 DB TLS 강제 여부, 분산 rate limit,
+        관리자 입력 배열 상한을 하나의 보안 강화 작업으로 조정하기 위한 설계 baseline이다. SQL Injection과
+        내부망 SSRF는 현재 직접 취약점이 확인되지 않았으므로 방어 불변식과 회귀 검증 대상으로 유지한다.
+        구현·migration·운영 설정 변경은 이 설계의 명시적 승인 전에는 시작하지 않는다.
+      </p>
+      <dl>
+        <dt>목적</dt>
+        <dd>백엔드 브라우저·API 보안 경계의 출시 차단 이슈를 수정하기 위한 보안 강화 설계</dd>
+        <dt>사용자</dt>
+        <dd>NEWTINE 백엔드 개발자·운영 담당자·보안 정책 결정자</dd>
+        <dt>문제</dt>
+        <dd>로그인·회원가입의 CSRF 경계, 원격 DB TLS 강제, 분산 rate limit, 관리자 입력 상한과 외부 데이터 전송 정책을 보안 작업별로 분리·확정해야 함</dd>
+        <dt>핵심 흐름</dt>
+        <dd>요청 Origin·입력 검증 → 인증·세션 발급 → DB·외부 호출 경계 → 실패 차단·관측·복구</dd>
+      </dl>
+      <p>
+        이전 문서인 <a href="../reviews/security.review.html">초기 보안 리뷰</a>는 정보 노출 중심의 별도 목적이므로
+        덮어쓰지 않는다. 설계 승인 후 연결된 구현 제어 문서
+        <code>security-hardening-implementation.html</code>을 생성한다.
+      </p>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#goal">목표·범위</a>
+      <a href="#evidence">확인된 근거</a>
+      <a href="#model">시스템 모델</a>
+      <a href="#decisions">의사결정</a>
+      <a href="#invariants">불변식</a>
+      <a href="#recovery">실패·복구</a>
+      <a href="#verification">검증</a>
+      <a href="#grilling">Grilling 상태</a>
+      <a href="#control">Design-control 상태</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="goal">
+          <h2>1. 목표와 범위</h2>
+          <h3>목표</h3>
+          <ul>
+            <li>브라우저 form 기반 cross-site 요청이 세션을 발급하거나 세션 상태를 변경하지 못하게 한다.</li>
+            <li>운영 환경에서 DB 연결 암호화 정책이 설정 누락으로 조용히 비활성화되지 않게 한다.</li>
+            <li>현재 process-local quota의 수평 확장 잔여 위험을 숨기지 않고 별도 이슈로 추적한다. 이번 작업에는 인프라 투자를 추가하지 않는다.</li>
+            <li>관리자 입력과 비싼 조회 경로의 상한을 명시적으로 유지한다.</li>
+            <li>SQL Injection·SSRF·authz 방어 불변식을 회귀 테스트로 고정한다.</li>
+          </ul>
+
+          <h3>성공 신호</h3>
+          <ul>
+            <li>허용되지 않은 Origin의 <code>signup</code>·<code>login</code> 요청은 세션 cookie 없이 거부된다.</li>
+            <li>브라우저 same-origin 흐름은 테스트하고, 이번 release에서 non-browser login/signup은 지원하지 않음을 명시적으로 검증한다.</li>
+            <li>운영·staging DB TLS 정책 위반은 기동 또는 연결 단계에서 fail-closed 된다.</li>
+            <li>현재 인스턴스 내부 rate limit의 회귀와 residual risk 기록이 검증된다. 분산 quota는 이번 완료 기준으로 주장하지 않는다.</li>
+            <li><code>failedJobIds</code> 및 사용자별 대량 조회가 고정된 상한을 넘지 않는다.</li>
+          </ul>
+
+          <h3>비목표</h3>
+          <ul>
+            <li>현재 직접 취약점이 확인되지 않은 SQL query builder 전면 교체.</li>
+            <li>현재 SSRF 방어 구현의 전면 재작성. 외부 egress allowlist는 별도 운영 정책으로 결정한다.</li>
+            <li>프론트엔드 전체 보안 헤더·HTML sanitization 구현. 서버 계약과 필요한 전제만 정의한다.</li>
+            <li>OpenAI 데이터 처리 계약의 최종 법무 승인. 기술적 최소화·차단 지점만 기록한다.</li>
+          </ul>
+        </section>
+
+        <section id="evidence">
+          <h2>2. 확인된 근거</h2>
+          <table>
+            <caption>현재 코드와 보안 리뷰에서 확인된 상태</caption>
+            <thead>
+              <tr>
+                <th scope="col">영역</th>
+                <th scope="col">확인된 사실</th>
+                <th scope="col">설계상 영향</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">CSRF</th>
+                <td>
+                  <a href="../../apps/api/src/auth/auth.controller.ts">auth.controller.ts</a>의
+                  signup/login은 <code>writeSession</code>으로 cookie를 발급하지만
+                  <code>assertAllowedOrigin</code>을 호출하지 않는다. JSON과 urlencoded body parser가 모두 켜져 있다.
+                </td>
+                <td>브라우저 session issuance 정책을 먼저 확정해야 구현 범위와 client 호환성이 결정된다.</td>
+              </tr>
+              <tr>
+                <th scope="row">Cookie</th>
+                <td>
+                  refresh cookie는 <code>HttpOnly; SameSite=Lax</code>이며 Secure는 production 기본값이다.
+                  Origin helper는 header 부재를 허용한다.
+                </td>
+                <td>Origin 강제와 SameSite 정책을 browser cookie 계약으로 고정하고, 향후 non-browser 계약은 별도 설계로 분리한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">DB transport</th>
+                <td>
+                  <a href="../../libs/core/src/common/database/database.options.ts">database.options.ts</a>에
+                  PostgreSQL SSL/TLS 옵션이 없다. Compose DB는 private network지만 원격 DB는 배포 조건에 따라 달라진다.
+                </td>
+                <td>앱이 fail-closed 할지, 인프라가 보장할지 소유권 결정을 해야 한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">Rate limit</th>
+                <td>현재 store는 process-local memory이며 README도 인스턴스별 best-effort quota로 설명한다.</td>
+                <td>shared store, gateway, 또는 현재 정책 유지 중 운영 목표를 결정해야 한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">입력 상한</th>
+                <td>
+                  일반 API는 Typia·도메인 재검증이 양호하지만
+                  <a href="../../apps/api/src/pipeline/type/pipelineRun.input.ts">pipelineRun.input.ts</a>의
+                  <code>failedJobIds</code>에는 <code>MaxItems</code>가 없다.
+                </td>
+                <td>관리자 endpoint라도 request·DB·메모리 상한을 계약에 명시한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">SQLi / SSRF</th>
+                <td>
+                  SQL 값은 parameter binding이고, 기사 fetch는 DNS public-IP 검사·IP pinning·redirect 재검증·timeout/body limit을 적용한다.
+                </td>
+                <td>구현 변경보다 회귀 테스트와 egress 정책의 잔여 위험 기록이 우선이다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="model">
+          <h2>3. 시스템 모델과 경계</h2>
+          <figure>
+            <svg viewBox="0 0 1120 270" role="img" aria-labelledby="flow-title flow-desc">
+              <title id="flow-title">보안 강화 대상 경계 흐름</title>
+              <desc id="flow-desc">
+                현재 브라우저 client와 향후 non-browser client가 Origin과 입력 검증을 거쳐 API 인증·세션 경계로 들어가고,
+                API가 DB와 외부 provider를 호출하며 실패 시 차단·관측·복구 정책을 적용하는 흐름
+              </desc>
+              <defs>
+                <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                  <path d="M0,0 L10,3 L0,6 Z" fill="#17627c" />
+                </marker>
+              </defs>
+              <g font-family="system-ui, sans-serif" font-size="15" fill="#172b36">
+                <rect x="28" y="88" width="170" height="82" rx="10" fill="#e4f1f6" stroke="#17627c" />
+                <text x="113" y="122" text-anchor="middle">Browser /</text>
+                <text x="113" y="146" text-anchor="middle">future API client</text>
+                <rect x="270" y="58" width="210" height="142" rx="10" fill="#fff4db" stroke="#cc8700" />
+                <text x="375" y="92" text-anchor="middle">Origin + input</text>
+                <text x="375" y="116" text-anchor="middle">validation</text>
+                <text x="375" y="150" text-anchor="middle">CSRF / bounds</text>
+                <text x="375" y="174" text-anchor="middle">decision boundary</text>
+                <rect x="550" y="58" width="210" height="142" rx="10" fill="#e9f5e9" stroke="#3b7d3b" />
+                <text x="655" y="92" text-anchor="middle">API auth/session</text>
+                <text x="655" y="116" text-anchor="middle">principal + role</text>
+                <text x="655" y="150" text-anchor="middle">rate limit</text>
+                <text x="655" y="174" text-anchor="middle">safe error/log</text>
+                <rect x="830" y="28" width="130" height="82" rx="10" fill="#f0edf9" stroke="#6e56a5" />
+                <text x="895" y="62" text-anchor="middle">PostgreSQL</text>
+                <text x="895" y="86" text-anchor="middle">TLS policy</text>
+                <rect x="830" y="158" width="130" height="82" rx="10" fill="#f0edf9" stroke="#6e56a5" />
+                <text x="895" y="192" text-anchor="middle">Naver /</text>
+                <text x="895" y="216" text-anchor="middle">OpenAI egress</text>
+                <path d="M198 129 H270" stroke="#17627c" stroke-width="3" marker-end="url(#arrow)" />
+                <path d="M480 129 H550" stroke="#17627c" stroke-width="3" marker-end="url(#arrow)" />
+                <path d="M760 100 H830" stroke="#17627c" stroke-width="3" marker-end="url(#arrow)" />
+                <path d="M760 170 H830" stroke="#17627c" stroke-width="3" marker-end="url(#arrow)" />
+              </g>
+            </svg>
+            <figcaption>
+              핵심 경계는 “요청이 유효한가”와 “세션을 발급·사용할 수 있는가”를 분리하고, DB·외부 provider로 나가는
+              연결에 별도의 transport·egress 정책을 적용하는 것이다. 텍스트 순서: client → Origin/input gate → auth/session/rate-limit gate → PostgreSQL 또는 external provider.
+            </figcaption>
+          </figure>
+        </section>
+
+        <section id="decisions">
+          <h2>4. 의사결정 트리와 현재 frontier</h2>
+          <table>
+            <caption>설계 의사결정 질문</caption>
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">결정</th>
+                <th scope="col">선택지</th>
+                <th scope="col">권고·트레이드오프</th>
+                <th scope="col">상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">G1</th>
+                <td>Cookie를 발급하는 signup/login의 CSRF 경계를 어떻게 강제할 것인가?</td>
+                <td>
+                  A. 허용 Origin을 strict allowlist로 검사하고 브라우저 경로는 Origin 부재도 거부<br />
+                  B. double-submit/synchronizer CSRF token을 추가<br />
+                  C. 현재처럼 SameSite와 CORS에 의존
+                </td>
+                <td>
+                  <span class="recommended">결정: A.</span> 현재 계약 변화가 가장 작고 Login CSRF를 직접 차단한다.
+                  Origin 없는 non-browser client는 현재 지원하지 않고, 향후 별도 Bearer 계약으로 정한다. B는 강하지만 token 발급·저장 흐름이 늘어난다.
+                </td>
+                <td>결정됨 · A</td>
+              </tr>
+              <tr>
+                <th scope="row">G2</th>
+                <td>Origin 없는 요청과 cross-site frontend를 어떤 client 계약으로 지원할 것인가?</td>
+                <td>
+                  A. 브라우저 same-origin만 지원하고 non-browser는 별도 Bearer client로 분리<br />
+                  B. Origin 없는 요청을 허용하되 cookie 발급 endpoint에는 token 요구<br />
+                  C. 모든 client에 CSRF token 계약 적용
+                </td>
+                <td>
+                  <span class="recommended">결정: A.</span> 쿠키 세션의 의미를 브라우저 same-origin으로 고정하고,
+                  non-browser client가 필요해지면 별도 Bearer 전용 계약으로 분리한다. B·C는 호환성이 좋지만 client 분류와 token lifecycle이 추가된다.
+                </td>
+                <td>결정됨 · A<br /><span class="muted">현재 release: G2.1-C</span></td>
+              </tr>
+              <tr>
+                <th scope="row">G2.1</th>
+                <td>이번 release에서 non-browser Bearer 전용 계약을 제공할 것인가?</td>
+                <td>
+                  A. cookie를 절대 쓰지 않는 별도 client-auth endpoint family를 추가<br />
+                  B. 기존 signup/login에 명시적 <code>X-Auth-Mode: bearer</code>를 요구하고 cookie 발급을 생략<br />
+                  C. 이번 release에서는 non-browser login/signup을 지원하지 않음
+                </td>
+                <td>
+                  <span class="recommended">결정: C.</span> 현재는 웹만 개발되어 있으므로 non-browser login/signup endpoint를 추가하지 않는다.
+                  Origin 없는 요청을 cookie 경계에 예외로 허용하지 않아 CSRF 경계를 단순하게 유지한다. 향후 모바일·CLI·서버 연동이 필요해지면
+                  별도 Bearer/OAuth 설계를 다시 연다.
+                </td>
+                <td>결정됨 · C</td>
+              </tr>
+              <tr>
+                <th scope="row">G3</th>
+                <td>DB TLS 보장의 소유권과 fail-closed 조건은 무엇인가?</td>
+                <td>
+                  A. 애플리케이션이 운영·staging에서 TLS mode와 검증 옵션을 강제<br />
+                  B. 인프라/managed DB가 보장하고 애플리케이션은 문서화만<br />
+                  C. 환경별 선택 허용
+                </td>
+                <td>
+                  <span class="recommended">결정: A + 인프라 이중 검증.</span> 설정 누락을 기동 실패로 바꿀 수 있다.
+                  인증서 배포·로컬 개발 편의 비용이 생긴다. C는 조용한 평문 연결 위험이 남는다.
+                </td>
+                <td>결정됨 · A</td>
+              </tr>
+              <tr>
+                <th scope="row">G3.1</th>
+                <td>G3-A의 TLS mode·인증서 검증 계약을 어떻게 표현할 것인가?</td>
+                <td>
+                  A. 운영은 <code>verify-full</code>과 명시적 CA 경로, 개발·test만 disable 허용<br />
+                  B. 운영은 암호화만 보장하는 <code>require</code>, 인증서 검증은 인프라 담당<br />
+                  C. connection string/managed driver 설정에 위임
+                </td>
+                <td>
+                  <span class="recommended">결정: A.</span> 운영은 <code>verify-full</code>과 명시적 CA 경로를 사용하고,
+                  개발·test만 disable을 허용한다. CA 배포와 hostname 관리가 필요하며, B는 MITM 방어가 약해진다.
+                </td>
+                <td>결정됨 · A</td>
+              </tr>
+              <tr>
+                <th scope="row">G4</th>
+                <td>수평 확장 rate limit을 이번 보안 작업에 포함할 것인가?</td>
+                <td>
+                  A. Redis 등 shared store를 앱 quota의 source of truth로 도입<br />
+                  B. gateway/WAF quota를 source of truth로 두고 앱은 best-effort 유지<br />
+                  C. 현재 process-local 정책을 유지하고 별도 이슈로 분리
+                </td>
+                <td>
+                  <span class="recommended">결정: C.</span> 인프라 투자 없이 현재 process-local 정책을 유지하고 별도 이슈로 분리한다.
+                  수평 확장 시 quota가 인스턴스 수만큼 늘어나는 잔여 위험을 명시적으로 수용한다.
+                </td>
+                <td>보류됨 · 별도 이슈</td>
+              </tr>
+              <tr>
+                <th scope="row">G5</th>
+                <td>외부 AI로 전송되는 사용자 관심 데이터의 기술적 조치를 어디까지 포함할 것인가?</td>
+                <td>
+                  A. 이 작업에 redaction·data minimization·provider 차단 기준 포함<br />
+                  B. 기술 구현은 유지하고 privacy/data-processing 이슈로 분리<br />
+                  C. 정책 확정 전 report worker 외부 호출 중단
+                </td>
+                <td>
+                  <span class="recommended">결정: B.</span> 현재 즉시 exploit보다는 데이터 거버넌스 결정이다.
+                  승인된 provider·보존·민감도 정책은 별도 privacy/compliance 이슈로 승인한다.
+                </td>
+                <td>보류됨 · 별도 이슈</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>최종 결정 반영</h3>
+          <ul>
+            <li>G1-A 확정: cookie 발급·회전 경계는 strict Origin allowlist를 사용하고 Origin 부재는 허용하지 않는다.</li>
+            <li>G2-A 확정: 브라우저는 same-origin cookie 세션만 사용한다. non-browser client는 이번 release에서 지원하지 않으며, 향후 별도 Bearer/OAuth 계약으로 분리한다.</li>
+            <li>G2.1-C 확정: 현재 구현에는 non-browser login/signup endpoint를 추가하지 않는다.</li>
+            <li>G3-A 확정: 애플리케이션이 운영·staging TLS 정책을 강제하며 인프라가 이중 검증한다.</li>
+            <li>G3.1-A 확정: 운영은 <code>verify-full</code> + 명시적 CA, 개발·test만 disable을 허용한다.</li>
+            <li>G4-C 확정: shared rate limit은 이번 범위에서 도입하지 않고 process-local 잔여 위험을 별도 이슈로 남긴다.</li>
+            <li>G5-B 확정: AI data egress는 별도 privacy/compliance 이슈로 분리한다.</li>
+          </ul>
+          <h3>의존 관계</h3>
+          <pre>G1 CSRF 방식 ──→ G2 브라우저/non-browser 계약 ──→ auth controller·cookie·integration test 범위
+G3 TLS 소유권 ──→ G3.1 mode/CA 계약 ──→ config schema·runtime bootstrap·deployment verification 범위
+G4 rate limit ──→ 별도 이슈(현재 process-local 잔여 위험)
+G5 data egress ──→ 별도 privacy/compliance issue
+공통 ──→ acceptance criteria·회귀 테스트·운영 관측</pre>
+        </section>
+
+        <section id="invariants">
+          <h2>5. 유지해야 할 보안 불변식</h2>
+          <ol>
+            <li>허용되지 않은 cross-site 요청은 access/refresh session을 발급하거나 회전시키지 않는다.</li>
+            <li>이번 범위에서는 Origin 부재 요청을 cookie session endpoint에 허용하지 않는다. 향후 Bearer client는 별도 인증 계약과 endpoint로 설계한다.</li>
+            <li>사용자 입력은 SQL 문자열·식별자·URL 요청 옵션에 직접 삽입하지 않고, parameter 또는 고정 allowlist로만 전달한다.</li>
+            <li>외부 URL은 scheme/port/userinfo/DNS/public IP/redirect를 매 hop 검증하고 resolve된 주소에 pinning한다.</li>
+            <li>DB 연결 보안 설정이 운영 환경에서 누락되면 연결을 허용하지 않는다.</li>
+            <li>이번 범위에서는 rate limit 저장소를 변경하지 않으며, process-local best-effort quota와 수평 확장 우회 위험을 운영 문서에 명시한다.</li>
+            <li>사용자·관리자 resource 조회는 principal/role 및 owner predicate를 거친다.</li>
+            <li>token, password, cookie, authorization header, 원문 request body는 응답·로그·외부 provider payload에 불필요하게 남기지 않는다.</li>
+        </ol>
+      </section>
+
+      <section id="recovery">
+        <h2>6. 실패와 복구 모델</h2>
+        <table>
+          <caption>실패 경계와 안전한 기본 동작</caption>
+          <thead>
+            <tr>
+              <th scope="col">실패</th>
+              <th scope="col">차단 동작</th>
+              <th scope="col">복구·운영 증거</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Origin 불일치/부재</th>
+              <td>cookie 발급·회전·삭제를 수행하지 않고 403</td>
+              <td>request id, endpoint, decision reason만 기록. credential은 기록하지 않음.</td>
+            </tr>
+            <tr>
+              <th scope="row">DB TLS 설정 누락/인증서 검증 실패</th>
+              <td>API·batch 기동 또는 DB 연결 실패. 평문 fallback 금지.</td>
+              <td>safe diagnostic으로 설정 key와 원인 유형만 기록하고, 인증서 갱신 runbook으로 복구.</td>
+            </tr>
+            <tr>
+              <th scope="row">수평 확장 rate limit</th>
+              <td>이번 범위에서는 shared store를 추가하지 않고 현재 process-local best-effort 정책을 유지한다.</td>
+              <td>인스턴스 수에 따른 quota 증가를 residual risk로 기록하고, shared quota 도입은 별도 이슈에서 운영 비용과 함께 결정한다.</td>
+            </tr>
+            <tr>
+              <th scope="row">입력 상한 초과</th>
+              <td>400/413으로 종료하고 DB·외부 provider 호출을 시작하지 않음.</td>
+              <td>필드명·상한·request id만 기록. 입력값 원문은 기록하지 않음.</td>
+            </tr>
+            <tr>
+              <th scope="row">외부 URL private IP/redirect/timeout</th>
+              <td>source unavailable 또는 retryable upstream error로 종료. 내부 주소 재시도 금지.</td>
+              <td>host가 아니라 분류된 error code와 hop 수만 기록.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="verification">
+        <h2>7. 검증 계획과 완료 기준</h2>
+        <table>
+          <caption>설계 승인 후 실행할 검증</caption>
+          <thead>
+            <tr>
+              <th scope="col">축</th>
+              <th scope="col">검증</th>
+              <th scope="col">완료 기준</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">CSRF</th>
+              <td>same-origin, 허용 cross-origin, 금지 cross-origin, Origin 부재 form/API 요청을 controller/integration test로 실행</td>
+              <td>금지 요청과 현재 지원하지 않는 non-browser 요청은 403이고 <code>Set-Cookie</code> 없음. browser same-origin만 세션 발급.</td>
+            </tr>
+            <tr>
+              <th scope="row">TLS/config</th>
+              <td>개발·test·staging·production config matrix와 실제 PostgreSQL handshake 확인</td>
+              <td>운영 mode에서 TLS 검증 실패가 fail-closed이고, 개발 예외가 운영에 전파되지 않음.</td>
+            </tr>
+            <tr>
+              <th scope="row">rate limit</th>
+              <td>현재 process-local quota, eviction, proxy IP 정책과 수평 확장 residual risk 기록을 검증</td>
+              <td>이번 범위에서 shared quota를 주장하지 않고, 기존 in-process 동작의 회귀가 없음.</td>
+            </tr>
+            <tr>
+              <th scope="row">입력·SQLi</th>
+              <td>unknown field, oversized array, malformed UUID, LIKE metacharacter, array binding regression test</td>
+              <td>400/413으로 종료되며 SQL 문자열 변경이나 예외 detail leak 없음.</td>
+            </tr>
+            <tr>
+              <th scope="row">SSRF</th>
+              <td>private IPv4/IPv6, DNS mixed answers, rebinding-shaped redirect, HTTP downgrade, oversized body/timeout</td>
+              <td>private 대상은 요청 전에 차단되고 public redirect만 bounded hop 내에서 허용.</td>
+            </tr>
+            <tr>
+              <th scope="row">회귀</th>
+              <td><code>npm run typecheck</code>, <code>npm run lint</code>, 관련 auth/rate-limit/naver/provider unit test, 필요한 integration/smoke</td>
+              <td>기존 인증·refresh rotation·owner scoping·AI output validation 회귀 없음.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted">
+          설계 시점의 기존 증거: 관련 단위 테스트 9개 suite/71개 통과, typecheck/lint 통과. 이는 새 설계 구현의 검증 결과가 아니며,
+          구현 후에는 연결된 implementation-control 문서에 fresh evidence를 기록한다.
+        </p>
+      </section>
+
+      <section id="grilling">
+        <h2>8. 설계 의사결정 질문 (grilling)</h2>
+        <p><strong>진행 상태: 완료 · 설계 승인됨</strong></p>
+        <dl>
+          <dt>범위</dt>
+          <dd>G1~G5의 보안 정책·client 계약·운영 dependency와 그에 따른 구현·검증 경계</dd>
+          <dt>현재 frontier</dt>
+          <dd>material decision frontier는 없다. G1·G2·G2.1·G3·G3.1은 확정되었고 G4·G5는 별도 이슈로 보류를 수용했다.</dd>
+          <dt>확인된 결정</dt>
+          <dd>G1-A, G2-A, G2.1-C, G3-A, G3.1-A, G4-C, G5-B. SQLi·SSRF는 전면 교체하지 않고 불변식·회귀 검증으로 유지한다. 구현은 설계 승인 전 시작하지 않는다.</dd>
+          <dt>보류된 branch</dt>
+          <dd>shared rate limit 도입, 외부 provider data egress의 최종 법무·DPA 정책, public-domain egress allowlist의 필요성</dd>
+          <dt>주요 가정</dt>
+          <dd>refresh cookie를 사용하는 브라우저 client가 존재하며, API는 수평 확장될 수 있고, staging도 실제 외부 접근 환경일 수 있다.</dd>
+        </dl>
+        <aside>
+          설계 선택은 확정되었다. 아래 self-check는 설계의 이해·운영 통제를 위한 비차단 점검이며, 구현 승인과 별개다.
+        </aside>
+      </section>
+
+      <section id="control">
+        <h2>9. 설계 이해·통제 점검 (design-control)</h2>
+        <dl>
+          <dt>상태</dt>
+          <dd>미실시</dd>
+          <dt>이유</dt>
+          <dd>설계는 확정되었지만 사용자가 실제 경계·불변식·실패 복구를 예측하는지는 아직 확인하지 않았다.</dd>
+          <dt>coverage ledger</dt>
+          <dd>
+            목표·범위: Q1 · material decisions: Q2/Q3/G2.1 · 불변식: Q4 · 경계/상태 전이: Q5 · 실패·복구: Q6 ·
+            권한/외부 효과: Q7 · 운영 관측: Q8 · 검증/잔여 위험: Q9
+          </dd>
+          <dt>다음 상태</dt>
+          <dd>self-check 결과는 이 브라우저 문서 안에만 남는다. Codex로 자동 전송되지 않으며, 구현 승인 여부를 대신하지 않는다.</dd>
+        </dl>
+
+        <div id="design-control-app">
+          <p class="muted">
+            각 문항은 설계 선택이 아니라 확정된 설계를 예측하는 점검이다. 제출 전에는 설명이 보이지 않는다.
+            CSS/JavaScript를 사용할 수 없으면 모든 문항이 순서대로 표시된다.
+          </p>
+          <noscript><p class="muted">JavaScript가 비활성화되어 있어 문항을 모두 표시합니다. 이 점검은 로컬 기록만 지원합니다.</p></noscript>
+          <p class="control-nav">
+            <span id="control-progress" class="control-progress">질문 1/9 · 제출 0/9</span>
+          </p>
+
+          <article class="control-slide is-active" data-answer="b">
+            <fieldset>
+              <legend>Q1 · 이 설계의 1차 목표는 무엇인가?</legend>
+              <label><input type="radio" name="q1" value="a" /> SQL query builder를 전면 교체한다.</label>
+              <label><input type="radio" name="q1" value="b" /> 세션·DB transport·입력 경계의 출시 차단 위험을 줄이고 회귀 불변식을 고정한다.</label>
+              <label><input type="radio" name="q1" value="c" /> 분산 rate limit과 AI provider 정책까지 이번 구현에서 모두 해결한다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <article class="control-slide" data-answer="c">
+            <fieldset>
+              <legend>Q2 · 이번 release의 non-browser login/signup 정책은?</legend>
+              <label><input type="radio" name="q2" value="a" /> 기존 cookie endpoint에서 Origin 없이 허용한다.</label>
+              <label><input type="radio" name="q2" value="b" /> Bearer endpoint를 이번 release에 즉시 추가한다.</label>
+              <label><input type="radio" name="q2" value="c" /> 이번 release에서는 지원하지 않고, 향후 별도 Bearer/OAuth 계약으로 분리한다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <article class="control-slide" data-answer="a">
+            <fieldset>
+              <legend>Q3 · 운영 DB TLS 설정은 어떻게 동작해야 하는가?</legend>
+              <label><input type="radio" name="q3" value="a" /> staging/production은 verify-full과 명시적 CA를 강제하고, 개발/test만 disable을 허용한다.</label>
+              <label><input type="radio" name="q3" value="b" /> 운영은 암호화만 되면 되고 인증서 검증은 선택이다.</label>
+              <label><input type="radio" name="q3" value="c" /> 운영 TLS는 connection string이 알아서 결정한다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <article class="control-slide" data-answer="c">
+            <fieldset>
+              <legend>Q4 · cross-site form이 Origin 없이 login을 호출하면?</legend>
+              <label><input type="radio" name="q4" value="a" /> SameSite=Lax만 믿고 login을 진행한다.</label>
+              <label><input type="radio" name="q4" value="b" /> access token만 막고 refresh cookie는 발급한다.</label>
+              <label><input type="radio" name="q4" value="c" /> strict Origin 정책에 따라 세션 발급 전에 거부한다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <article class="control-slide" data-answer="b">
+            <fieldset>
+              <legend>Q5 · 허용되지 않은 Origin 요청에서 보장해야 할 상태는?</legend>
+              <label><input type="radio" name="q5" value="a" /> 403을 반환하지만 Set-Cookie는 유지한다.</label>
+              <label><input type="radio" name="q5" value="b" /> 403으로 종료하고 session issuance/rotation/clearing을 수행하지 않는다.</label>
+              <label><input type="radio" name="q5" value="c" /> 입력이 유효하면 Origin 오류를 무시한다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <article class="control-slide" data-answer="a">
+            <fieldset>
+              <legend>Q6 · DB TLS 설정이 잘못되면 어떤 복구 모델인가?</legend>
+              <label><input type="radio" name="q6" value="a" /> 기동/연결을 실패시키고 평문 fallback 없이 인증서·CA 설정을 복구한다.</label>
+              <label><input type="radio" name="q6" value="b" /> 일단 평문으로 연결한 뒤 운영자가 나중에 바꾼다.</label>
+              <label><input type="radio" name="q6" value="c" /> 연결 오류를 숨기고 요청을 계속 처리한다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <article class="control-slide" data-answer="c">
+            <fieldset>
+              <legend>Q7 · 이번 범위에서 rate limit과 AI data egress는?</legend>
+              <label><input type="radio" name="q7" value="a" /> Redis와 redaction을 반드시 이번 구현에 포함한다.</label>
+              <label><input type="radio" name="q7" value="b" /> 두 문제 모두 해결된 것으로 간주한다.</label>
+              <label><input type="radio" name="q7" value="c" /> process-local rate limit과 현재 AI 호출은 유지하되 각각 별도 이슈로 기록한다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <article class="control-slide" data-answer="b">
+            <fieldset>
+              <legend>Q8 · SQLi·SSRF 방어의 유지 불변식은?</legend>
+              <label><input type="radio" name="q8" value="a" /> SQL 문자열 interpolation과 URL redirect 자동 추적을 허용한다.</label>
+              <label><input type="radio" name="q8" value="b" /> SQL 값은 parameter binding, 외부 URL은 public-IP·redirect 재검증과 pinning을 유지한다.</label>
+              <label><input type="radio" name="q8" value="c" /> 관리자 요청에만 이 검증을 적용한다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <article class="control-slide" data-answer="a">
+            <fieldset>
+              <legend>Q9 · 구현 완료를 판단하는 검증 묶음은?</legend>
+              <label><input type="radio" name="q9" value="a" /> CSRF·TLS·입력·SQLi·SSRF regression과 typecheck/lint/관련 integration evidence를 모두 확인한다.</label>
+              <label><input type="radio" name="q9" value="b" /> 설계 HTML을 작성했으면 구현 완료로 본다.</label>
+              <label><input type="radio" name="q9" value="c" /> 단위 테스트 하나만 통과하면 운영 승인으로 본다.</label>
+            </fieldset>
+            <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
+            <div class="control-result is-pending" hidden>
+              <p data-result="status"></p><p data-result="explanation"></p><p data-result="next"></p>
+            </div>
+          </article>
+
+          <div class="control-nav">
+            <button type="button" data-action="previous">이전</button>
+            <button type="button" data-action="next">다음</button>
+            <span id="control-score" class="muted" aria-live="polite"></span>
+          </div>
+          <output id="control-output" aria-live="polite" class="muted">아직 제출한 답변이 없습니다.</output>
+        </div>
+      </section>
+
+      <section id="approval">
+        <h2>10. 승인 상태</h2>
+        <p><strong>설계 승인됨.</strong> 사용자가 2026-09-19 18:30 KST에 현재 설계로 구현을 시작하도록 명시 승인했다.</p>
+        <p>
+          승인된 범위는 G1-A, G2-A/G2.1-C, G3-A/G3.1-A, G4-C, G5-B 및 SQLi·SSRF 기존 불변식 회귀 검증이다.
+          구현 중 설계가 materially 변경되면 이 승인 상태를 되돌리고 재승인을 받는다.
+        </p>
+      </section>
+      </article>
+    </main>
+    <script>
+      (() => {
+        const app = document.querySelector('#design-control-app');
+        if (app === null) return;
+        const slides = Array.from(app.querySelectorAll('.control-slide'));
+        const progress = app.querySelector('#control-progress');
+        const score = app.querySelector('#control-score');
+        const output = app.querySelector('#control-output');
+        const submitted = new Map();
+        let current = 0;
+        const explanations = [
+          '이번 범위는 세션·DB transport·입력 경계를 강화한다. 분산 rate limit과 AI data egress는 별도 이슈다.',
+          'cookie 세션은 브라우저 same-origin으로 제한하고, 이번 release에서는 non-browser login/signup을 지원하지 않는다. 향후 별도 Bearer/OAuth 계약으로 분리한다.',
+          '운영과 staging은 verify-full 및 CA를 사용하고, 개발/test만 명시적으로 disable을 허용한다.',
+          'Origin 부재도 허용하지 않아 session issuance 전에 요청을 차단한다. SameSite는 보조 방어다.',
+          '실패 응답뿐 아니라 Set-Cookie 등 session side effect도 없어야 한다.',
+          'TLS 검증 실패는 평문 fallback 없이 기동/연결 실패로 드러나야 한다.',
+          '이번 범위에서 두 위험은 해결된 것으로 가장하지 않고 별도 이슈와 residual risk로 남긴다.',
+          'parameter binding, public-IP 검사, redirect 재검증, resolved IP pinning을 회귀 불변식으로 유지한다.',
+          '설계 문서만으로 구현 완료가 되지 않는다. 보안 경계별 테스트와 typecheck/lint/integration evidence가 필요하다.',
+        ];
+
+        function render() {
+          slides.forEach((slide, index) => slide.classList.toggle('is-active', index === current));
+          const previous = app.querySelector('[data-action="previous"]');
+          const next = app.querySelector('[data-action="next"]');
+          if (previous) previous.disabled = current === 0;
+          if (next) next.disabled = current === slides.length - 1;
+          if (progress) progress.textContent = `질문 ${current + 1}/${slides.length} · 제출 ${submitted.size}/${slides.length}`;
+          if (score) {
+            const correct = Array.from(submitted.values()).filter(Boolean).length;
+            score.textContent = submitted.size === 0 ? '' : `현재 확립 ${correct}/${submitted.size}`;
+          }
+        }
+
+        function submitCurrent() {
+          const slide = slides[current];
+          const selected = slide.querySelector('input:checked');
+          if (selected === null) {
+            if (output) output.textContent = '먼저 현재 문항의 답변을 선택하세요.';
+            return;
+          }
+          const correct = selected.value === slide.dataset.answer;
+          submitted.set(current, correct);
+          const result = slide.querySelector('.control-result');
+          if (result) {
+            result.hidden = false;
+            result.classList.toggle('is-pending', !correct);
+            const status = result.querySelector('[data-result="status"]');
+            const explanation = result.querySelector('[data-result="explanation"]');
+            const next = result.querySelector('[data-result="next"]');
+            if (status) status.textContent = correct ? '상태: 확립' : '상태: 보류';
+            if (explanation) explanation.textContent = `설명: ${explanations[current]}`;
+            if (next) next.textContent = correct ? '다음 행동: 다음 문항으로 이동하세요.' : '다음 행동: 설계 본문을 다시 확인하고 같은 문항을 재제출하세요.';
+          }
+          if (output) output.textContent = correct ? '현재 문항이 확립되었습니다.' : '현재 문항은 보류 상태입니다.';
+          render();
+        }
+
+        app.addEventListener('click', (event) => {
+          const target = event.target.closest('[data-action]');
+          if (!target) return;
+          const action = target.dataset.action;
+          if (action === 'submit') submitCurrent();
+          if (action === 'previous' && current > 0) {
+            current -= 1;
+            render();
+          }
+          if (action === 'next' && current < slides.length - 1) {
+            current += 1;
+            render();
+          }
+        });
+
+        render();
+      })();
+    </script>
+  </body>
+</html>

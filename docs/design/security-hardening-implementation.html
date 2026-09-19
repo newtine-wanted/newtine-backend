@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="승인된 백엔드 보안 강화 설계의 구현 상태와 검증 증거를 추적하는 제어 문서" />
+    <meta name="audience" content="NEWTINE 백엔드 개발자·운영 담당자·보안 검토자" />
+    <meta name="problem" content="CSRF·DB TLS·입력 상한 보안 변경의 구현 범위, 불변식, 회귀 검증과 잔여 위험을 추적해야 함" />
+    <meta name="core-flow" content="승인 baseline → bounded implementation → security regression → critical review → 운영 handoff" />
+    <title>백엔드 보안 강화 구현 제어 · 검토 완료</title>
+    <style>
+      :root {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        color: #172b36;
+        background: #f2f5f7;
+        line-height: 1.7;
+      }
+      body {
+        max-width: 1100px;
+        margin: auto;
+        padding: 28px;
+      }
+      header,
+      section {
+        background: white;
+        border: 1px solid #d9e3e8;
+        border-radius: 12px;
+        padding: 24px;
+        margin: 18px 0;
+      }
+      h1,
+      h2,
+      h3 {
+        line-height: 1.35;
+      }
+      h1 {
+        font-size: 30px;
+      }
+      h2 {
+        font-size: 22px;
+      }
+      a {
+        color: #075d9b;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 14px;
+      }
+      th,
+      td {
+        border: 1px solid #cbd8df;
+        text-align: left;
+        padding: 10px;
+        vertical-align: top;
+      }
+      caption {
+        text-align: left;
+        font-weight: 700;
+        margin: 10px 0;
+      }
+      dt {
+        font-weight: 700;
+      }
+      dd {
+        margin: 0 0 10px;
+      }
+      aside {
+        padding: 16px;
+        background: #fff4db;
+        border-left: 4px solid #cc8700;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      li {
+        margin: 8px 0;
+      }
+      .state {
+        font-weight: 700;
+        color: #9b3b00;
+      }
+      .muted {
+        color: #435865;
+      }
+      .done {
+        color: #146b43;
+        font-weight: 700;
+      }
+      .blocked {
+        color: #9b3b00;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>구현 제어 baseline · <time datetime="2026-09-19">2026-09-19</time> · 강도 <strong>High-risk</strong> · <strong class="done">검토 완료</strong></p>
+      <h1>백엔드 보안 강화 구현 제어</h1>
+      <p>
+        승인된 설계를 bounded implementation으로 옮기고, 보안 경계별 fresh evidence와 독립적인 critical review를 기록하는 문서다.
+        구현 범위 밖의 인프라·privacy 정책은 변경하지 않는다.
+      </p>
+      <dl>
+        <dt>목적</dt>
+        <dd>승인된 백엔드 보안 강화 설계의 구현 상태와 검증 증거를 추적하는 제어 문서</dd>
+        <dt>사용자</dt>
+        <dd>NEWTINE 백엔드 개발자·운영 담당자·보안 검토자</dd>
+        <dt>문제</dt>
+        <dd>CSRF·DB TLS·입력 상한 보안 변경의 구현 범위, 불변식, 회귀 검증과 잔여 위험을 추적해야 함</dd>
+        <dt>핵심 흐름</dt>
+        <dd>승인 baseline → bounded implementation → security regression → critical review → 운영 handoff</dd>
+      </dl>
+      <p>
+        승인 근거: <a href="security-hardening-design.html">security-hardening-design.html</a>의 G1-A, G2-A/G2.1-C,
+        G3-A/G3.1-A, G4-C, G5-B. 승인 전 구현은 금지되었고, 현재부터 이 worktree에서만 변경한다.
+      </p>
+    </header>
+
+    <main>
+      <section id="contract">
+        <h2>1. Execution Contract</h2>
+        <dl>
+          <dt>작업 위치</dt>
+          <dd><code>/Users/hyunseok/.codex/worktrees/security-hardening-design/newtine-backend</code></dd>
+          <dt>단일 write owner</dt>
+          <dd>현재 Codex 작업. overlapping source 변경은 병렬 작업으로 분리하지 않는다.</dd>
+          <dt>필수 불변식</dt>
+          <dd>금지 Origin은 session side effect 없이 거부하고, 같은 요구사항을 generated OpenAPI·SDK·e2e 계약에도 반영한다. 운영 DB TLS는 fail-closed이며 실제 연결 사전검증 명령으로 확인할 수 있다. 외부 URL 검증과 parameter binding은 유지한다.</dd>
+          <dt>비목표</dt>
+          <dd>Redis/gateway rate limit, AI data egress 정책, SQL builder 전면 교체, SSRF 전면 재작성, 비브라우저 인증 endpoint 추가</dd>
+          <dt>설계 변경 조건</dt>
+          <dd>쿠키·Origin·TLS mode·외부 효과·데이터 계약을 materially 바꿔야 하면 구현을 멈추고 설계 재승인을 받는다.</dd>
+        </dl>
+        <aside>현재 설계의 G2.1-C에 따라 이번 구현은 웹 인증만 다룬다. Origin 없는 login/signup을 허용하는 예외나 Bearer endpoint를 추가하지 않는다.</aside>
+      </section>
+
+      <section id="tasks">
+        <h2>2. 구현 작업과 상태</h2>
+        <table>
+          <caption>승인된 bounded work items</caption>
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">작업</th>
+              <th scope="col">완료 기준</th>
+              <th scope="col">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">I1</th>
+              <td>Cookie session을 발급하는 signup/login에 strict Origin allowlist 적용</td>
+              <td>same-origin/허용 Origin만 발급·회전하고, Origin 부재·불일치는 403 및 <code>Set-Cookie</code> 없음</td>
+              <td class="done">완료</td>
+            </tr>
+            <tr>
+              <th scope="row">I2</th>
+              <td>운영·staging PostgreSQL TLS mode와 명시적 CA 검증 강제</td>
+              <td><code>verify-full</code> 또는 동등한 검증이 누락되면 기동/연결 실패. dev/test 예외가 운영에 전파되지 않음</td>
+              <td class="done">완료</td>
+            </tr>
+            <tr>
+              <th scope="row">I3</th>
+              <td>관리자 pipeline input의 <code>failedJobIds</code> 상한과 회귀 테스트</td>
+              <td>상한 초과가 DB·provider 호출 전에 400/413으로 종료</td>
+              <td class="done">완료</td>
+            </tr>
+            <tr>
+              <th scope="row">I4</th>
+              <td>G2.1-C 웹 전용 계약 테스트</td>
+              <td>Origin 없는 login/signup이 cookie를 발급하지 않고 거부되며, Bearer endpoint가 새로 생기지 않음</td>
+              <td class="done">완료</td>
+            </tr>
+            <tr>
+              <th scope="row">I5</th>
+              <td>기존 SQLi·SSRF·authz·rate-limit 불변식 회귀 검증</td>
+              <td>parameter binding, public-IP/redirect/pinning, owner predicate, process-local quota 회귀 없음</td>
+              <td class="done">완료</td>
+            </tr>
+            <tr>
+              <th scope="row">I6</th>
+              <td>보안 경계와 생성 계약·운영 TLS 검증 경로 동기화</td>
+              <td>인증 route의 <code>Origin</code>이 OpenAPI·SDK·e2e에 나타나고, <code>db:tls:preflight</code>가 운영 설정으로 실제 PostgreSQL 연결을 검증하며, stale generated baseline은 수동 병합 없이 재생성된다.</td>
+              <td class="done">완료 · 실 DB 실행은 대상 환경에서 별도 수행</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="verification">
+        <h2>3. Verification Record</h2>
+        <table>
+          <caption>구현 후 fresh evidence를 기록할 항목</caption>
+          <thead>
+            <tr>
+              <th scope="col">검증</th>
+              <th scope="col">명령·증거</th>
+              <th scope="col">결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">focused security tests</th>
+              <td>auth Origin/session side effect, DB TLS config, pipeline input limit 관련 test</td>
+              <td class="done">통과 · 46 tests (auth/pipeline/DB config/contract)</td>
+            </tr>
+            <tr>
+              <th scope="row">typecheck/lint</th>
+              <td><code>ttsc --noEmit --incremental false --cache-dir /tmp/newtine-ttsc-cache</code>, <code>npm run lint</code></td>
+              <td class="done">통과 · sandbox의 기본 cache write 제한으로 equivalent no-emit command 사용</td>
+            </tr>
+            <tr>
+              <th scope="row">critical review</th>
+              <td>구현 완료 후 no-write review로 state/lifecycle·boundary·failure handling 재검토</td>
+              <td class="done">완료 · no-write critical review</td>
+            </tr>
+            <tr>
+              <th scope="row">operational handoff</th>
+              <td>DB CA/mode 운영 문서, <code>db:tls:preflight</code> 실행 절차와 G4 residual risk 확인</td>
+              <td class="done">기록 완료 · 현재 worktree에는 staging DB가 없어 실제 handshake 결과는 미실행</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="review">
+        <h2>4. Status</h2>
+        <p><strong class="done">검토 완료 · concrete security finding 없음.</strong> 정적 경로 검토에서 새로운 Origin 우회는 발견되지 않았고, 금지 Origin에서 다섯 use case가 호출되지 않는 것을 직접 확인했다. 추가 controller 테스트는 품질 보강 권고이지 보안 결함 수정이 아니다.</p>
+        <p class="muted">초기 critical review에서 signup/login의 새 403이 TypedException/OpenAPI에 누락된 사실을 먼저 수정했다. 후속으로 모든 cookie-auth route의 Origin 헤더를 generated 계약에 노출하고, 실제 DB TLS handshake를 수행하는 사전검증 명령을 추가했으며, stale generated baseline은 Nestia 전체 재생성으로 동기화했다.</p>
+      </section>
+
+      <section id="critical-review">
+        <h2>5. Critical review · 무쓰기 재검토</h2>
+        <dl>
+          <dt>리뷰 유형</dt>
+          <dd>자기 변경에 대한 독립 no-write critical review. 승인 설계, 실제 diff, 호출 경로, 계약, 실패·부작용 경계를 대조했다.</dd>
+          <dt>범위</dt>
+          <dd>Origin 부재·불일치와 cookie side effect, 운영 DB TLS fail-closed, <code>failedJobIds</code> 상한, SQLi·SSRF·authz·process-local rate-limit 불변식, generated contract</dd>
+          <dt>판단</dt>
+          <dd><strong class="done">runtime 보안 finding 없음.</strong> 초기 누락과 계약·생성물 관찰은 재생성·재검증했고, 직접 controller 호출에서는 금지 Origin이 다섯 use case를 호출하지 않음을 확인했다. controller 테스트 보강과 실 DB handshake는 선택된 실행 환경에서 추가할 검증 항목이며 현재 코드의 보안 결함은 아니다.</dd>
+        </dl>
+        <table>
+          <caption>리뷰 finding과 조치</caption>
+          <thead>
+            <tr>
+              <th scope="col">ID</th>
+              <th scope="col">관찰</th>
+              <th scope="col">조치·재검증</th>
+              <th scope="col">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">SH-CR-001</th>
+              <td>signup/login은 Origin 거부로 runtime 403을 반환하지만 초기 변경본의 <code>TypedException</code>과 OpenAPI에는 403이 없었다.</td>
+              <td>두 route에 <code>ApiException.Forbidden</code>을 추가하고 contracts를 재생성했다. contract test가 signup/login의 403과 pipeline <code>maxItems=100</code>을 확인한다.</td>
+              <td class="done">fixed</td>
+            </tr>
+            <tr>
+              <th scope="row">SH-CR-002</th>
+              <td>runtime은 인증 route에서 Origin을 요구하지만 초기 generated OpenAPI의 해당 route <code>parameters</code>가 비어 있었다.</td>
+              <td>5개 cookie-auth POST에 optional typed <code>origin</code> header를 연결하고, 설명에 누락 시 route guard가 403을 반환함을 명시했다. SDK·e2e·OpenAPI를 함께 재생성하고 contract test로 고정했다.</td>
+              <td class="done">fixed</td>
+            </tr>
+            <tr>
+              <th scope="row">SH-CR-003</th>
+              <td>실제 staging PostgreSQL TLS handshake를 이 worktree에서 수행할 대상이 없고, 기존 검증은 options/config와 opt-in DB test에 한정됐다.</td>
+              <td><code>db:tls:preflight</code>가 staging/production 설정과 <code>verify-full</code>을 확인한 뒤 실제 MikroORM PostgreSQL 연결 및 <code>select 1</code>을 실행하도록 추가했다. 대상 DB가 생기면 배포 전 명령으로 실행한다.</td>
+              <td class="state">non-blocking risk · target DB 실행 pending</td>
+            </tr>
+            <tr>
+              <th scope="row">SH-CR-004</th>
+              <td>현재 source와 HEAD의 generated baseline이 이미 어긋나 metadata 추가·stale onboarding 제거가 보안 diff에 섞였다.</td>
+              <td>generated SDK·e2e·OpenAPI를 수동 병합하지 않고 <code>contracts:all</code>로 동일 source에서 재생성했다. required artifact와 stale route 부재를 contract test로 확인하며, 커밋 시 baseline sync와 보안 변경을 별도 변경 단위로 분리할 수 있도록 기록한다.</td>
+              <td class="state">non-blocking risk · worktree fixed, commit split pending</td>
+            </tr>
+            <tr>
+              <th scope="row">SH-CR-005</th>
+              <td>승인 기준은 same-origin·허용 cross-origin·금지 cross-origin·Origin 부재 요청을 controller/integration 경로에서 확인하도록 요구하지만, 현재 HTTP 증거는 missing-origin signup/refresh/logout 일부에 그친다. login·withdraw와 금지 Origin의 세션 발급·회전·폐기 불변은 직접 검증되지 않았고 full smoke도 완료되지 않았다.</td>
+              <td>정적 호출 순서는 유스케이스·cookie effect 전에 Origin을 검사하는 것으로 확인했지만, 인수 전 다섯 인증 route에 대해 허용 Origin 성공, 누락·금지 Origin 403, <code>Set-Cookie</code> 부재, 세션 상태 불변을 HTTP 테스트로 남겨야 한다.</td>
+              <td class="state">non-blocking test coverage improvement · runtime bypass not found</td>
+            </tr>
+            <tr>
+              <th scope="row">SH-CR-006</th>
+              <td>runtime image는 devDependencies와 해당 script를 복사하지 않지만, README는 이 명령을 배포 pipeline 또는 운영 DB 접근이 가능한 일회성 작업에서 실행하도록 안내한다.</td>
+              <td>현재는 image 내부 실행을 요구하는 계약이 아니므로 보안 finding은 아니다. image-only 배포를 선택하면 build workspace/CI 실행 단계를 명시하거나 preflight 전용 image stage를 추가한다. 현재 소스 worktree에서의 config fail-closed 음성 검증과 실제 DB handshake 미실행은 별도 항목이다.</td>
+              <td class="done">finding 아님 · 실행 대상은 pipeline/one-off로 문서화</td>
+            </tr>
+          </tbody>
+        </table>
+        <figure>
+          <figcaption>실행 경로와 차단 지점</figcaption>
+          <pre><code>signup/login/refresh/logout
+  → explicit Origin 존재·형식·allowlist/host 비교
+  → 실패 시 ForbiddenException, use case·writeSession·cookie 변경 없음
+  → 성공 시 기존 use case와 cookie 흐름 유지
+
+production/staging DB
+  → 필수 DB 값 + DB_SSL_MODE=verify-full + readable DB_SSL_CA_PATH
+  → ssl.ca + rejectUnauthorized=true로 실제 PostgreSQL 연결
+  → db:tls:preflight가 select 1까지 확인
+  → 누락/disable/invalid mode는 bootstrap 전에 fail-closed
+
+pipeline retry
+  → generated request maxItems=100
+  → application service guard
+  → repository guard
+  → 기존 owner/state/SQL parameterization 불변식 유지</code></pre>
+          <p class="muted">텍스트 등가: 입력이 각 보안 경계를 통과한 뒤에만 use case, DB 연결, retry mutation 또는 cookie side effect가 실행된다.</p>
+        </figure>
+        <aside>
+          <strong>잔여 위험과 검증 공백.</strong> full <code>test:smoke</code>와 실제 DB handshake는 환경 제약으로 실행하지 못했지만, 이는 현재 코드에서 확인된 보안 finding이 아니다. G4-C에 따라 rate limit은 process-local이며 수평 확장 시 전역 quota가 아니다. controller 테스트 보강은 비차단 품질 개선 항목이다. 외부 권한으로 실행한 rate-limit smoke는 통과했다.
+        </aside>
+        <details>
+          <summary>fresh verification evidence</summary>
+          <ul>
+            <li><code>npm run format:check</code>, <code>npm run lint</code>, <code>git diff --check</code> 통과</li>
+            <li><code>ttsc --noEmit --incremental false --cache-dir /tmp/newtine-ttsc-review-cache</code> 통과</li>
+            <li><code>npm run test:unit</code>: 47 suites / 236 tests 통과; auth controller의 same-origin·allowlisted cross-origin 허용 및 missing/disallowed Origin 차단·무 side effect 경로를 포함</li>
+            <li><code>npm run test:integration</code>: 2 suites / 13 tests 통과, disposable DB가 필요한 8 tests는 기존 opt-in 조건으로 skip</li>
+            <li><code>npm run test:contracts</code>: 6 tests 통과; generated OpenAPI 403·maxItems 계약 확인</li>
+            <li><code>npm run contracts:all</code>: SDK·e2e·OpenAPI 전체 재생성; auth Origin header와 metadata artifact 동기화</li>
+            <li><code>npm run db:tls:preflight</code>: 미실행 · staging DB endpoint/CA 미제공</li>
+            <li><code>npm run build</code>: API·batch build 통과</li>
+            <li><code>npm run test:smoke:rate-limit</code>: 외부 실행 권한에서 통과</li>
+            <li>재검토: concrete security finding 없음; SH-CR-005는 non-blocking test coverage improvement, SH-CR-006은 finding 아님</li>
+          </ul>
+        </details>
+      </section>
+    </main>
+  </body>
+</html>
