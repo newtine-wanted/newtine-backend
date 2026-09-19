@@ -51,7 +51,7 @@ export class DiscoveryRepository implements DiscoveryStore {
       return { ...rows[0]!, day, completed: false };
     });
   }
-  async catalog(since: string): Promise<SearchQuery[]> {
+  async catalog(since: string, entityTypes = this.entityTypes): Promise<SearchQuery[]> {
     const categories = await executePostgresSql<{ code: string; name: string }[]>(
       this.em,
       'select code, display_name as name from issue_categories order by display_order, code',
@@ -63,7 +63,7 @@ export class DiscoveryRepository implements DiscoveryStore {
     const entities = await executePostgresSql<{ id: string; name: string; type: string }[]>(
       this.em,
       'select id, name, type from entities where is_active = true and type = any($1::text[]) order by type, name, id',
-      [this.entityTypes],
+      [entityTypes],
     );
     return [
       ...categories.flatMap((c) =>
@@ -79,13 +79,18 @@ export class DiscoveryRepository implements DiscoveryStore {
         issue_id: string;
         title: string;
         keywords: string[];
+        related_names: string[];
         last_checked_at: Date;
         expires_at: Date;
         known_titles: string[];
       }[]
     >(
       this.em,
-      `select t.*, i.title from news_follow_up_tracks t join issues i on i.id = t.issue_id
+      `select t.*, i.title,
+        coalesce((select jsonb_agg(e.name order by e.name) from issue_entities ie
+          join entities e on e.id = ie.entity_id where ie.issue_id = t.issue_id and e.is_active
+          and e.type in ('POLITICIAN', 'INSTITUTION', 'PARTY')), '[]'::jsonb) as related_names
+        from news_follow_up_tracks t join issues i on i.id = t.issue_id
         where t.enabled and t.expires_at > $1 and t.last_checked_at < $1 and i.publication_status = 'PUBLISHED'
         order by t.issue_id`,
       [at],
@@ -93,7 +98,7 @@ export class DiscoveryRepository implements DiscoveryStore {
     return rows.map((r) => ({
       issueId: r.issue_id,
       title: r.title,
-      keywords: r.keywords,
+      keywords: [...new Set([...r.keywords, ...r.related_names])],
       lastCheckedAt: new Date(r.last_checked_at).toISOString(),
       expiresAt: new Date(r.expires_at).toISOString(),
       knownTitles: r.known_titles,

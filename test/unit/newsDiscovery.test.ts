@@ -283,3 +283,74 @@ test('OpenAI request uses fixed model and only the title array as extraction inp
   );
   await assert.rejects(incomplete.extract(['제목'], 5), /INCOMPLETE/);
 });
+
+test('failed semantic validation records usage and preserves original query checkpoints', async () => {
+  const store = new Store();
+  const usage = [
+    { stage: 'deduplicate', model: 'gpt-5.4-mini-2026-03-17', inputTokens: 10, outputTokens: 2 },
+  ];
+  const client = model({
+    usage,
+    groups: async () => {
+      throw new Error('OPENAI_HTTP_429');
+    },
+  });
+  const service = new DiscoveryService(store, { search: async (q) => [article(q)] }, client);
+  await assert.rejects(service.execute(config, at), /OPENAI_HTTP_429/);
+  assert.equal(store.saved!.snapshot.results.length, 2);
+  assert.ok(store.saved!.snapshot.usage.some((u) => u.inputTokens === 10));
+  assert.equal(store.saved!.completed, false);
+});
+
+test('semantic groups must cover every candidate once, and invalid output cannot complete', async () => {
+  const store = new Store();
+  await assert.rejects(
+    new DiscoveryService(
+      store,
+      { search: async (q) => [article(q)] },
+      model({ groups: async () => [[0]] }),
+    ).execute(config, at),
+    /INCOMPLETE_DUPLICATE_GROUPS/,
+  );
+  assert.equal(store.saved!.completed, false);
+  assert.equal(store.saved!.snapshot.results.length, 2);
+});
+
+test('exact duplicates are merged before semantic comparison while retaining all sources', async () => {
+  const store = new Store();
+  const run = await new DiscoveryService(
+    store,
+    { search: async (q) => [article('동일 기사', `https://example.com/${encodeURIComponent(q)}`)] },
+    model({
+      groups: async () => {
+        throw new Error('UNNECESSARY_LLM_CALL');
+      },
+    }),
+  ).execute(config, at);
+  assert.equal(run.snapshot.candidates!.length, 1);
+  assert.equal(run.snapshot.candidates![0]!.articles.length, 1);
+  assert.deepEqual(run.snapshot.candidates![0]!.queries, ['정치', '국회']);
+});
+
+test('abort after search does not call the LLM or advance the checkpoint', async () => {
+  const store = new Store();
+  const controller = new AbortController();
+  await assert.rejects(
+    new DiscoveryService(
+      store,
+      {
+        search: async () => {
+          controller.abort();
+          return [article('뉴스')];
+        },
+      },
+      model({
+        extract: async () => {
+          throw new Error('MUST_NOT_CALL');
+        },
+      }),
+    ).execute(config, at, controller.signal),
+  );
+  assert.equal(store.saved!.snapshot.results.length, 0);
+  assert.equal(store.failed, true);
+});

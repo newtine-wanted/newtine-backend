@@ -53,6 +53,7 @@ async function main() {
         store,
         new NaverNewsProvider(),
         new DiscoveryOpenAiModel(process.env.OPENAI_API_KEY ?? ''),
+        (event) => console.log(JSON.stringify({ event: 'news.discovery.progress', ...event })),
       );
       const run = await service.execute(config, new Date(), controller.signal);
       await mkdir(directory, { recursive: true });

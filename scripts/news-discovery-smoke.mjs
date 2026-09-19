@@ -45,7 +45,26 @@ try {
       ],
     );
   }
+  const entityIds = [generateUuidV7(), generateUuidV7(), generateUuidV7(), generateUuidV7()];
+  for (const [index, type] of ['POLITICIAN', 'INSTITUTION', 'PARTY', 'POLITICIAN'].entries()) {
+    await sql(em, 'insert into entities(id, name, type, is_active) values ($1, $2, $3, $4)', [
+      entityIds[index],
+      `검증주체 ${index}`,
+      type,
+      index < 3,
+    ]);
+  }
+  await sql(
+    em,
+    'insert into issue_entities(issue_entities_id, issue_id, entity_id) values ($1, $2, $3)',
+    [generateUuidV7(), issueId, entityIds[0]],
+  );
   const catalog = await store.catalog(before);
+  for (const id of entityIds.slice(0, 3))
+    assert.ok(catalog.some((q) => q.origins.some((o) => o.endsWith(id))));
+  assert.ok(!catalog.some((q) => q.origins.some((o) => o.endsWith(entityIds[3]))));
+  assert.ok((await store.tracks(at.toISOString()))[0].keywords.includes('검증주체 0'));
+
   assert.ok(catalog.some((q) => q.origins.includes('TOPIC:politics')));
   assert.equal(catalog.filter((q) => q.origins.some((o) => o.startsWith('REGION:'))).length, 17);
   assert.ok(catalog.every((q) => !q.origins.some((o) => o.startsWith('AGE'))));
@@ -84,7 +103,8 @@ try {
   await assert.rejects(service.execute(config, at), /SMOKE_FAILURE/);
   const failed = await sql(
     em,
-    "select * from news_discovery_runs where error_code = 'SMOKE_FAILURE'",
+    "select * from news_discovery_runs where error_code = 'SMOKE_FAILURE' and snapshot->>'at' = $1",
+    [at.toISOString()],
   );
   const runId = failed.at(-1).id;
   assert.equal(failed.at(-1).snapshot.results.length, 1);
@@ -118,7 +138,13 @@ try {
     at.toISOString(),
   );
   const nextAt = new Date(at.getTime() + 86400_000);
-  const claim = await store.claim(nextAt, config);
+  const contenders = await Promise.allSettled([
+    store.claim(nextAt, config),
+    new DiscoveryRepository(orm.em.fork(), config.entityTypes).claim(nextAt, config),
+  ]);
+  assert.equal(contenders.filter((r) => r.status === 'fulfilled').length, 1);
+  assert.equal(contenders.filter((r) => r.status === 'rejected').length, 1);
+  const claim = contenders.find((r) => r.status === 'fulfilled').value;
   await assert.rejects(store.claim(nextAt, config), /ALREADY_RUNNING/);
   await assert.rejects(
     store.claim(new Date(nextAt.getTime() + 86400_000), config),
@@ -133,7 +159,41 @@ try {
   assert.notEqual(reclaimed.owner, claim.owner);
   await assert.rejects(store.save(claim), /LEASE_LOST/);
   await assert.rejects(store.complete(claim), /LEASE_LOST/);
+  // Force a tracking write failure after the completion update; both must roll back.
+  reclaimed.snapshot.tracks = [
+    {
+      issueId,
+      title: '검증',
+      keywords: [],
+      lastCheckedAt: at.toISOString(),
+      expiresAt: expiry,
+      knownTitles: [],
+    },
+  ];
+  reclaimed.snapshot.at = before;
+  await sql(
+    em,
+    `create function discovery_smoke_reject_tracking() returns trigger language plpgsql as
+    'begin raise exception ''SMOKE_ROLLBACK''; end';
+    create trigger discovery_smoke_reject_tracking before update on news_follow_up_tracks
+    for each row execute function discovery_smoke_reject_tracking()`,
+  );
+  try {
+    await assert.rejects(store.complete(reclaimed), /SMOKE_ROLLBACK/);
+    assert.equal(
+      (await sql(em, 'select status from news_discovery_runs where id=$1', [reclaimed.id]))[0]
+        .status,
+      'RUNNING',
+    );
+  } finally {
+    await sql(
+      em,
+      'drop trigger discovery_smoke_reject_tracking on news_follow_up_tracks; drop function discovery_smoke_reject_tracking()',
+    );
+  }
   await store.fail(reclaimed, 'SMOKE_DONE');
+  // Keep evidence and fixture IDs for audit; prevent fixture actors from entering future live searches.
+  await sql(em, 'update entities set is_active = false where id = any($1::uuid[])', [entityIds]);
   console.log(
     JSON.stringify(
       {
@@ -142,6 +202,8 @@ try {
         checks: [
           'base migrations',
           'catalog/no generations',
+          'active actor types',
+          'linked actor query',
           'expiry/disabled tracking',
           'persisted checkpoint',
           'failure watermark',
@@ -150,6 +212,7 @@ try {
           'same-day idempotency',
           'no issue publication',
           'atomic tracking update',
+          'transaction rollback',
           'concurrent claims',
           'stale lease fencing',
         ],

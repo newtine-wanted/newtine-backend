@@ -20,6 +20,11 @@ export class DiscoveryService {
     private readonly store: DiscoveryStore,
     private readonly search: { search(query: string, limit: number): Promise<DiscoveredArticle[]> },
     private readonly model: DiscoveryModel,
+    private readonly progress?: (event: {
+      runId: string;
+      completedQueries: number;
+      totalQueries: number;
+    }) => void,
   ) {}
   async execute(
     config: DiscoveryConfig,
@@ -55,7 +60,7 @@ export class DiscoveryService {
       if (!snapshot.queries) {
         snapshot.tracks = await this.store.tracks(snapshot.at);
         snapshot.queries = mergeQueries([
-          ...(await this.store.catalog(since)),
+          ...(await this.store.catalog(since, limits.entityTypes)),
           ...snapshot.tracks.flatMap((t) =>
             [...new Set([t.title, ...t.keywords])].map((text) => ({
               text,
@@ -78,6 +83,7 @@ export class DiscoveryService {
           snapshot.at,
           limits.articlesPerQuery,
         );
+        check();
         const extracted = articles.length
           ? await this.model.extract(
               articles.map((a) => a.title),
@@ -89,7 +95,11 @@ export class DiscoveryService {
         let candidates: Candidate[] = extracted.map((c) => {
           if (typeof c?.title !== 'string' || !c.title.trim() || c.title.length > 200)
             throw new Error('INVALID_CANDIDATE_TITLE');
-          const indices = checkedIndexes(c.titleIndexes, articles.length);
+          // Repeated evidence references are harmless; preserve each article only once.
+          const indices = checkedIndexes(
+            Array.isArray(c.titleIndexes) ? [...new Set(c.titleIndexes)] : c.titleIndexes,
+            articles.length,
+          );
           const id = generateUuidV7();
           return {
             id,
@@ -117,6 +127,11 @@ export class DiscoveryService {
         snapshot.results.push({ query, articles, candidates });
         snapshot.usage.push(...(this.model.usage?.splice(0) ?? []));
         await this.store.save(run);
+        this.progress?.({
+          runId: run.id,
+          completedQueries: snapshot.results.length,
+          totalQueries: snapshot.queries.length,
+        });
       }
       check();
       // Exact matching first; semantic comparison still sees every distinct candidate.
@@ -140,9 +155,19 @@ export class DiscoveryService {
     } catch (error) {
       // Never store upstream response bodies or credentials in failure messages.
       const message =
-        error instanceof Error && /^[A-Z_]+$/.test(error.message)
+        error instanceof Error && /^[A-Z][A-Z0-9_]{0,99}$/.test(error.message)
           ? error.message
           : 'DISCOVERY_EXTERNAL_ERROR';
+      const usage = this.model.usage?.splice(0) ?? [];
+      if (usage.length) {
+        run.snapshot.usage.push(...usage);
+        // A fenced/failed DB write must not mask the original error.
+        try {
+          await this.store.save(run);
+        } catch {
+          /* fail() remains owner-fenced */
+        }
+      }
       await this.store.fail(run, message);
       throw error;
     } finally {

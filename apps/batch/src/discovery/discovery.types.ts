@@ -53,7 +53,7 @@ export interface DiscoveryRun {
 }
 export interface DiscoveryStore {
   claim(at: Date, config: DiscoveryConfig): Promise<DiscoveryRun>;
-  catalog(since: string): Promise<SearchQuery[]>;
+  catalog(since: string, entityTypes?: string[]): Promise<SearchQuery[]>;
   tracks(at: string): Promise<TrackingIssue[]>;
   save(run: DiscoveryRun): Promise<void>;
   heartbeat(run: DiscoveryRun): Promise<void>;
