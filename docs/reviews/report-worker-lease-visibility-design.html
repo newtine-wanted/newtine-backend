@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="비동기 리포트 워커의 후보 가시성 재검증과 lease fencing 개선" />
+    <meta name="audience" content="batch/core 리포트 개발자와 배포 운영자" />
+    <meta name="problem" content="두 번째 visibility 결과가 폐기되고 만료된 워커가 lifecycle 상태를 변경할 수 있음" />
+    <meta name="core-flow" content="claim → 후보 캡처·필터 → provider 처리 → 최종 필터 → heartbeat·complete·fail 저장" />
+    <title>비동기 리포트 워커 가시성·lease fencing 개선 설계</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2937; background: #f8fafc; }
+      body { max-width: 1120px; margin: 0 auto; padding: 32px 20px 64px; line-height: 1.65; }
+      header, section, aside { background: white; border: 1px solid #dbe3ec; border-radius: 12px; padding: 20px; margin: 18px 0; }
+      header { border-top: 5px solid #2563eb; }
+      nav { display: flex; flex-wrap: wrap; gap: 12px 18px; margin: 18px 0; }
+      nav a { color: #1d4ed8; }
+      h1, h2, h3 { line-height: 1.25; color: #0f172a; }
+      h1 { margin-top: 0; }
+      table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+      th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: left; vertical-align: top; }
+      th { background: #eff6ff; }
+      code, pre, samp { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      pre { overflow: auto; padding: 14px; background: #0f172a; color: #e2e8f0; border-radius: 8px; }
+      .status { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #fef3c7; color: #92400e; font-weight: 700; }
+      .risk { border-left: 4px solid #dc2626; background: #fef2f2; }
+      .note { border-left: 4px solid #2563eb; background: #eff6ff; }
+      figure { margin: 16px 0; }
+      figcaption { font-weight: 700; margin-bottom: 8px; }
+      .control-slide { display: none; border: 1px solid #cbd5e1; border-radius: 10px; padding: 16px; }
+      .control-slide.active { display: block; }
+      fieldset { border: 0; padding: 0; margin: 0; }
+      legend { font-weight: 700; margin-bottom: 10px; }
+      label { display: block; padding: 7px 0; }
+      .controls { display: flex; gap: 8px; margin-top: 14px; }
+      button { border: 1px solid #64748b; border-radius: 7px; padding: 7px 12px; background: #fff; cursor: pointer; }
+      button[type="submit"] { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+      .result { display: none; margin-top: 14px; padding: 12px; border-radius: 8px; background: #f0fdf4; }
+      .result.visible { display: block; }
+      .result [data-role="status"] { font-weight: 700; }
+      .progress { color: #475569; margin: 8px 0; }
+      .muted { color: #64748b; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>비동기 리포트 워커 가시성·lease fencing 개선 설계</h1>
+      <p><strong>문서 상태:</strong> <span class="status">설계 승인됨</span> · <strong>강도:</strong> High-risk (동시성·상태 경계)</p>
+      <p><strong>작성 범위:</strong> <code>newtine-backend</code> · 작성일 <time datetime="2026-09-19">2026-09-19</time></p>
+      <p><strong>승인 기록:</strong> 사용자 승인 · <time datetime="2026-09-20">2026-09-20</time> · 승인 범위 변경 없음</p>
+      <p><strong>구현 통제 문서:</strong> <code>docs/reviews/report-worker-lease-visibility-implementation.html</code></p>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#scope">목표·범위</a>
+      <a href="#evidence">확인된 근거</a>
+      <a href="#model">변경 모델</a>
+      <a href="#decisions">결정·불변식</a>
+      <a href="#verification">검증 계획</a>
+      <a href="#control">설계 이해 점검</a>
+      <a href="#approval">구현 승인</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="scope">
+          <h2>목표와 경계</h2>
+          <dl>
+            <dt><strong>목표</strong></dt>
+            <dd>최종 저장 직전의 현재 후보 상태를 실제 report content에 반영하고, lease가 만료된 워커가 후보·heartbeat·성공·실패 상태를 변경하지 못하게 한다.</dd>
+            <dt><strong>성공 신호</strong></dt>
+            <dd>두 번째 visibility 조회에서 제외된 추천 후보가 최종 content에 나타나지 않는다. 만료된 claim의 claim-bound write는 모두 실패하며, 다음 워커가 정상적으로 claim·재시도할 수 있다.</dd>
+            <dt><strong>비목표</strong></dt>
+            <dd>스키마·마이그레이션·HTTP API·lease 기간·재시도 정책·provider 프롬프트·운영 배포 설정은 변경하지 않는다.</dd>
+          </dl>
+        </section>
+
+        <section id="evidence">
+          <h2>확인된 근거</h2>
+          <table>
+            <caption>현재 코드에서 확인된 결함과 영향</caption>
+            <thead><tr><th scope="col">영역</th><th scope="col">근거</th><th scope="col">영향</th></tr></thead>
+            <tbody>
+              <tr>
+                <th scope="row">visibility</th>
+                <td><code>apps/batch/src/report/report.worker.ts:152-166</code>에서 첫 번째 결과는 재할당하지만, 두 번째 <code>filterVisibleCandidates</code> 반환값은 버린다.</td>
+                <td><code>buildReportContent</code>가 첫 번째 스냅샷의 추천 후보를 사용해 숨김·활동 후보를 저장할 수 있다.</td>
+              </tr>
+              <tr>
+                <th scope="row">lease lifecycle</th>
+                <td><code>libs/core/src/report/mikroOrmReport.repository.ts:419-434</code>, <code>:709-814</code>의 heartbeat·complete·fail 조건에 <code>lease_expires_at</code> 비교가 없다.</td>
+                <td>id·attempt·token이 동일한 오래된 워커가 lease 만료 뒤에도 새 워커의 상태와 경쟁할 수 있다.</td>
+              </tr>
+              <tr>
+                <th scope="row">같은 경계의 추가 write</th>
+                <td><code>captureCandidates</code>도 claim triple로 후보 JSON을 저장하지만 만료 조건은 없다. 반면 usage 시작은 <code>lease_expires_at &gt; clock_timestamp()</code>를 이미 검사한다.</td>
+                <td>동일한 fencing invariant를 lifecycle 일부에만 적용하면 claim-bound write 경계가 불균일해진다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="model">
+          <h2>변경 모델</h2>
+          <figure>
+            <figcaption>claim의 유효성은 모든 worker-owned write의 공통 전제다.</figcaption>
+            <pre aria-label="상태 흐름의 텍스트 표현">RUNNING claim
+  ├─ id + attempt + lease_token 일치
+  ├─ lease_expires_at > operation now
+  │    ├─ captureCandidates: 후보 저장 허용
+  │    ├─ heartbeat: lease 연장 허용
+  │    ├─ complete: SUCCEEDED 저장 허용
+  │    └─ fail: QUEUED 또는 FAILED 전환 허용
+  └─ 하나라도 불일치/만료
+       └─ write 거부 → 오래된 워커는 결과를 버림 → 다음 claim이 회수·재시도</pre>
+            <p class="muted">텍스트 동등 표현: 후보 캡처부터 최종 상태 전환까지 모든 claim-bound write가 동일한 id·attempt·token·만료 조건을 통과해야 한다.</p>
+          </figure>
+          <ol>
+            <li>초기 후보 필터 결과는 기존처럼 provider 입력으로 사용한다.</li>
+            <li>provider 처리 후 두 번째 필터의 반환값을 <code>candidates</code>에 다시 대입한다.</li>
+            <li><code>buildReportContent</code>는 재할당된 후보만 사용한다. 이때 <code>relatedUnavailable</code>도 최신 필터 결과에 맞게 유지된다.</li>
+            <li>repository의 claim-bound SQL은 만료 조건까지 확인한다. 만료 claim은 <code>complete</code>/<code>fail</code>에서 false를 반환하고, worker는 기존 stale 로그 경로를 사용한다.</li>
+          </ol>
+        </section>
+
+        <section id="decisions">
+          <h2>설계 결정과 불변식</h2>
+          <table>
+            <caption>구현 기준선</caption>
+            <thead><tr><th scope="col">ID</th><th scope="col">결정</th><th scope="col">근거와 trade-off</th></tr></thead>
+            <tbody>
+              <tr>
+                <th scope="row">D1</th>
+                <td>두 번째 <code>filterVisibleCandidates</code> 결과를 <code>candidates</code>에 재할당한다.</td>
+                <td>이미 존재하는 필터·상태 필드를 재사용하는 최소 수정이다. visibility 조회를 추가하지 않으며 provider 계약도 바꾸지 않는다.</td>
+              </tr>
+              <tr>
+                <th scope="row">D2</th>
+                <td>lease 만료 guard를 heartbeat·complete·fail뿐 아니라 <code>captureCandidates</code>에도 적용한다.</td>
+                <td>후보 JSON 저장도 claim-owned write이므로 같은 fencing invariant를 적용한다. 범위는 동일 repository 경계 안에 한정된다.</td>
+              </tr>
+              <tr>
+                <th scope="row">D3</th>
+                <td>이번 변경의 만료 비교는 각 repository 메서드가 받은 <code>now</code>를 사용한다. claim/reaper의 기존 시간 계약은 유지한다.</td>
+                <td>현재 claim·retry·테스트가 동일한 <code>now</code> 계약을 사용하므로 동작 변화가 작고 결정론적 테스트가 가능하다. 여러 호스트의 시계가 크게 어긋나는 문제는 별도 DB-clock 통합 hardening으로 미룬다.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <aside class="risk" aria-label="핵심 위험">
+            <strong>핵심 위험:</strong> 만료 비교를 일부 SQL에만 넣으면 오래된 워커가 다른 경로로 상태를 바꿀 수 있다. 따라서 <code>captureCandidates</code>의 select/update, <code>complete</code>의 선행 select/final update, heartbeat/fail update 모두에 같은 조건을 둔다.
+          </aside>
+
+          <h3>불변식</h3>
+          <ul>
+            <li>현재 claim의 <code>id + attempt + leaseToken</code>이 맞고 <code>lease_expires_at &gt; now</code>일 때만 claim-bound write가 성공한다.</li>
+            <li>두 번째 visibility 결과에서 제외된 optional recommendation은 같은 실행의 최종 content에 들어가지 않는다.</li>
+            <li>source issue의 공개 상태에 대한 기존 <code>complete</code> 검사는 유지한다. optional recommendation의 이후 변화는 기존 read-time filtering 정책을 유지한다.</li>
+            <li>만료 write 거부는 정상 stale 경로로 처리하며, 오래된 워커가 새 워커의 성공·재시도 상태를 덮어쓰지 않는다.</li>
+          </ul>
+        </section>
+
+        <section id="failure">
+          <h2>실패·복구와 운영 영향</h2>
+          <table>
+            <caption>경계별 기대 동작</caption>
+            <thead><tr><th scope="col">상황</th><th scope="col">기대 동작</th><th scope="col">운영 증거</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">두 번째 visibility에서 후보 제외</th><td>후보 배열과 <code>relatedUnavailable</code>가 갱신되고, 저장 content에는 제외된 후보가 없다.</td><td>worker unit test의 최종 content assertion.</td></tr>
+              <tr><th scope="row">만료 claim이 heartbeat 호출</th><td>update row count 0 → <code>false</code> → 다음 heartbeat/작업이 stale 처리된다.</td><td>repository integration test와 기존 stale 로그.</td></tr>
+              <tr><th scope="row">만료 claim이 complete/fail 호출</th><td>상태·content를 바꾸지 않고 <code>false</code> 반환. 다음 <code>claim</code>이 만료 row를 회수한다.</td><td>상태·token·content 불변 assertion, 재claim assertion.</td></tr>
+              <tr><th scope="row">새 worker가 먼저 claim</th><td>attempt/token이 바뀌므로 이전 worker의 모든 write가 거부된다.</td><td>기존 stale completion 회귀 테스트 + heartbeat/fail 보강 테스트.</td></tr>
+            </tbody>
+          </table>
+          <p class="note">배포 설정, migration, DB schema 변경은 없다. 배포 시 새 batch 코드와 core 코드가 함께 배포되어야 하며, 롤링 중 구버전 워커가 잠시 남아도 token·expiry 조건으로 새 결과를 덮지 못하는 것이 목표다.</p>
+        </section>
+
+        <section id="verification">
+          <h2>검증 계획</h2>
+          <ol>
+            <li><strong>단위:</strong> visibility mock이 첫 번째 조회에서는 후보를 보이고 두 번째 조회에서는 숨기도록 만들어, 완료 content에서 해당 후보가 사라지는지 확인한다.</li>
+            <li><strong>DB lifecycle:</strong> 만료 claim 각각에 대해 <code>heartbeat</code>·<code>complete</code>·<code>fail</code>이 false/무변경인지 확인하고, <code>claim</code> 후 새 attempt가 처리되는지 확인한다.</li>
+            <li><strong>후보 저장:</strong> 만료 claim의 <code>captureCandidates</code>가 <code>STALE_CLAIM</code>으로 거부되고 candidates JSON이 변하지 않는지 확인한다.</li>
+            <li><strong>회귀:</strong> source issue 공개 상태 검사, 정상 heartbeat 연장, 정상 complete/fail, 기존 token fencing을 유지하는지 확인한다.</li>
+          </ol>
+          <p><strong>집중 명령:</strong> <code>npm run test:jest -- test/unit/reportWorker.test.ts</code> · <code>REPORT_TEST_DATABASE_URL=... npm run test:jest -- test/integration/reportLifecycle.test.ts</code> · <code>npm run typecheck</code> · <code>npm run lint</code></p>
+          <p class="muted">DB integration은 <code>REPORT_TEST_DATABASE_URL</code>가 없으면 실행되지 않으므로, 그 경우 미검증 범위를 결과에 명시한다.</p>
+        </section>
+
+        <section id="grilling-state">
+          <h2>설계 의사결정 상태</h2>
+          <dl>
+            <dt><strong>진행 상태</strong></dt><dd>완료</dd>
+            <dt><strong>범위</strong></dt><dd>report worker 후보 visibility와 repository claim-bound write fencing</dd>
+            <dt><strong>결정 트리</strong></dt><dd>후보 결과 반영 → claim-owned write 식별 → 만료 조건 일관 적용 → 단위·DB lifecycle 검증</dd>
+            <dt><strong>현재 frontier</strong></dt><dd>없음. 기존 메서드 계약과 코드 경계로 최소 경로를 확정했다.</dd>
+            <dt><strong>해결된 결정</strong></dt><dd>D1 재할당, D2 captureCandidates 포함, D3 기존 메서드 <code>now</code> 계약 유지</dd>
+            <dt><strong>보류 범위</strong></dt><dd>다중 호스트 시계 오차를 제거하기 위한 전면적인 <code>clock_timestamp()</code> 기반 lease 시간 통합. 필요 조건은 실제 배포 호스트 시간 불일치 관측이다.</dd>
+            <dt><strong>가정</strong></dt><dd>배포 호스트의 시계는 현재 claim/reaper 계약이 요구하는 수준으로 동기화되어 있다.</dd>
+          </dl>
+        </section>
+
+        <section id="control">
+          <h2>설계 이해·통제 점검 (design-control)</h2>
+          <p><strong>design-control-state:</strong> 미실시 · <strong>approval-state:</strong> 설계 승인됨</p>
+          <p>아래 점검은 설계를 선택하는 질문이 아니라, 구현 전에 경계와 실패 동작을 예측하는 비차단 self-check다. 결과는 이 HTML 안에만 남으며 Codex로 자동 전달되지 않는다.</p>
+          <div id="control-deck" aria-live="polite">
+            <p class="progress" id="control-progress">1 / 5 · 답변 0개</p>
+            <div class="control-slide active" data-answer="b">
+              <fieldset>
+                <legend>DC-01 · 두 번째 visibility 조회에서 추천 후보가 제외되면 최종 content는 어떻게 되는가?</legend>
+                <label><input type="radio" name="dc-01" value="a" /> 첫 번째 후보 스냅샷이 그대로 저장된다.</label>
+                <label><input type="radio" name="dc-01" value="b" /> 재할당된 후보만 content에 반영되고 unavailable 상태도 갱신된다.</label>
+                <label><input type="radio" name="dc-01" value="c" /> source issue가 아니므로 전체 report가 실패한다.</label>
+              </fieldset>
+              <div class="result"><div data-role="status"></div><div data-role="explanation"></div><div data-role="next"></div></div>
+            </div>
+            <div class="control-slide" data-answer="c">
+              <fieldset>
+                <legend>DC-02 · 만료된 claim이 complete를 호출하면 어떤 결과가 맞는가?</legend>
+                <label><input type="radio" name="dc-02" value="a" /> token이 같으면 SUCCEEDED로 저장된다.</label>
+                <label><input type="radio" name="dc-02" value="b" /> 무조건 예외를 던져 retry row를 만든다.</label>
+                <label><input type="radio" name="dc-02" value="c" /> 만료 조건에서 update가 거부되고 false가 반환되며 기존 상태는 바뀌지 않는다.</label>
+              </fieldset>
+              <div class="result"><div data-role="status"></div><div data-role="explanation"></div><div data-role="next"></div></div>
+            </div>
+            <div class="control-slide" data-answer="a">
+              <fieldset>
+                <legend>DC-03 · 왜 captureCandidates에도 만료 guard를 넣는가?</legend>
+                <label><input type="radio" name="dc-03" value="a" /> candidates JSON도 claim-owned write이므로 같은 fencing invariant가 필요하다.</label>
+                <label><input type="radio" name="dc-03" value="b" /> provider 호출 비용을 줄이기 위해서다.</label>
+                <label><input type="radio" name="dc-03" value="c" /> DB migration을 대체하기 위해서다.</label>
+              </fieldset>
+              <div class="result"><div data-role="status"></div><div data-role="explanation"></div><div data-role="next"></div></div>
+            </div>
+            <div class="control-slide" data-answer="b">
+              <fieldset>
+                <legend>DC-04 · 오래된 worker가 stale 처리된 뒤 정상 복구 경로는 무엇인가?</legend>
+                <label><input type="radio" name="dc-04" value="a" /> 오래된 worker가 계속 heartbeat를 재시도한다.</label>
+                <label><input type="radio" name="dc-04" value="b" /> 다음 claim이 만료 row를 회수하고, 새 attempt/token으로 재처리한다.</label>
+                <label><input type="radio" name="dc-04" value="c" /> 운영자가 매번 content를 수동 삭제한다.</label>
+              </fieldset>
+              <div class="result"><div data-role="status"></div><div data-role="explanation"></div><div data-role="next"></div></div>
+            </div>
+            <div class="control-slide" data-answer="c">
+              <fieldset>
+                <legend>DC-05 · 이번 변경에서 다루지 않는 것은 무엇인가?</legend>
+                <label><input type="radio" name="dc-05" value="a" /> lifecycle SQL의 lease 만료 guard</label>
+                <label><input type="radio" name="dc-05" value="b" /> 두 번째 visibility 결과의 content 반영</label>
+                <label><input type="radio" name="dc-05" value="c" /> 다중 호스트 시계를 DB clock으로 전면 통합하는 별도 hardening</label>
+              </fieldset>
+              <div class="result"><div data-role="status"></div><div data-role="explanation"></div><div data-role="next"></div></div>
+            </div>
+            <div class="controls">
+              <button type="button" id="control-prev">이전</button>
+              <button type="button" id="control-next">다음</button>
+              <button type="button" id="control-submit">제출</button>
+            </div>
+            <output id="control-output" aria-live="polite"></output>
+          </div>
+        </section>
+
+        <section id="approval">
+          <h2>구현 승인</h2>
+          <p>현재 문서는 구현 전 설계 기준선이다. 실제 코드·테스트 파일은 아직 변경하지 않았다.</p>
+          <p><strong>이 설계로 구현을 시작할까?</strong> 승인하면 위 범위의 구현과 집중 검증을 진행한다.</p>
+          <p class="muted">답변 예시: <code>승인 — 구현 시작</code> / <code>수정 — 설계 조정</code> / <code>보류</code></p>
+        </section>
+      </article>
+    </main>
+
+    <script>
+      (() => {
+        const slides = [...document.querySelectorAll('.control-slide')];
+        const progress = document.querySelector('#control-progress');
+        const output = document.querySelector('#control-output');
+        let index = 0;
+        const explanations = [
+          '두 번째 필터 반환값을 candidates에 재할당해야 buildReportContent가 최신 후보 배열을 사용한다.',
+          '만료된 worker는 상태를 변경하지 않고 false/stale 경로로 종료되어 새 claim과 충돌하지 않는다.',
+          '후보 캡처도 weekly_reports의 claim 상태를 쓰는 작업이므로 heartbeat·complete·fail과 같은 fencing이 필요하다.',
+          '다음 claim이 만료 상태를 회수하고 attempt/token을 갱신한 뒤 새 worker가 재처리한다.',
+          '이번 변경은 시간 원천 통합이 아니라 보고된 두 결함의 최소 수정에 집중한다.'
+        ];
+        function answered() { return slides.filter((slide) => slide.querySelector('input:checked')).length; }
+        function render() {
+          slides.forEach((slide, position) => slide.classList.toggle('active', position === index));
+          progress.textContent = `${index + 1} / ${slides.length} · 답변 ${answered()}개`;
+          document.querySelector('#control-prev').disabled = index === 0;
+          document.querySelector('#control-next').disabled = index === slides.length - 1;
+        }
+        function submit() {
+          slides.forEach((slide, position) => {
+            const selected = slide.querySelector('input:checked');
+            const result = slide.querySelector('.result');
+            if (!selected) return;
+            const correct = selected.value === slide.dataset.answer;
+            result.classList.add('visible');
+            result.querySelector('[data-role="status"]').textContent = correct ? '확립' : '보류';
+            result.querySelector('[data-role="explanation"]').textContent = explanations[position];
+            result.querySelector('[data-role="next"]').textContent = correct ? '다음 경계로 진행한다.' : '설계의 해당 경계를 다시 확인한다.';
+          });
+          const complete = slides.every((slide) => slide.querySelector('input:checked'));
+          const correct = slides.every((slide) => slide.querySelector('input:checked')?.value === slide.dataset.answer);
+          output.textContent = complete ? (correct ? '전체 점검: 확립' : '전체 점검: 보류 — 표시된 경계를 다시 확인') : '미응답 항목이 있다.';
+        }
+        document.querySelector('#control-prev').addEventListener('click', () => { index = Math.max(0, index - 1); render(); });
+        document.querySelector('#control-next').addEventListener('click', () => { index = Math.min(slides.length - 1, index + 1); render(); });
+        document.querySelector('#control-submit').addEventListener('click', submit);
+        slides.forEach((slide) => slide.addEventListener('change', render));
+        render();
+      })();
+    </script>
+  </body>
+</html>
