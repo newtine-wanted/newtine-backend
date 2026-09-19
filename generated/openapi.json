@@ -28,386 +28,6 @@
       }
     },
     "schemas": {
-      "PipelineRunAcceptedResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "runId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "oneOf": [
-              {
-                "const": "CANCELLED"
-              },
-              {
-                "const": "FAILED"
-              },
-              {
-                "const": "PARTIALLY_SUCCEEDED"
-              },
-              {
-                "const": "QUEUED"
-              },
-              {
-                "const": "RUNNING"
-              },
-              {
-                "const": "SUCCEEDED"
-              }
-            ]
-          }
-        },
-        "required": [
-          "runId",
-          "status"
-        ],
-        "type": "object"
-      },
-      "PipelineRunCreateRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "query": {
-            "maxLength": 100,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "query"
-        ],
-        "type": "object"
-      },
-      "ProblemDetails": {
-        "additionalProperties": false,
-        "properties": {
-          "title": {
-            "type": "string"
-          },
-          "status": {
-            "type": "number"
-          },
-          "detail": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "status",
-          "detail",
-          "code"
-        ],
-        "type": "object"
-      },
-      "PipelineJobResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "issueId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "oneOf": [
-              {
-                "const": "CANCELLED"
-              },
-              {
-                "const": "FAILED"
-              },
-              {
-                "const": "QUEUED"
-              },
-              {
-                "const": "RUNNING"
-              },
-              {
-                "const": "SUCCEEDED"
-              }
-            ]
-          },
-          "stage": {
-            "oneOf": [
-              {
-                "const": "FETCH"
-              },
-              {
-                "const": "GENERATE"
-              },
-              {
-                "const": "SEARCH"
-              },
-              {
-                "const": "VALIDATE"
-              }
-            ]
-          },
-          "attempt": {
-            "type": "number"
-          },
-          "failureKind": {
-            "type": "string"
-          },
-          "lastError": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "issueId",
-          "status",
-          "stage",
-          "attempt"
-        ],
-        "type": "object"
-      },
-      "PipelineRunResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "runId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "oneOf": [
-              {
-                "const": "CANCELLED"
-              },
-              {
-                "const": "FAILED"
-              },
-              {
-                "const": "PARTIALLY_SUCCEEDED"
-              },
-              {
-                "const": "QUEUED"
-              },
-              {
-                "const": "RUNNING"
-              },
-              {
-                "const": "SUCCEEDED"
-              }
-            ]
-          },
-          "attempt": {
-            "type": "number"
-          },
-          "executionId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "currentStage": {
-            "oneOf": [
-              {
-                "const": "FETCH"
-              },
-              {
-                "const": "GENERATE"
-              },
-              {
-                "const": "SEARCH"
-              },
-              {
-                "const": "VALIDATE"
-              }
-            ]
-          },
-          "candidateCounts": {
-            "additionalProperties": false,
-            "properties": {
-              "discovered": {
-                "type": "number"
-              },
-              "duplicate": {
-                "type": "number"
-              },
-              "uncertain": {
-                "type": "number"
-              },
-              "created": {
-                "type": "number"
-              },
-              "skippedByLimit": {
-                "type": "number"
-              }
-            },
-            "required": [
-              "discovered",
-              "duplicate",
-              "uncertain",
-              "created",
-              "skippedByLimit"
-            ],
-            "type": "object"
-          },
-          "jobs": {
-            "items": {
-              "$ref": "#/components/schemas/PipelineJobResponse"
-            },
-            "type": "array"
-          },
-          "embeddingPendingCount": {
-            "type": "number"
-          },
-          "usageSummary": {
-            "$ref": "#/components/schemas/PipelineUsageSummaryResponse"
-          },
-          "lastError": {
-            "type": "string"
-          },
-          "startedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "finishedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "runId",
-          "status",
-          "attempt",
-          "candidateCounts",
-          "jobs",
-          "embeddingPendingCount",
-          "usageSummary",
-          "createdAt",
-          "updatedAt"
-        ],
-        "type": "object"
-      },
-      "PipelineUsageSummaryResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "calls": {
-            "type": "number"
-          },
-          "succeededCalls": {
-            "type": "number"
-          },
-          "failedCalls": {
-            "type": "number"
-          },
-          "unknownCalls": {
-            "type": "number"
-          },
-          "inputTokens": {
-            "type": "number"
-          },
-          "outputTokens": {
-            "type": "number"
-          },
-          "actualCost": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "number"
-              }
-            ]
-          }
-        },
-        "required": [
-          "calls",
-          "succeededCalls",
-          "failedCalls",
-          "unknownCalls",
-          "inputTokens",
-          "outputTokens",
-          "actualCost"
-        ],
-        "type": "object"
-      },
-      "PipelineRunRetryRequestBase__type": {
-        "additionalProperties": false,
-        "properties": {
-          "expectedAttempt": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "scope": {
-            "const": "DISCOVERY",
-            "title": null,
-            "description": null
-          },
-          "failedJobIds": {
-            "items": {
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-              "type": "string"
-            },
-            "minItems": 1,
-            "type": "array"
-          }
-        },
-        "required": [
-          "expectedAttempt",
-          "scope"
-        ],
-        "type": "object"
-      },
-      "PipelineRunRetryRequestBase__type-o1": {
-        "additionalProperties": false,
-        "properties": {
-          "expectedAttempt": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "scope": {
-            "const": "CONTENT",
-            "title": null,
-            "description": null
-          },
-          "failedJobIds": {
-            "items": {
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-              "type": "string"
-            },
-            "minItems": 1,
-            "type": "array"
-          }
-        },
-        "required": [
-          "expectedAttempt",
-          "scope",
-          "failedJobIds"
-        ],
-        "type": "object"
-      },
-      "PipelineRunInterruptRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "expectedAttempt": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "executionId": {
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-            "type": "string"
-          }
-        },
-        "required": [
-          "expectedAttempt",
-          "executionId"
-        ],
-        "type": "object"
-      },
       "ReportListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -574,6 +194,30 @@
           "retryable",
           "nextRetryAt",
           "failureCode"
+        ],
+        "type": "object"
+      },
+      "ProblemDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "number"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "status",
+          "detail",
+          "code"
         ],
         "type": "object"
       },
@@ -939,78 +583,365 @@
         ],
         "type": "object"
       },
-      "OnboardingAgeOption": {
+      "PipelineRunAcceptedResponse": {
         "additionalProperties": false,
         "properties": {
-          "code": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
             "oneOf": [
               {
-                "const": "AGE_19_34"
+                "const": "CANCELLED"
               },
               {
-                "const": "AGE_35_49"
+                "const": "FAILED"
               },
               {
-                "const": "AGE_50_64"
+                "const": "PARTIALLY_SUCCEEDED"
               },
               {
-                "const": "AGE_65_PLUS"
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
               }
-            ],
-            "readOnly": true
-          },
-          "name": {
-            "readOnly": true,
-            "type": "string"
-          },
-          "displayOrder": {
-            "readOnly": true,
-            "type": "number"
+            ]
           }
         },
         "required": [
-          "code",
-          "name",
-          "displayOrder"
+          "runId",
+          "status"
         ],
         "type": "object"
       },
-      "OnboardingOptions": {
+      "PipelineRunCreateRequest": {
         "additionalProperties": false,
         "properties": {
-          "topics": {
-            "items": {
-              "$ref": "#/components/schemas/OnboardingTopicOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          },
-          "ageGroups": {
-            "items": {
-              "$ref": "#/components/schemas/OnboardingAgeOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
-          },
-          "regions": {
-            "items": {
-              "$ref": "#/components/schemas/RegionOption"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
+          "query": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
           }
         },
         "required": [
-          "topics",
-          "ageGroups",
-          "regions"
+          "query"
         ],
         "type": "object"
       },
-      "OnboardingTopicOption": {
+      "PipelineJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "issueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "const": "CANCELLED"
+              },
+              {
+                "const": "FAILED"
+              },
+              {
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
+              }
+            ]
+          },
+          "stage": {
+            "oneOf": [
+              {
+                "const": "FETCH"
+              },
+              {
+                "const": "GENERATE"
+              },
+              {
+                "const": "SEARCH"
+              },
+              {
+                "const": "VALIDATE"
+              }
+            ]
+          },
+          "attempt": {
+            "type": "number"
+          },
+          "failureKind": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "issueId",
+          "status",
+          "stage",
+          "attempt"
+        ],
+        "type": "object"
+      },
+      "PipelineRunResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "runId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "const": "CANCELLED"
+              },
+              {
+                "const": "FAILED"
+              },
+              {
+                "const": "PARTIALLY_SUCCEEDED"
+              },
+              {
+                "const": "QUEUED"
+              },
+              {
+                "const": "RUNNING"
+              },
+              {
+                "const": "SUCCEEDED"
+              }
+            ]
+          },
+          "attempt": {
+            "type": "number"
+          },
+          "executionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currentStage": {
+            "oneOf": [
+              {
+                "const": "FETCH"
+              },
+              {
+                "const": "GENERATE"
+              },
+              {
+                "const": "SEARCH"
+              },
+              {
+                "const": "VALIDATE"
+              }
+            ]
+          },
+          "candidateCounts": {
+            "additionalProperties": false,
+            "properties": {
+              "discovered": {
+                "type": "number"
+              },
+              "duplicate": {
+                "type": "number"
+              },
+              "uncertain": {
+                "type": "number"
+              },
+              "created": {
+                "type": "number"
+              },
+              "skippedByLimit": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "discovered",
+              "duplicate",
+              "uncertain",
+              "created",
+              "skippedByLimit"
+            ],
+            "type": "object"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineJobResponse"
+            },
+            "type": "array"
+          },
+          "embeddingPendingCount": {
+            "type": "number"
+          },
+          "usageSummary": {
+            "$ref": "#/components/schemas/PipelineUsageSummaryResponse"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "runId",
+          "status",
+          "attempt",
+          "candidateCounts",
+          "jobs",
+          "embeddingPendingCount",
+          "usageSummary",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "PipelineUsageSummaryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "type": "number"
+          },
+          "succeededCalls": {
+            "type": "number"
+          },
+          "failedCalls": {
+            "type": "number"
+          },
+          "unknownCalls": {
+            "type": "number"
+          },
+          "inputTokens": {
+            "type": "number"
+          },
+          "outputTokens": {
+            "type": "number"
+          },
+          "actualCost": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "required": [
+          "calls",
+          "succeededCalls",
+          "failedCalls",
+          "unknownCalls",
+          "inputTokens",
+          "outputTokens",
+          "actualCost"
+        ],
+        "type": "object"
+      },
+      "PipelineRunRetryRequestBase__type": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedAttempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "const": "DISCOVERY",
+            "title": null,
+            "description": null
+          },
+          "failedJobIds": {
+            "items": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "expectedAttempt",
+          "scope"
+        ],
+        "type": "object"
+      },
+      "PipelineRunRetryRequestBase__type-o1": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedAttempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "const": "CONTENT",
+            "title": null,
+            "description": null
+          },
+          "failedJobIds": {
+            "items": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "expectedAttempt",
+          "scope",
+          "failedJobIds"
+        ],
+        "type": "object"
+      },
+      "PipelineRunInterruptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedAttempt": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "executionId": {
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedAttempt",
+          "executionId"
+        ],
+        "type": "object"
+      },
+      "MetadataCategoryResponse": {
         "additionalProperties": false,
         "properties": {
           "code": {
@@ -1064,7 +995,43 @@
         ],
         "type": "object"
       },
-      "RegionOption": {
+      "MetadataAgeGroupResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "oneOf": [
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ],
+            "readOnly": true
+          },
+          "name": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "displayOrder": {
+            "readOnly": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "displayOrder"
+        ],
+        "type": "object"
+      },
+      "MetadataRegionResponse": {
         "additionalProperties": false,
         "properties": {
           "code": {
@@ -1087,12 +1054,13 @@
         ],
         "type": "object"
       },
-      "OnboardingEntityResult": {
+      "PoliticalActorResponse": {
         "additionalProperties": false,
         "properties": {
           "id": {
             "readOnly": true,
-            "type": "string"
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
             "readOnly": true,
@@ -1133,12 +1101,12 @@
         ],
         "type": "object"
       },
-      "OnboardingEntitySearchResult": {
+      "PoliticalActorSearchResponse": {
         "additionalProperties": false,
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/OnboardingEntityResult"
+              "$ref": "#/components/schemas/PoliticalActorResponse"
             },
             "readOnly": true,
             "type": "array",
@@ -1165,7 +1133,7 @@
         ],
         "type": "object"
       },
-      "OnboardingEntityQuery": {
+      "PoliticalActorQuery": {
         "additionalProperties": false,
         "properties": {
           "q": {
@@ -1346,357 +1314,6 @@
           "entityIds",
           "ageGroup",
           "regionCodes"
-        ],
-        "type": "object"
-      },
-      "InterestAnalysisResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "asOf": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "period": {
-            "additionalProperties": false,
-            "properties": {
-              "type": {
-                "const": "ROLLING_DAYS",
-                "title": null,
-                "description": null
-              },
-              "days": {
-                "type": "number"
-              },
-              "startAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "endAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "timeZone": {
-                "const": "Asia/Seoul",
-                "title": null,
-                "description": null
-              }
-            },
-            "required": [
-              "type",
-              "days",
-              "startAt",
-              "endAt",
-              "timeZone"
-            ],
-            "type": "object"
-          },
-          "sampleStatus": {
-            "oneOf": [
-              {
-                "const": "EMPTY"
-              },
-              {
-                "const": "LOW_SAMPLE"
-              },
-              {
-                "const": "READY"
-              }
-            ]
-          },
-          "minimumSampleSize": {
-            "type": "number"
-          },
-          "issueCount": {
-            "type": "number"
-          },
-          "likedIssueCount": {
-            "type": "number"
-          },
-          "categoryCounts": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "oneOf": [
-                    {
-                      "const": "climate"
-                    },
-                    {
-                      "const": "education"
-                    },
-                    {
-                      "const": "finance"
-                    },
-                    {
-                      "const": "health"
-                    },
-                    {
-                      "const": "housing"
-                    },
-                    {
-                      "const": "labor"
-                    },
-                    {
-                      "const": "local"
-                    },
-                    {
-                      "const": "politics"
-                    },
-                    {
-                      "const": "security"
-                    },
-                    {
-                      "const": "welfare"
-                    }
-                  ]
-                },
-                "name": {
-                  "type": "string"
-                },
-                "count": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "code",
-                "name",
-                "count"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "asOf",
-          "period",
-          "sampleStatus",
-          "minimumSampleSize",
-          "issueCount",
-          "likedIssueCount",
-          "categoryCounts"
-        ],
-        "type": "object"
-      },
-      "LikedIssuesResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "issueId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "title": {
-                  "type": "string"
-                },
-                "category": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "code": {
-                      "oneOf": [
-                        {
-                          "const": "climate"
-                        },
-                        {
-                          "const": "education"
-                        },
-                        {
-                          "const": "finance"
-                        },
-                        {
-                          "const": "health"
-                        },
-                        {
-                          "const": "housing"
-                        },
-                        {
-                          "const": "labor"
-                        },
-                        {
-                          "const": "local"
-                        },
-                        {
-                          "const": "politics"
-                        },
-                        {
-                          "const": "security"
-                        },
-                        {
-                          "const": "welfare"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "name"
-                  ],
-                  "type": "object"
-                },
-                "likedAt": {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                "thumbnailUrl": {
-                  "type": "null"
-                }
-              },
-              "required": [
-                "issueId",
-                "title",
-                "category",
-                "likedAt",
-                "thumbnailUrl"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "totalCount": {
-            "type": "number"
-          },
-          "nextCursor": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "totalCount",
-          "nextCursor"
-        ],
-        "type": "object"
-      },
-      "LikedIssuesQuery": {
-        "additionalProperties": false,
-        "properties": {
-          "categoryCode": {
-            "oneOf": [
-              {
-                "const": "climate"
-              },
-              {
-                "const": "education"
-              },
-              {
-                "const": "finance"
-              },
-              {
-                "const": "health"
-              },
-              {
-                "const": "housing"
-              },
-              {
-                "const": "labor"
-              },
-              {
-                "const": "local"
-              },
-              {
-                "const": "politics"
-              },
-              {
-                "const": "security"
-              },
-              {
-                "const": "welfare"
-              }
-            ]
-          },
-          "cursor": {
-            "maxLength": 512,
-            "minLength": 1,
-            "type": "string"
-          },
-          "limit": {
-            "maximum": 50,
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "AuthSessionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "accessToken": {
-            "type": "string"
-          },
-          "tokenType": {
-            "const": "Bearer",
-            "title": null,
-            "description": null
-          },
-          "expiresIn": {
-            "type": "number"
-          },
-          "user": {
-            "additionalProperties": false,
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "email": {
-                "type": "string"
-              },
-              "role": {
-                "oneOf": [
-                  {
-                    "const": "ADMIN"
-                  },
-                  {
-                    "const": "USER"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "id",
-              "email",
-              "role"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "accessToken",
-          "tokenType",
-          "expiresIn",
-          "user"
-        ],
-        "type": "object"
-      },
-      "AuthCredentialsRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "email": {
-            "maxLength": 254,
-            "minLength": 1,
-            "type": "string"
-          },
-          "password": {
-            "maxLength": 128,
-            "minLength": 12,
-            "type": "string"
-          }
-        },
-        "required": [
-          "email",
-          "password"
         ],
         "type": "object"
       },
@@ -2365,10 +1982,706 @@
         },
         "required": [],
         "type": "object"
+      },
+      "InterestAnalysisResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period": {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "ROLLING_DAYS",
+                "title": null,
+                "description": null
+              },
+              "days": {
+                "type": "number"
+              },
+              "startAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "endAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "timeZone": {
+                "const": "Asia/Seoul",
+                "title": null,
+                "description": null
+              }
+            },
+            "required": [
+              "type",
+              "days",
+              "startAt",
+              "endAt",
+              "timeZone"
+            ],
+            "type": "object"
+          },
+          "sampleStatus": {
+            "oneOf": [
+              {
+                "const": "EMPTY"
+              },
+              {
+                "const": "LOW_SAMPLE"
+              },
+              {
+                "const": "READY"
+              }
+            ]
+          },
+          "minimumSampleSize": {
+            "type": "number"
+          },
+          "issueCount": {
+            "type": "number"
+          },
+          "likedIssueCount": {
+            "type": "number"
+          },
+          "categoryCounts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "oneOf": [
+                    {
+                      "const": "climate"
+                    },
+                    {
+                      "const": "education"
+                    },
+                    {
+                      "const": "finance"
+                    },
+                    {
+                      "const": "health"
+                    },
+                    {
+                      "const": "housing"
+                    },
+                    {
+                      "const": "labor"
+                    },
+                    {
+                      "const": "local"
+                    },
+                    {
+                      "const": "politics"
+                    },
+                    {
+                      "const": "security"
+                    },
+                    {
+                      "const": "welfare"
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "name",
+                "count"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "period",
+          "sampleStatus",
+          "minimumSampleSize",
+          "issueCount",
+          "likedIssueCount",
+          "categoryCounts"
+        ],
+        "type": "object"
+      },
+      "LikedIssuesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "issueId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "category": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "oneOf": [
+                        {
+                          "const": "climate"
+                        },
+                        {
+                          "const": "education"
+                        },
+                        {
+                          "const": "finance"
+                        },
+                        {
+                          "const": "health"
+                        },
+                        {
+                          "const": "housing"
+                        },
+                        {
+                          "const": "labor"
+                        },
+                        {
+                          "const": "local"
+                        },
+                        {
+                          "const": "politics"
+                        },
+                        {
+                          "const": "security"
+                        },
+                        {
+                          "const": "welfare"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "likedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "thumbnailUrl": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "issueId",
+                "title",
+                "category",
+                "likedAt",
+                "thumbnailUrl"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "totalCount": {
+            "type": "number"
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "totalCount",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "LikedIssuesQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "categoryCode": {
+            "oneOf": [
+              {
+                "const": "climate"
+              },
+              {
+                "const": "education"
+              },
+              {
+                "const": "finance"
+              },
+              {
+                "const": "health"
+              },
+              {
+                "const": "housing"
+              },
+              {
+                "const": "labor"
+              },
+              {
+                "const": "local"
+              },
+              {
+                "const": "politics"
+              },
+              {
+                "const": "security"
+              },
+              {
+                "const": "welfare"
+              }
+            ]
+          },
+          "cursor": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "AuthSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "tokenType": {
+            "const": "Bearer",
+            "title": null,
+            "description": null
+          },
+          "expiresIn": {
+            "type": "number"
+          },
+          "user": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              },
+              "role": {
+                "oneOf": [
+                  {
+                    "const": "ADMIN"
+                  },
+                  {
+                    "const": "USER"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "email",
+              "role"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "accessToken",
+          "tokenType",
+          "expiresIn",
+          "user"
+        ],
+        "type": "object"
+      },
+      "AuthCredentialsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "maxLength": 254,
+            "minLength": 1,
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 12,
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "AuthOriginHeaders": {
+        "additionalProperties": false,
+        "properties": {
+          "origin": {
+            "description": "Browser Origin; omission is rejected with 403 by the route guard.",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
       }
     }
   },
   "paths": {
+    "/api/me/reports": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "list"
+        ],
+        "x-samchon-controller": "ReportController"
+      },
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Existing completed or failed report; no new work enqueued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Report input exceeds the configured limit.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The service is temporarily unavailable.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "request"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
+    "/api/me/reports/{reportId}": {
+      "get": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "get"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
+    "/api/me/reports/{reportId}/retry": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "schema": {
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The requested resource was not found.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Retry cooldown is active.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "reports",
+          "retry"
+        ],
+        "x-samchon-controller": "ReportController"
+      }
+    },
     "/api/pipeline/runs": {
       "post": {
         "tags": [],
@@ -2788,7 +3101,7 @@
         "x-samchon-controller": "PipelineController"
       }
     },
-    "/api/me/reports": {
+    "/api/metadata/categories": {
       "get": {
         "tags": [],
         "parameters": [],
@@ -2798,17 +3111,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReportListResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
+                  "items": {
+                    "$ref": "#/components/schemas/MetadataCategoryResponse"
+                  },
+                  "type": "array"
                 }
               }
             }
@@ -2824,305 +3130,15 @@
             }
           }
         },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "x-samchon-accessor": [
-          "me",
-          "reports",
-          "list"
+          "metadata",
+          "categories",
+          "getCategories"
         ],
-        "x-samchon-controller": "ReportController"
-      },
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReportRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Existing completed or failed report; no new work enqueued.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportSummaryResponse"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportSummaryResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The requested resource was not found.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Report input exceeds the configured limit.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The service is temporarily unavailable.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "reports",
-          "request"
-        ],
-        "x-samchon-controller": "ReportController"
+        "x-samchon-controller": "MetadataController"
       }
     },
-    "/api/me/reports/{reportId}": {
-      "get": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "reportId",
-            "in": "path",
-            "schema": {
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-              "type": "string"
-            },
-            "required": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The requested resource was not found.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "reports",
-          "get"
-        ],
-        "x-samchon-controller": "ReportController"
-      }
-    },
-    "/api/me/reports/{reportId}/retry": {
-      "post": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "reportId",
-            "in": "path",
-            "schema": {
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
-              "type": "string"
-            },
-            "required": true
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportSummaryResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The requested resource was not found.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request conflicts with the current resource state.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Retry cooldown is active.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "reports",
-          "retry"
-        ],
-        "x-samchon-controller": "ReportController"
-      }
-    },
-    "/api/onboarding/options": {
+    "/api/metadata/age-groups": {
       "get": {
         "tags": [],
         "parameters": [],
@@ -3132,7 +3148,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OnboardingOptions"
+                  "items": {
+                    "$ref": "#/components/schemas/MetadataAgeGroupResponse"
+                  },
+                  "type": "array"
                 }
               }
             }
@@ -3149,14 +3168,51 @@
           }
         },
         "x-samchon-accessor": [
-          "onboarding",
-          "options",
-          "getOptions"
+          "metadata",
+          "age_groups",
+          "getAgeGroups"
         ],
-        "x-samchon-controller": "OnboardingController"
+        "x-samchon-controller": "MetadataController"
       }
     },
-    "/api/onboarding/entities": {
+    "/api/metadata/regions": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MetadataRegionResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "metadata",
+          "regions",
+          "getRegions"
+        ],
+        "x-samchon-controller": "MetadataController"
+      }
+    },
+    "/api/metadata/political-actors": {
       "get": {
         "tags": [],
         "parameters": [
@@ -3209,7 +3265,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OnboardingEntitySearchResult"
+                  "$ref": "#/components/schemas/PoliticalActorSearchResponse"
                 }
               }
             }
@@ -3236,11 +3292,11 @@
           }
         },
         "x-samchon-accessor": [
-          "onboarding",
-          "entities",
-          "searchEntities"
+          "metadata",
+          "political_actors",
+          "searchPoliticalActors"
         ],
-        "x-samchon-controller": "OnboardingController"
+        "x-samchon-controller": "MetadataController"
       }
     },
     "/api/me/onboarding": {
@@ -3408,510 +3464,6 @@
           "skip"
         ],
         "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/api/me/interest-analysis": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InterestAnalysisResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "interest_analysis",
-          "getAnalysis"
-        ],
-        "x-samchon-controller": "InterestController"
-      }
-    },
-    "/api/me/liked-issues": {
-      "get": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "categoryCode",
-            "in": "query",
-            "schema": {
-              "oneOf": [
-                {
-                  "const": "climate"
-                },
-                {
-                  "const": "education"
-                },
-                {
-                  "const": "finance"
-                },
-                {
-                  "const": "health"
-                },
-                {
-                  "const": "housing"
-                },
-                {
-                  "const": "labor"
-                },
-                {
-                  "const": "local"
-                },
-                {
-                  "const": "politics"
-                },
-                {
-                  "const": "security"
-                },
-                {
-                  "const": "welfare"
-                }
-              ]
-            },
-            "required": false
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "number"
-            },
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LikedIssuesResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "liked_issues",
-          "getLikedIssues"
-        ],
-        "x-samchon-controller": "InterestController"
-      }
-    },
-    "/api/health": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "status": {
-                      "const": "ok",
-                      "title": null,
-                      "description": null
-                    }
-                  },
-                  "required": [
-                    "status"
-                  ],
-                  "type": "object"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "health",
-          "getHealth"
-        ],
-        "x-samchon-controller": "HealthController"
-      }
-    },
-    "/api/auth/signup": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AuthCredentialsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthSessionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request conflicts with the current resource state.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "auth",
-          "signup"
-        ],
-        "x-samchon-controller": "AuthController"
-      }
-    },
-    "/api/auth/login": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AuthCredentialsRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthSessionResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "auth",
-          "login"
-        ],
-        "x-samchon-controller": "AuthController"
-      }
-    },
-    "/api/auth/refresh": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthSessionResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The authenticated principal is not allowed to perform this action.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "auth",
-          "refresh"
-        ],
-        "x-samchon-controller": "AuthController"
-      }
-    },
-    "/api/auth/logout": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "403": {
-            "description": "The authenticated principal is not allowed to perform this action.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "x-samchon-accessor": [
-          "auth",
-          "logout"
-        ],
-        "x-samchon-controller": "AuthController"
-      }
-    },
-    "/api/auth/withdraw": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "204": {
-            "description": ""
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The authenticated principal is not allowed to perform this action.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Retry cooldown is active.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The service is temporarily unavailable.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "auth",
-          "withdraw"
-        ],
-        "x-samchon-controller": "AuthController"
       }
     },
     "/api/issues/{issueId}/interactions": {
@@ -4491,6 +4043,580 @@
           "getFeed"
         ],
         "x-samchon-controller": "FeedController"
+      }
+    },
+    "/api/me/interest-analysis": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterestAnalysisResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "interest_analysis",
+          "getAnalysis"
+        ],
+        "x-samchon-controller": "InterestController"
+      }
+    },
+    "/api/me/liked-issues": {
+      "get": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "categoryCode",
+            "in": "query",
+            "schema": {
+              "oneOf": [
+                {
+                  "const": "climate"
+                },
+                {
+                  "const": "education"
+                },
+                {
+                  "const": "finance"
+                },
+                {
+                  "const": "health"
+                },
+                {
+                  "const": "housing"
+                },
+                {
+                  "const": "labor"
+                },
+                {
+                  "const": "local"
+                },
+                {
+                  "const": "politics"
+                },
+                {
+                  "const": "security"
+                },
+                {
+                  "const": "welfare"
+                }
+              ]
+            },
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LikedIssuesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "liked_issues",
+          "getLikedIssues"
+        ],
+        "x-samchon-controller": "InterestController"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "const": "ok",
+                      "title": null,
+                      "description": null
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "health",
+          "getHealth"
+        ],
+        "x-samchon-controller": "HealthController"
+      }
+    },
+    "/api/auth/signup": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "Browser Origin; omission is rejected with 403 by the route guard."
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal is not allowed to perform this action.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current resource state.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "auth",
+          "signup"
+        ],
+        "x-samchon-controller": "AuthController"
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "Browser Origin; omission is rejected with 403 by the route guard."
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthCredentialsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal is not allowed to perform this action.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "auth",
+          "login"
+        ],
+        "x-samchon-controller": "AuthController"
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "Browser Origin; omission is rejected with 403 by the route guard."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal is not allowed to perform this action.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "auth",
+          "refresh"
+        ],
+        "x-samchon-controller": "AuthController"
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "Browser Origin; omission is rejected with 403 by the route guard."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "The authenticated principal is not allowed to perform this action.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "x-samchon-accessor": [
+          "auth",
+          "logout"
+        ],
+        "x-samchon-controller": "AuthController"
+      }
+    },
+    "/api/auth/withdraw": {
+      "post": {
+        "tags": [],
+        "parameters": [
+          {
+            "name": "origin",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "description": "Browser Origin; omission is rejected with 403 by the route guard."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The authenticated principal is not allowed to perform this action.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Retry cooldown is active.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The service is temporarily unavailable.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "auth",
+          "withdraw"
+        ],
+        "x-samchon-controller": "AuthController"
       }
     }
   },

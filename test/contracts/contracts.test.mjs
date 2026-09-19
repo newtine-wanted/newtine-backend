@@ -24,8 +24,10 @@ const EXPECTED_FAILURE_STATUSES = {
   '/issues/{issueId}/detail-views/{viewId}/progress': ['400', '401', '404', '409', '410', '503'],
   '/feed': ['400', '401', '404', '409', '410', '503'],
   '/health': ['500'],
-  '/onboarding/options': ['500'],
-  '/onboarding/entities': ['400', '500'],
+  '/metadata/categories': ['500'],
+  '/metadata/age-groups': ['500'],
+  '/metadata/regions': ['500'],
+  '/metadata/political-actors': ['400', '500'],
   '/me/onboarding': ['401', '500'],
   '/me/interest-analysis': ['401', '500'],
   '/me/liked-issues': ['400', '401', '500'],
@@ -39,8 +41,8 @@ const EXPECTED_FAILURE_STATUSES = {
   '/pipeline/runs/{runId}': ['400', '401', '403', '404', '500'],
   '/pipeline/runs/{runId}/retry': ['400', '401', '403', '404', '409', '500'],
   '/pipeline/runs/{runId}/interrupt': ['400', '401', '403', '404', '409', '500'],
-  '/auth/signup': ['400', '409', '500'],
-  '/auth/login': ['400', '401', '500'],
+  '/auth/signup': ['400', '403', '409', '500'],
+  '/auth/login': ['400', '401', '403', '500'],
   '/auth/refresh': ['401', '403', '500'],
   '/auth/logout': ['403', '500'],
   '/auth/withdraw': ['400', '401', '403', '429', '503', '500'],
@@ -73,16 +75,20 @@ const requiredFiles = [
   'api/functional/me/interest_analysis/index.ts',
   'api/functional/me/liked_issues/index.ts',
   'api/functional/me/onboarding/index.ts',
-  'api/functional/onboarding/index.ts',
-  'api/functional/onboarding/entities/index.ts',
-  'api/functional/onboarding/options/index.ts',
+  'api/functional/metadata/index.ts',
+  'api/functional/metadata/age_groups/index.ts',
+  'api/functional/metadata/categories/index.ts',
+  'api/functional/metadata/political_actors/index.ts',
+  'api/functional/metadata/regions/index.ts',
   'e2e/features/api/automated/test_api_me_onboarding_complete.ts',
   'e2e/features/api/automated/test_api_me_onboarding_getMyOnboarding.ts',
   'e2e/features/api/automated/test_api_me_onboarding_skip.ts',
   'e2e/features/api/automated/test_api_me_interest_analysis_getAnalysis.ts',
   'e2e/features/api/automated/test_api_me_liked_issues_getLikedIssues.ts',
-  'e2e/features/api/automated/test_api_onboarding_entities_searchEntities.ts',
-  'e2e/features/api/automated/test_api_onboarding_options_getOptions.ts',
+  'e2e/features/api/automated/test_api_metadata_age_groups_getAgeGroups.ts',
+  'e2e/features/api/automated/test_api_metadata_categories_getCategories.ts',
+  'e2e/features/api/automated/test_api_metadata_political_actors_searchPoliticalActors.ts',
+  'e2e/features/api/automated/test_api_metadata_regions_getRegions.ts',
   'api/functional/pipeline/runs/index.ts',
   'e2e/features/api/automated/test_api_pipeline_runs_create.ts',
   'e2e/features/api/automated/test_api_pipeline_runs_get.ts',
@@ -157,6 +163,28 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   assert.deepEqual(Object.keys(pipelineCreate?.properties ?? {}), ['query']);
   assert.equal(schemas?.PipelineRunLimitsRequest, undefined);
 
+  for (const path of [
+    '/auth/signup',
+    '/auth/login',
+    '/auth/refresh',
+    '/auth/logout',
+    '/auth/withdraw',
+  ]) {
+    assert.deepEqual(
+      document.paths?.[apiPath(path)]?.post?.parameters,
+      [
+        {
+          name: 'origin',
+          in: 'header',
+          schema: { type: 'string' },
+          required: false,
+          description: 'Browser Origin; omission is rejected with 403 by the route guard.',
+        },
+      ],
+      `${path} must document the browser Origin header`,
+    );
+  }
+
   const retrySchema =
     document.paths?.[apiPath('/pipeline/runs/{runId}/retry')]?.post?.requestBody?.content?.[
       'application/json'
@@ -167,6 +195,8 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   assert.ok(contentSchemaName && discoverySchemaName);
   assert.ok(schemas?.[contentSchemaName]?.required?.includes('failedJobIds'));
   assert.equal(schemas?.[discoverySchemaName]?.required?.includes('failedJobIds'), false);
+  assert.equal(schemas?.[contentSchemaName]?.properties?.failedJobIds?.maxItems, 100);
+  assert.equal(schemas?.[discoverySchemaName]?.properties?.failedJobIds?.maxItems, 100);
 
   assert.deepEqual(Object.keys(problemDetails.properties ?? {}).sort(), [
     'code',
