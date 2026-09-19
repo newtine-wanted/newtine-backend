@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="비동기 리포트 워커 가시성·lease fencing 개선의 구현 통제와 검증 기록" />
+    <meta name="audience" content="batch/core 리포트 개발자와 배포 운영자" />
+    <meta name="problem" content="승인된 visibility 재할당과 claim 만료 fencing 변경의 실제 구현·검증 상태 추적" />
+    <meta name="core-flow" content="승인 기준선 → 코드·테스트 변경 → 집중 검증 → 잔여 위험·운영 이해 점검" />
+    <title>비동기 리포트 워커 가시성·lease fencing 구현 통제</title>
+    <style>
+      :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2937; background: #f8fafc; }
+      body { max-width: 1120px; margin: 0 auto; padding: 32px 20px 64px; line-height: 1.65; }
+      header, section, aside { background: #fff; border: 1px solid #dbe3ec; border-radius: 12px; padding: 20px; margin: 18px 0; }
+      header { border-top: 5px solid #2563eb; }
+      nav { display: flex; flex-wrap: wrap; gap: 12px 18px; margin: 18px 0; }
+      nav a { color: #1d4ed8; }
+      h1, h2, h3 { line-height: 1.25; color: #0f172a; }
+      h1 { margin-top: 0; }
+      table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+      th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: left; vertical-align: top; }
+      th { background: #eff6ff; }
+      code, pre, samp { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      pre { overflow: auto; padding: 14px; background: #0f172a; color: #e2e8f0; border-radius: 8px; }
+      .status { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #dbeafe; color: #1e40af; font-weight: 700; }
+      .pending { background: #fef3c7; color: #92400e; }
+      .risk { border-left: 4px solid #dc2626; background: #fef2f2; }
+      .note { border-left: 4px solid #2563eb; background: #eff6ff; }
+      .control-slide { display: none; border: 1px solid #cbd5e1; border-radius: 10px; padding: 16px; }
+      .control-slide.active { display: block; }
+      fieldset { border: 0; padding: 0; margin: 0; }
+      legend { font-weight: 700; margin-bottom: 10px; }
+      label { display: block; padding: 7px 0; }
+      .controls { display: flex; gap: 8px; margin-top: 14px; }
+      button { border: 1px solid #64748b; border-radius: 7px; padding: 7px 12px; background: #fff; cursor: pointer; }
+      button[type="button"]:last-child { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+      .result { display: none; margin-top: 14px; padding: 12px; border-radius: 8px; background: #f0fdf4; }
+      .result.visible { display: block; }
+      .progress { color: #475569; margin: 8px 0; }
+      .muted { color: #64748b; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>비동기 리포트 워커 가시성·lease fencing 구현 통제</h1>
+      <p><strong>상태:</strong> <span class="status">구현 완료</span> · <strong>기술 검증:</strong> unit·정적 통과 / DB integration 미실시 · <strong>구현 이해:</strong> 미실시</p>
+      <p><strong>기준선:</strong> <a href="report-worker-lease-visibility-design.html">report-worker-lease-visibility-design.html</a> · 승인 <time datetime="2026-09-20">2026-09-20</time></p>
+      <p><strong>범위:</strong> <code>apps/batch/src/report/report.worker.ts</code> · <code>libs/core/src/report/mikroOrmReport.repository.ts</code> · 관련 report unit/integration tests</p>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#baseline">기준선</a>
+      <a href="#implementation">현재 구현</a>
+      <a href="#issues">이슈 등록부</a>
+      <a href="#verification">검증</a>
+      <a href="#residual">잔여 위험</a>
+      <a href="#control">구현 이해 점검</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="baseline">
+          <h2>승인된 기준선</h2>
+          <dl>
+            <dt><strong>목표</strong></dt><dd>최종 visibility 필터 결과를 저장 content에 반영하고, 만료 claim의 worker-owned write를 차단한다.</dd>
+            <dt><strong>불변식</strong></dt><dd>claim id·attempt·token이 맞고 lease가 유효할 때만 captureCandidates·heartbeat·complete·fail이 성공한다.</dd>
+            <dt><strong>비목표</strong></dt><dd>스키마·HTTP API·lease 기간·재시도 정책·provider 계약·DB clock 전면 통합은 변경하지 않는다.</dd>
+            <dt><strong>승인 범위</strong></dt><dd>설계 문서 D1 visibility 재할당, D2 captureCandidates 포함 fencing, D3 기존 <code>now</code> 계약 유지.</dd>
+          </dl>
+        </section>
+
+        <section id="implementation">
+          <h2>현재 구현</h2>
+          <p>승인 범위의 구현을 완료했다. 스키마·API·lease 기간·재시도 정책은 변경하지 않았다.</p>
+          <ol>
+            <li><code>apps/batch/src/report/report.worker.ts:166</code>에서 두 번째 <code>filterVisibleCandidates</code> 반환값을 <code>candidates</code>에 재할당했다.</li>
+            <li><code>libs/core/src/report/mikroOrmReport.repository.ts</code>의 heartbeat·captureCandidates·complete·fail에 <code>lease_expires_at &gt; now</code> 조건을 추가했다. <code>complete</code>는 선행 select와 최종 update 모두 검사한다.</li>
+            <li>visibility 변화 unit test와 만료 claim lifecycle integration test를 추가했다.</li>
+            <li>집중 테스트·전체 unit·typecheck·lint·format을 실행했다.</li>
+          </ol>
+          <pre aria-label="변경 경계">RUNNING + id/attempt/token + lease_expires_at > now
+  → claim-bound write 허용
+만료 또는 token 불일치
+  → row count 0 / STALE_CLAIM
+  → 기존 stale 처리와 다음 claim 회수</pre>
+        </section>
+
+        <section id="issues">
+          <h2>이슈 등록부</h2>
+          <table>
+            <caption>승인 범위의 구현 이슈와 상태</caption>
+            <thead><tr><th scope="col">ID / 상태</th><th scope="col">증상·원인</th><th scope="col">조치·증거</th><th scope="col">잔여 위험</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">REP-001 · 해결됨</th><td>두 번째 visibility 반환값 폐기. <code>report.worker.ts:166</code>.</td><td>최종 candidates 재할당 및 visibility flip unit test 통과.</td><td>두 번째 조회 이후의 좁은 TOCTOU는 기존 read-time filtering 정책 범위.</td></tr>
+              <tr><th scope="row">REP-002 · 해결됨</th><td>heartbeat/complete/fail 및 후보 저장이 lease 만료를 조건으로 검사하지 않음.</td><td>네 claim-bound 경로에 guard를 추가하고 lifecycle test를 작성했다.</td><td>호스트 시계 동기화는 기존 <code>now</code> 계약에 남음.</td></tr>
+              <tr><th scope="row">REP-003 · 완화됨</th><td>변경 후 회귀 검증 공백.</td><td>전체 unit 234개, typecheck, lint, format 통과. PostgreSQL lifecycle suite는 URL 부재로 7개 skip.</td><td>실제 DB transaction 경계는 disposable PostgreSQL 실행 전까지 미검증.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="verification">
+          <h2>검증 증거</h2>
+          <table>
+            <caption>구현 후 갱신할 검증 매핑</caption>
+            <thead><tr><th scope="col">축</th><th scope="col">명령/관찰</th><th scope="col">상태</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">visibility 결과</th><td><code>npm run test:jest -- test/unit/reportWorker.test.ts</code> · 1 suite / 11 tests passed</td><td>통과</td></tr>
+              <tr><th scope="row">전체 unit 회귀</th><td><code>npm run test:unit</code> · 46 suites / 234 tests passed</td><td>통과</td></tr>
+              <tr><th scope="row">lease lifecycle</th><td><code>npm run test:jest -- test/integration/reportLifecycle.test.ts</code> · 7 tests skipped: <code>REPORT_TEST_DATABASE_URL</code> 없음</td><td>미실시</td></tr>
+              <tr><th scope="row">정적 계약</th><td><code>npm run typecheck</code> · <code>npm run lint</code> · <code>npm run format:check</code></td><td>통과</td></tr>
+              <tr><th scope="row">변경 범위</th><td><code>git diff --check</code> 통과. 대상 코드·테스트 diff는 승인 범위와 일치; 기존 unrelated worktree 변경은 건드리지 않음.</td><td>통과</td></tr>
+            </tbody>
+          </table>
+          <p class="muted">명령 실패 시 원인과 미검증 범위를 숨기지 않고 기록한다. 테스트 통과만으로 DB 동시성 전체를 증명했다고 표현하지 않는다.</p>
+        </section>
+
+        <section id="delta">
+          <h2>설계 delta</h2>
+          <p><strong>없음.</strong> 승인된 D1 재할당, D2 captureCandidates 포함 fencing, D3 기존 <code>now</code> 계약 유지가 그대로 구현됐다. 스키마·API·외부 효과·재시도 정책의 추가 변경은 없다.</p>
+        </section>
+
+        <section id="residual">
+          <h2>잔여 위험과 운영 조건</h2>
+          <aside class="risk"><strong>현재 잔여 위험:</strong> 설계는 repository 메서드의 기존 <code>now</code> 계약을 유지한다. 배포 호스트 간 시계 오차가 실제로 관측되면 <code>clock_timestamp()</code> 기반의 별도 lease 시간 통합 설계를 다시 승인해야 한다.</aside>
+          <p>운영에서 확인할 첫 증거는 <code>report.run.stale_result</code>, <code>report.run.stale_failure</code> 로그와 report의 attempt/token 상태다. 오래된 worker가 false를 받은 뒤 새 attempt가 claim되면 정상 회복 경로다.</p>
+        </section>
+
+        <section id="review">
+          <h2>자기 변경 읽기 전용 리뷰</h2>
+          <dl>
+            <dt><strong>리뷰 유형</strong></dt><dd>자기 변경 · 구현 후 critical review</dd>
+            <dt><strong>검토 범위</strong></dt><dd>worker visibility 재할당, repository SQL predicate, 신규 unit/integration test, 승인 기준선 대비 diff</dd>
+            <dt><strong>검토 결과</strong></dt><dd>승인 설계와 구현이 일치한다. 새로운 concrete finding 없음.</dd>
+            <dt><strong>확인한 불변식</strong></dt><dd>최종 content는 최신 candidates를 사용하며, captureCandidates·heartbeat·complete·fail은 id/attempt/token과 lease 만료를 함께 검사한다.</dd>
+            <dt><strong>검증 한계</strong></dt><dd>실제 PostgreSQL lifecycle test는 <code>REPORT_TEST_DATABASE_URL</code> 부재로 실행하지 못했다. SQL placeholder와 transaction race의 runtime 증거는 아직 없다.</dd>
+          </dl>
+        </section>
+
+        <section id="control">
+          <h2>구현 이해 점검</h2>
+          <p><strong>implementation-control-state:</strong> 구현 완료 · <strong>이해 점검:</strong> 미실시</p>
+          <p>이 점검은 실제 구현·검증 후 as-built 동작을 예측하는 비차단 확인이다. 결과는 HTML 안에만 남는다.</p>
+          <div id="control-deck" aria-live="polite">
+            <p class="progress" id="control-progress">1 / 4 · 답변 0개</p>
+            <div class="control-slide active" data-answer="b">
+              <fieldset>
+                <legend>IC-01 · provider 처리 뒤 후보가 acted 상태가 되면 저장 경로는 무엇을 사용해야 하는가?</legend>
+                <label><input type="radio" name="ic-01" value="a" /> provider 호출 전 후보 배열</label>
+                <label><input type="radio" name="ic-01" value="b" /> 두 번째 visibility 결과를 재할당한 후보 배열</label>
+                <label><input type="radio" name="ic-01" value="c" /> DB에 저장된 원본 candidates만 무조건 사용</label>
+              </fieldset>
+              <div class="result"><strong>결과:</strong> <span data-role="status"></span><p data-role="explanation"></p><p data-role="next"></p></div>
+            </div>
+            <div class="control-slide" data-answer="c">
+              <fieldset>
+                <legend>IC-02 · 만료된 claim의 complete 결과는 무엇인가?</legend>
+                <label><input type="radio" name="ic-02" value="a" /> token만 맞으면 성공</label>
+                <label><input type="radio" name="ic-02" value="b" /> 항상 예외를 던지고 수동 복구</label>
+                <label><input type="radio" name="ic-02" value="c" /> update가 거부되고 false, 기존 상태 불변</label>
+              </fieldset>
+              <div class="result"><strong>결과:</strong> <span data-role="status"></span><p data-role="explanation"></p><p data-role="next"></p></div>
+            </div>
+            <div class="control-slide" data-answer="a">
+              <fieldset>
+                <legend>IC-03 · 만료 write 거부 뒤 정상 복구의 첫 주체는 누구인가?</legend>
+                <label><input type="radio" name="ic-03" value="a" /> 다음 claim 호출이 만료 row를 회수하고 새 attempt/token을 부여한다.</label>
+                <label><input type="radio" name="ic-03" value="b" /> 오래된 worker가 같은 token으로 재시도한다.</label>
+                <label><input type="radio" name="ic-03" value="c" /> API 요청이 content를 직접 복구한다.</label>
+              </fieldset>
+              <div class="result"><strong>결과:</strong> <span data-role="status"></span><p data-role="explanation"></p><p data-role="next"></p></div>
+            </div>
+            <div class="control-slide" data-answer="b">
+              <fieldset>
+                <legend>IC-04 · 검증이 통과해도 별도로 남는 운영 조건은 무엇인가?</legend>
+                <label><input type="radio" name="ic-04" value="a" /> schema migration을 추가 배포해야 함</label>
+                <label><input type="radio" name="ic-04" value="b" /> 호스트 시계 오차는 기존 now 계약의 잔여 위험으로 관찰해야 함</label>
+                <label><input type="radio" name="ic-04" value="c" /> provider prompt를 운영자가 매번 교체해야 함</label>
+              </fieldset>
+              <div class="result"><strong>결과:</strong> <span data-role="status"></span><p data-role="explanation"></p><p data-role="next"></p></div>
+            </div>
+            <div class="controls">
+              <button type="button" id="control-prev">이전</button>
+              <button type="button" id="control-next">다음</button>
+              <button type="button" id="control-submit">제출</button>
+            </div>
+            <output id="control-output" aria-live="polite"></output>
+          </div>
+        </section>
+      </article>
+    </main>
+
+    <script>
+      (() => {
+        const slides = [...document.querySelectorAll('.control-slide')];
+        const progress = document.querySelector('#control-progress');
+        const output = document.querySelector('#control-output');
+        let index = 0;
+        const explanations = [
+          '최종 content는 두 번째 visibility 결과를 재할당한 candidates에서 만들어야 한다.',
+          'lease 만료 조건이 false를 만들고 content·status를 변경하지 않는다.',
+          '다음 claim이 expired row를 회수하고 새 attempt/token으로 재처리한다.',
+          '호스트 시계 동기화는 이번 범위 밖의 잔여 운영 조건이다.'
+        ];
+        function answered() { return slides.filter((slide) => slide.querySelector('input:checked')).length; }
+        function render() {
+          slides.forEach((slide, position) => slide.classList.toggle('active', position === index));
+          progress.textContent = `${index + 1} / ${slides.length} · 답변 ${answered()}개`;
+          document.querySelector('#control-prev').disabled = index === 0;
+          document.querySelector('#control-next').disabled = index === slides.length - 1;
+        }
+        function submit() {
+          slides.forEach((slide, position) => {
+            const selected = slide.querySelector('input:checked');
+            if (!selected) return;
+            const correct = selected.value === slide.dataset.answer;
+            const result = slide.querySelector('.result');
+            result.classList.add('visible');
+            result.querySelector('[data-role="status"]').textContent = correct ? '확립' : '보류';
+            result.querySelector('[data-role="explanation"]').textContent = explanations[position];
+            result.querySelector('[data-role="next"]').textContent = correct ? '다음 경계로 진행한다.' : '해당 경계의 실제 코드를 다시 확인한다.';
+          });
+          const complete = slides.every((slide) => slide.querySelector('input:checked'));
+          const correct = slides.every((slide) => slide.querySelector('input:checked')?.value === slide.dataset.answer);
+          output.textContent = complete ? (correct ? '전체 점검: 확립' : '전체 점검: 보류') : '미응답 항목이 있다.';
+        }
+        document.querySelector('#control-prev').addEventListener('click', () => { index = Math.max(0, index - 1); render(); });
+        document.querySelector('#control-next').addEventListener('click', () => { index = Math.min(slides.length - 1, index + 1); render(); });
+        document.querySelector('#control-submit').addEventListener('click', submit);
+        slides.forEach((slide) => slide.addEventListener('change', render));
+        render();
+      })();
+    </script>
+  </body>
+</html>

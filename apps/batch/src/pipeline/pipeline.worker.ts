@@ -39,6 +39,7 @@ import {
   PipelineAiConfiguration,
   type PipelineAiUsageContext,
 } from '@newtine/batch/pipeline/pipeline.ai.config.js';
+import { DEFAULT_OPENAI_TEXT_MODEL } from '@newtine/batch/ai/ai-model.defaults.js';
 
 @Injectable()
 export class PipelineWorker implements OnModuleDestroy {
@@ -649,7 +650,7 @@ function normalizeTitle(value: string): string {
 
 function usageModel(operation: UsageRecordInput['operation']): string | undefined {
   if (operation === 'EMBED') return 'text-embedding-3-small';
-  if (operation === 'LLM') return 'gpt-5.4-mini-2026-03-17';
+  if (operation === 'LLM') return DEFAULT_OPENAI_TEXT_MODEL;
   return undefined;
 }
 

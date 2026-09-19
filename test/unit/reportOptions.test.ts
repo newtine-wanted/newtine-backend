@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from '@jest/globals';
 
+import { DEFAULT_OPENAI_TEXT_MODEL } from '@newtine/batch/ai/ai-model.defaults.js';
 import {
   DEFAULT_REPORT_AI_TIMEOUT_MS,
   DEFAULT_REPORT_WORKER_EXECUTION_TIMEOUT_MS,
@@ -35,6 +36,17 @@ test('report AI configuration has isolated worker defaults and immutable prompt 
   assert.equal(Object.isFrozen(configuration.snapshot), true);
   assert.match(configuration.generationPrompt.hash, /^[0-9a-f]{64}$/);
   assert.match(configuration.validationPrompt.hash, /^[0-9a-f]{64}$/);
+});
+
+test('report AI model falls back when the environment value is missing or blank', () => {
+  assert.equal(
+    new ReportAiConfiguration(env({ REPORT_AI_MODEL: undefined })).model,
+    DEFAULT_OPENAI_TEXT_MODEL,
+  );
+  assert.equal(
+    new ReportAiConfiguration(env({ REPORT_AI_MODEL: '  ' })).model,
+    DEFAULT_OPENAI_TEXT_MODEL,
+  );
 });
 
 test('report configuration does not require the API key until reportWorker is selected', () => {

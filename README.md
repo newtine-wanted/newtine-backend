@@ -245,6 +245,8 @@ node --env-file=.env dist/apps/api/src/main.js
 | `NAVER_CLIENT_SECRET`     | 없음                      | 파이프라인 실행 시 필수 |
 | `OPENAI_API_KEY`          | 없음                      | 파이프라인 실행 시 필수 |
 | `PIPELINE_AI_CONFIG_PATH` | `config/pipeline-ai.yml`  | batch 시작 시 읽는 단계별 모델·prompt 설정 |
+| `PIPELINE_AI_MODEL`       | 빈 값                    | pipeline text stage 모델 override; 빈 값이면 stage YAML 후 기본 모델 사용 |
+| `REPORT_AI_MODEL`         | 빈 값                    | report worker 모델 override; 빈 값이면 `gpt-5.4-mini-2026-03-17` 사용 |
 | `PIPELINE_WORKER_POLL_MS` | `1000`                    | 워커 polling 간격(ms)   |
 | `PIPELINE_WORKER_ONCE`     | `0`                       | `1`이면 run 1건만 처리   |
 | `PIPELINE_EMBEDDING_REPAIR_RECLAIM_OWNER` | 없음 | 종료 확인된 repair processExecutionId만 지정 |
@@ -255,13 +257,6 @@ node --env-file=.env dist/apps/api/src/main.js
 | `AUTH_ALLOWED_ORIGINS`   | 빈 값(동일 origin)        | 허용할 절대 origin 목록 |
 | `INTEREST_ANALYSIS_WINDOW_DAYS` | `7` | 마이페이지 관심 분석 rolling 기간(일), 1~365 |
 | `INTEREST_ANALYSIS_MINIMUM_SAMPLE_SIZE` | `10` | 저표본 경고 임계값, 1~100000 |
-
-DB 기본값은 `NODE_ENV=development` 또는 `test`일 때만 적용됩니다. `DB_SSL_MODE=disable`은
-development/test에서만 허용되며, staging/production에서는 `DB_SSL_MODE=verify-full`과
-`DB_SSL_CA_PATH`가 없거나 인증서 파일을 읽지 못하면 ORM 초기화 단계에서 실패합니다.
-그 외 환경에서도 DB 변수 누락·빈 값·잘못된 포트가 ORM 초기화 단계에서 실패합니다. 로컬 예시는 [.env.example](.env.example)을
-참고하세요. `PIPELINE_AI_CONFIG_PATH`는 batch worker가 시작할 때 한 번 읽습니다. YAML을 변경하면
-worker를 재시작해야 다음 실행부터 적용되며, API 프로세스는 이 파일을 읽지 않습니다.
 
 ### 뉴스 검색 자격증명
 
@@ -431,7 +426,11 @@ npm run db:migrate
 npm run start:batch -- reportWorker
 ```
 
-`OPENAI_API_KEY`, `REPORT_AI_MODEL`을 반드시 설정합니다. 모델 이름은 사용하는 계정에서 Structured Outputs를 지원하는 모델로 명시합니다. `REPORT_WORKER_ONCE=1`은 한 작업만 처리하는 점검 모드이며 상시 운영에서는 사용하지 않습니다. 일반 DB 점검/기존 pipeline 작업에는 보고서 AI 설정을 요구하지 않습니다.
+`OPENAI_API_KEY`는 반드시 설정합니다. `REPORT_AI_MODEL`은 선택 사항이며 비어 있으면
+`gpt-5.4-mini-2026-03-17`을 사용합니다. 값을 지정할 경우 사용하는 계정에서 Structured
+Outputs를 지원하는 모델명을 넣습니다. `REPORT_WORKER_ONCE=1`은 한 작업만 처리하는 점검
+모드이며 상시 운영에서는 사용하지 않습니다. 일반 DB 점검/기존 pipeline 작업에는 보고서 AI
+설정을 요구하지 않습니다.
 
 Compose에서는 `reports` 프로필의 `report-worker`가 별도 프로세스입니다. API 및 migrate와 같은 DB 설정을 사용하고 migrate 성공 뒤 시작합니다.
 

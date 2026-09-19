@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { Injectable } from '@nestjs/common';
 
+import { DEFAULT_OPENAI_TEXT_MODEL } from '@newtine/batch/ai/ai-model.defaults.js';
+
 export interface ReportWorkerOptions {
   readonly pollIntervalMs: number;
   readonly leaseMs: number;
@@ -71,7 +73,7 @@ export class ReportAiConfiguration {
   readonly snapshot: ReportAiConfigSnapshot;
 
   constructor(env: NodeJS.ProcessEnv = process.env) {
-    const model = nonEmptyString(env[REPORT_AI_MODEL_ENV], REPORT_AI_MODEL_ENV);
+    const model = optionalNonEmptyString(env[REPORT_AI_MODEL_ENV]) ?? DEFAULT_OPENAI_TEXT_MODEL;
     const providerTimeoutMs = readInteger(
       firstDefined(env[REPORT_AI_TIMEOUT_ENV], env.REPORT_WORKER_PROVIDER_TIMEOUT_MS),
       DEFAULT_REPORT_AI_TIMEOUT_MS,
@@ -203,12 +205,6 @@ function readInteger(
     throw new Error(`${name} must be an integer between ${min} and ${max}`);
   }
   return value;
-}
-
-function nonEmptyString(value: string | undefined, name: string): string {
-  const result = optionalNonEmptyString(value);
-  if (result === undefined) throw new Error(`${name} is required when reportWorker is selected`);
-  return result;
 }
 
 function optionalNonEmptyString(value: string | undefined): string | undefined {

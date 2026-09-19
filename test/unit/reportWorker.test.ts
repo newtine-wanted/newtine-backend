@@ -455,3 +455,37 @@ test('withdrawn recommendation is omitted without failing input analysis', async
   assert.deepEqual(state.completed[0]?.majorIssues, []);
   assert.equal(usage.starts.length, 0);
 });
+
+test('worker applies a recommendation withdrawal observed by the final visibility check', async () => {
+  const { claim: current } = claim(2);
+  const withdrawn = issue();
+  const snapshot = { ...candidates(), major: [withdrawn], majorCategoryCodes: ['ECONOMY'] };
+  let visibilityReads = 0;
+  const state = repositoryFor(current, snapshot, {
+    visibility: async (ids) => {
+      visibilityReads += 1;
+      return visibilityReads === 1 ? ids : ids.filter((id) => id !== withdrawn.issueId);
+    },
+  });
+  const usage = usageRepository();
+  const worker = new ReportWorker(
+    state.repository,
+    {
+      generate: async () => {
+        throw new Error('AI must not be called');
+      },
+      validate: async () => {
+        throw new Error('AI must not be called');
+      },
+    },
+    usage.repository,
+    logger(),
+    configuration(),
+  );
+
+  await worker.runOnce();
+  assert.equal(visibilityReads, 2);
+  assert.deepEqual(state.completed[0]?.majorIssues, []);
+  assert.equal(state.completed[0]?.recommendationsStatus, 'PARTIAL');
+  assert.equal(state.failures.length, 0);
+});

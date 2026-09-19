@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { test } from '@jest/globals';
 
+import { DEFAULT_OPENAI_TEXT_MODEL } from '@newtine/batch/ai/ai-model.defaults.js';
 import {
   DEFAULT_PIPELINE_AI_CONFIG_PATH,
   PipelineAiConfiguration,
@@ -19,6 +20,40 @@ test('pipeline AI configuration snapshots stage models and immutable prompt hash
   assert.match(snapshot.stages.content.prompt!.hash, /^[0-9a-f]{64}$/);
   assert.equal(Object.isFrozen(snapshot), true);
   assert.equal(Object.isFrozen(snapshot.stages.content.prompt), true);
+});
+
+test('pipeline AI model env overrides every text stage while keeping embedding separate', () => {
+  const configuration = new PipelineAiConfiguration(undefined, {
+    ...process.env,
+    PIPELINE_AI_MODEL: 'env-pipeline-model',
+  });
+
+  assert.equal(configuration.stage('candidate').model, 'env-pipeline-model');
+  assert.equal(configuration.stage('content').model, 'env-pipeline-model');
+  assert.equal(configuration.stage('validation').model, 'env-pipeline-model');
+  assert.equal(configuration.stage('embedding').model, 'text-embedding-3-small');
+});
+
+test('pipeline AI text stages fall back to the shared model when YAML omits their models', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'newtine-pipeline-ai-'));
+  const path = join(directory, 'pipeline-ai.yml');
+  try {
+    const source = readFileSync(join(process.cwd(), DEFAULT_PIPELINE_AI_CONFIG_PATH), 'utf8');
+    writeFileSync(
+      path,
+      source
+        .split('\n')
+        .filter((line) => line !== '    model: gpt-5.4-mini-2026-03-17')
+        .join('\n'),
+    );
+    const snapshot = loadPipelineAiConfig(path);
+
+    assert.equal(snapshot.stages.candidate.model, DEFAULT_OPENAI_TEXT_MODEL);
+    assert.equal(snapshot.stages.content.model, DEFAULT_OPENAI_TEXT_MODEL);
+    assert.equal(snapshot.stages.validation.model, DEFAULT_OPENAI_TEXT_MODEL);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('pipeline AI configuration rejects an embedding dimension outside the current vector schema', () => {
