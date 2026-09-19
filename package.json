@@ -34,7 +34,8 @@
     "contracts:e2e": "npm run contracts:clean && nestia e2e && node scripts/prefix-generated-api.mjs",
     "contracts:all": "npm run contracts:sdk && npm run contracts:e2e && npm run contracts:swagger",
     "contracts:check": "npm run contracts:all && npm run test:contracts && npm run typecheck:generated",
-    "news:discovery": "node scripts/news-discovery.mjs"
+    "news:discovery": "node scripts/news-discovery.mjs",
+    "news:collection": "node scripts/news-collection.mjs"
   },
   "dependencies": {
     "@mikro-orm/core": "7.2.0",
