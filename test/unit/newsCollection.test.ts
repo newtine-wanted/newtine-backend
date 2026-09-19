@@ -310,3 +310,32 @@ test('model refuses malformed, refused and incomplete output', async () => {
     await assert.rejects(m.relevant(candidate(), [article(1)]));
   }
 });
+
+test('model normalizes repeated valid references but still rejects out-of-range indices', async () => {
+  for (const indices of [
+    [0, 0, 1, 1],
+    [0, 2, 2],
+  ]) {
+    const m = new CollectionOpenAiModel(
+      'key',
+      async () =>
+        new Response(
+          JSON.stringify({
+            status: 'completed',
+            output: [
+              {
+                type: 'message',
+                content: [{ type: 'output_text', text: JSON.stringify({ indices }) }],
+              },
+            ],
+          }),
+        ),
+    );
+    if (indices.includes(2))
+      await assert.rejects(
+        m.relevant(candidate(), [article(0), article(1)]),
+        /INVALID_TITLE_INDEXES/,
+      );
+    else assert.deepEqual(await m.relevant(candidate(), [article(0), article(1)]), [0, 1]);
+  }
+});
