@@ -22,7 +22,7 @@ const at = new Date('2026-09-20T03:00:00Z');
 const since = '2026-09-19T03:00:00.000Z';
 const config: DiscoveryConfig = {
   articlesPerQuery: 50,
-  candidatesPerQuery: 5,
+  candidatesPerQuery: 3,
   maxQueries: 300,
   maxCandidates: 1500,
   entityTypes: ['POLITICIAN', 'INSTITUTION', 'PARTY'],
@@ -275,7 +275,7 @@ test('OpenAI request uses fixed model and only the title array as extraction inp
       }),
     );
   }) as typeof fetch);
-  await client.extract(['제목만 전송'], 5);
+  await client.extract(['제목만 전송'], 3);
   assert.deepEqual(JSON.parse(String(payload.input)), [{ index: 0, title: '제목만 전송' }]);
   assert.equal(payload.model, 'gpt-5.4-mini-2026-03-17');
   assert.equal(payload.store, false);
@@ -285,7 +285,7 @@ test('OpenAI request uses fixed model and only the title array as extraction inp
     (async () =>
       new Response(JSON.stringify({ status: 'incomplete', output: [] }))) as typeof fetch,
   );
-  await assert.rejects(incomplete.extract(['제목'], 5), /INCOMPLETE/);
+  await assert.rejects(incomplete.extract(['제목'], 3), /INCOMPLETE/);
 });
 
 test('failed semantic validation records usage and preserves original query checkpoints', async () => {
@@ -409,7 +409,7 @@ test('extraction schema bounds evidence indices to the actual title count', asyn
       }),
     );
   }) as typeof fetch);
-  await client.extract(['A', 'B'], 5);
+  await client.extract(['A', 'B'], 3);
   const text = payload.text as {
     format: {
       schema: {
@@ -431,12 +431,12 @@ test('extraction schema bounds evidence indices to the actual title count', asyn
   assert.equal(indexes.items.maximum, 1);
 });
 
-test('candidate limit cannot exceed five in configuration, direct model calls, or generated output', async () => {
-  assert.throws(() => parseDiscoveryConfig({ ...config, candidatesPerQuery: 6 }));
+test('candidate limit cannot exceed three in configuration, direct model calls, or generated output', async () => {
+  assert.throws(() => parseDiscoveryConfig({ ...config, candidatesPerQuery: 4 }));
   const client = new DiscoveryOpenAiModel('test', (async () => {
     throw new Error('MUST_NOT_CALL');
   }) as typeof fetch);
-  await assert.rejects(client.extract(['뉴스'], 6), /INVALID_CANDIDATE_LIMIT/);
+  await assert.rejects(client.extract(['뉴스'], 4), /INVALID_CANDIDATE_LIMIT/);
   const store = new Store();
   store.catalogQueries = [query()];
   await assert.rejects(
@@ -445,7 +445,7 @@ test('candidate limit cannot exceed five in configuration, direct model calls, o
       { search: async () => [article('기사')] },
       model({
         extract: async () =>
-          Array.from({ length: 6 }, (_, i) => ({
+          Array.from({ length: 4 }, (_, i) => ({
             title: `후보 ${i}`,
             titleIndexes: [0],
             representativeTitleIndex: 0,

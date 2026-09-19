@@ -67,3 +67,9 @@
 - 관련 단위 테스트 전체 32개 및 실제 DB discovery smoke 통과. 세부 표본 결과와 남은 특정성 한계는 `stage-2-collection.md`의 피드백 반영 검증 절 참고.
 
 
+## 후보 상한 3개 변경 (2026-09-20)
+
+- 설정 및 직접 모델 호출에서 4개 이상 요청 거부, 모델이 4개 반환 시 실행 결과 저장 전 거부를 기존 경계 테스트로 확인.
+- `npm run test:jest -- test/unit/newsDiscovery.test.ts`: 16개 통과.
+- `npm run build:batch`: 통과.
+- 기존 실행 결과는 보존했고 유료 전체 재실행은 하지 않았다.
