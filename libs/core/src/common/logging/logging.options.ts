@@ -37,7 +37,7 @@ export function createLoggerOptions(service: LogService): Params<Request, Respon
       customAttributeKeys: { reqId: 'requestId' },
       genReqId: () => generateUuidV7(),
       redact: [...REDACT_PATHS],
-      ...(environment === 'development'
+      ...(environment === 'development' && process.env.LOG_FORMAT !== 'json'
         ? {
             transport: {
               target: 'pino-pretty',
