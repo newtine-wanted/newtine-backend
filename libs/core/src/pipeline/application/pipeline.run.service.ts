@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 
 import { isUuidV7, type UuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
-import { normalizePipelineLimits } from '@newtine/core/pipeline/domain/pipeline.limits.js';
+import {
+  MAX_FAILED_JOB_IDS,
+  normalizePipelineLimits,
+} from '@newtine/core/pipeline/domain/pipeline.limits.js';
 import {
   PipelineException,
   PipelineExceptionCode,
@@ -66,6 +69,12 @@ export class PipelineRunService {
       throw new PipelineException(
         PipelineExceptionCode.InvalidInput,
         '재시도 범위가 올바르지 않습니다.',
+      );
+    }
+    if (Array.isArray(command.failedJobIds) && command.failedJobIds.length > MAX_FAILED_JOB_IDS) {
+      throw new PipelineException(
+        PipelineExceptionCode.InvalidInput,
+        `failedJobIds는 최대 ${MAX_FAILED_JOB_IDS}개까지 지정할 수 있습니다.`,
       );
     }
     if (!Number.isSafeInteger(command.expectedAttempt) || command.expectedAttempt < 1) {

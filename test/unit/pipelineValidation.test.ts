@@ -3,6 +3,7 @@ import { test } from '@jest/globals';
 
 import {
   InMemoryPipelineRepository,
+  MAX_FAILED_JOB_IDS,
   PipelineException,
   PipelineExceptionCode,
   PipelineRunService,
@@ -166,6 +167,28 @@ test('run service rejects an explicitly empty retry job list', async () => {
     (error: unknown) =>
       error instanceof PipelineException && error.code === PipelineExceptionCode.InvalidInput,
   );
+});
+
+test('run service rejects a retry job list above the explicit input cap before repository work', async () => {
+  const repository = new InMemoryPipelineRepository();
+  const service = new PipelineRunService(repository);
+  const run = await service.enqueue({ idempotencyKey: 'too-many-retry-jobs', query: '정책' });
+  const failedJobIds = Array.from({ length: MAX_FAILED_JOB_IDS + 1 }, () => generateUuidV7());
+
+  await assert.rejects(
+    () =>
+      service.retry({
+        runId: run.id,
+        expectedAttempt: 1,
+        scope: 'DISCOVERY',
+        failedJobIds,
+      }),
+    (error: unknown) =>
+      error instanceof PipelineException && error.code === PipelineExceptionCode.InvalidInput,
+  );
+  const unchanged = await repository.findById(run.id);
+  assert.equal(unchanged?.attempt, 1);
+  assert.equal(unchanged?.status, 'QUEUED');
 });
 
 test('run service rejects CONTENT retry without an explicit failed job list before mutation', async () => {
