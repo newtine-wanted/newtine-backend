@@ -44,6 +44,7 @@ export interface ValidationResult {
   status?: 'PASSED' | 'HELD';
 }
 export interface ValidationSnapshot {
+  aiValidationEnabled?: boolean;
   at: string;
   generationAt: string;
   config: GenerationConfig;
@@ -59,7 +60,7 @@ export interface ValidationRun {
   snapshot: ValidationSnapshot;
 }
 export interface ValidationStore {
-  claim(source: string, at: Date): Promise<ValidationRun>;
+  claim(source: string, at: Date, aiValidationEnabled?: boolean): Promise<ValidationRun>;
   save(run: ValidationRun): Promise<void>;
   heartbeat(run: ValidationRun): Promise<void>;
   complete(run: ValidationRun): Promise<void>;

@@ -1,3 +1,4 @@
+import { Migration20260920000400NewsValidationMode } from '../dist/apps/batch/src/validation/validation-mode.migration.js';
 /* global console, process, AbortController */
 import 'reflect-metadata';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -19,6 +20,7 @@ export async function validationOrm() {
     Migration20260920000100NewsCollection,
     Migration20260920000200NewsGeneration,
     Migration20260920000300NewsValidation,
+    Migration20260920000400NewsValidationMode,
   );
   return MikroORM.init(options);
 }
@@ -28,6 +30,11 @@ import { writeValidationReport } from './news-validation-report.mjs';
 async function main() {
   const command = process.argv[2] ?? 'run';
   if (!['run', 'migrate'].includes(command)) throw new Error('UNKNOWN_VALIDATION_COMMAND');
+  const config = JSON.parse(
+    await readFile(process.env.NEWS_VALIDATION_CONFIG ?? 'config/news-validation.json', 'utf8'),
+  );
+  if (typeof config?.aiValidationEnabled !== 'boolean')
+    throw new Error('INVALID_VALIDATION_CONFIG');
   const source = process.argv[3];
   if (command === 'run' && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(source ?? ''))
     throw new Error('GENERATION_RUN_ID_REQUIRED');
@@ -45,18 +52,30 @@ async function main() {
     try {
       const service = new ValidationService(
         new ValidationRepository(orm.em.fork()),
-        new ValidationOpenAiModel(
-          process.env.OPENAI_API_KEY ?? '',
-          await readFile('docs/news-pipeline/direction/ux-writing.md', 'utf8'),
-        ),
+        config.aiValidationEnabled
+          ? new ValidationOpenAiModel(
+              process.env.OPENAI_API_KEY ?? '',
+              await readFile('docs/news-pipeline/direction/ux-writing.md', 'utf8'),
+            )
+          : null,
         (event) => console.log(JSON.stringify({ event: 'news.validation.progress', ...event })),
+        config.aiValidationEnabled,
       );
       const run = await service.execute(source, new Date(), controller.signal);
       const directory = resolve(process.env.NEWS_VALIDATION_DATA_DIR ?? '.local/news-validation');
       await mkdir(directory, { recursive: true });
-      const file = resolve(directory, `${run.generationRunId}-validated.json`);
+      const file = resolve(
+        directory,
+        `${run.generationRunId}-${config.aiValidationEnabled ? 'ai' : 'rules-only'}-validated.json`,
+      );
       await writeFile(file, JSON.stringify(run.snapshot, null, 2));
-      await writeValidationReport(run, resolve(directory, `${run.generationRunId}-report.md`));
+      await writeValidationReport(
+        run,
+        resolve(
+          directory,
+          `${run.generationRunId}-${config.aiValidationEnabled ? 'ai' : 'rules-only'}-report.md`,
+        ),
+      );
       const counts = Object.fromEntries(
         ['PASSED', 'HELD'].map((s) => [
           s,

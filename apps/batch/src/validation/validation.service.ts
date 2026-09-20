@@ -4,11 +4,16 @@ import type { ValidationModel, ValidationRun, ValidationStore } from './validati
 export class ValidationService {
   constructor(
     private readonly store: ValidationStore,
-    private readonly model: ValidationModel,
+    private readonly model: ValidationModel | null = null,
     private readonly progress?: (e: { runId: string; completed: number; total: number }) => void,
+    private readonly aiValidationEnabled = false,
   ) {}
   async execute(source: string, at = new Date(), signal?: AbortSignal): Promise<ValidationRun> {
-    const run = await this.store.claim(source, at);
+    if (this.aiValidationEnabled && !this.model) throw new Error('VALIDATION_MODEL_REQUIRED');
+    const run = await this.store.claim(source, at, this.aiValidationEnabled);
+    run.snapshot.aiValidationEnabled ??= this.aiValidationEnabled;
+    if (run.snapshot.aiValidationEnabled !== this.aiValidationEnabled)
+      throw new Error('VALIDATION_MODE_MISMATCH');
     if (run.completed) return run;
     let heartbeatError: unknown;
     let beating: Promise<void> | undefined;
@@ -29,7 +34,7 @@ export class ValidationService {
     };
     const save = async () => {
       check();
-      run.snapshot.usage.push(...this.model.usage.splice(0));
+      run.snapshot.usage.push(...(this.model?.usage.splice(0) ?? []));
       await this.store.save(run);
     };
     try {
@@ -45,6 +50,18 @@ export class ValidationService {
           await save();
         }
         if (r.status) continue;
+        if (!this.aiValidationEnabled) {
+          const failures = rules(r.current, run.snapshot);
+          r.reviews = [{ phase: 'INITIAL', rules: failures }];
+          r.status = failures.length ? 'HELD' : 'PASSED';
+          await save();
+          this.progress?.({
+            runId: run.id,
+            completed: run.snapshot.results.filter((r) => r.status).length,
+            total: run.snapshot.results.length,
+          });
+          continue;
+        }
         for (const phase of ['INITIAL', 'FINAL'] as const) {
           let review = r.reviews.find((v) => v.phase === phase);
           if (!review) {
@@ -54,7 +71,7 @@ export class ValidationService {
           }
           if (!review.rules.length && !review.semantic) {
             review.semantic = checkedReview(
-              await this.model.review(r.current, run.snapshot),
+              await this.model!.review(r.current, run.snapshot),
               r.current,
             );
             await save();
@@ -71,7 +88,7 @@ export class ValidationService {
           if (!r.repair) {
             const fields = repairFields(findings);
             const patches = fields.length
-              ? await this.model.repair(r.current, findings, fields, run.snapshot)
+              ? await this.model!.repair(r.current, findings, fields, run.snapshot)
               : [];
             r.repair = { fields, patches };
             try {
@@ -98,7 +115,7 @@ export class ValidationService {
       await this.store.complete(run);
       return run;
     } catch (error) {
-      run.snapshot.usage.push(...this.model.usage.splice(0));
+      run.snapshot.usage.push(...(this.model?.usage.splice(0) ?? []));
       try {
         await this.store.save(run);
       } catch {

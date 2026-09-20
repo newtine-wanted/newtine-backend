@@ -18,6 +18,11 @@ import type {
   ValidationStore,
   ValidationModel,
 } from '@newtine/batch/validation/validation.types.js';
+class AiValidationService extends ValidationService {
+  constructor(store: ValidationStore, model: ValidationModel) {
+    super(store, model, undefined, true);
+  }
+}
 const config: GenerationConfig = {
   bodyCharacters: 18000,
   freshnessHalfLifeHours: 72,
@@ -143,9 +148,9 @@ function model(overrides: Partial<ValidationModel> = {}): ValidationModel {
 test('valid content passes without requiring independent evidence groups', async () => {
   const store = new Store();
   assert.equal(rules(store.run.snapshot.results[0]!.current, store.run.snapshot).length, 0);
-  const run = await new ValidationService(store, model()).execute('source');
+  const run = await new AiValidationService(store, model()).execute('source');
   assert.equal(run.snapshot.results[0]!.status, 'PASSED');
-  const again = await new ValidationService(
+  const again = await new AiValidationService(
     store,
     model({
       review: async () => {
@@ -161,7 +166,7 @@ test('rule failure bypasses initial semantic call and repairs only failed field'
   item.current.draft!.title = '';
   item.original = structuredClone(item.current);
   let calls = 0;
-  const run = await new ValidationService(
+  const run = await new AiValidationService(
     store,
     model({
       review: async () => {
@@ -185,7 +190,7 @@ test('rule failure bypasses initial semantic call and repairs only failed field'
 test('semantic failure repairs once and holds on repeated failure', async () => {
   const store = new Store();
   let repairs = 0;
-  const run = await new ValidationService(
+  const run = await new AiValidationService(
     store,
     model({
       review: async () => ({
@@ -210,7 +215,7 @@ test('semantic failure repairs once and holds on repeated failure', async () => 
 });
 test('invalid patch cannot mutate unrelated fields and is held', async () => {
   const store = new Store();
-  const run = await new ValidationService(
+  const run = await new AiValidationService(
     store,
     model({
       review: async () => ({
@@ -250,7 +255,7 @@ test('wrong DB codes, references, scores and shared impacts fail rules', () => {
 test('malformed repaired field is rejected by final rules', async () => {
   const store = new Store();
   store.run.snapshot.results[0]!.current.draft!.summaryLines = [];
-  const run = await new ValidationService(
+  const run = await new AiValidationService(
     store,
     model({ repair: async () => [{ field: 'summaryLines', value: null }] }),
   ).execute('source');
@@ -273,7 +278,7 @@ test('failed final API call resumes without repeating successful repair', async 
       return [{ field: 'title', value: '지원 발표' }];
     },
   });
-  const service = new ValidationService(store, m);
+  const service = new AiValidationService(store, m);
   await assert.rejects(service.execute('source'), /NETWORK/);
   const run = await service.execute('source');
   assert.equal(repairs, 1);
@@ -335,7 +340,7 @@ test('dependent shared impact fields repair together and preserve unrelated fiel
     description: '주거 지원 대상인 사람이라면 지원을 받을 수 있어요.',
     articleIds: [articles[0]!.articleId],
   };
-  const run = await new ValidationService(
+  const run = await new AiValidationService(
     store,
     model({
       review: async () =>
@@ -368,7 +373,7 @@ test('dependent shared impact fields repair together and preserve unrelated fiel
 test('bad computed scores are recomputed without a repair LLM call', async () => {
   const store = new Store();
   store.run.snapshot.results[0]!.current.scores!.freshness = 2;
-  const run = await new ValidationService(
+  const run = await new AiValidationService(
     store,
     model({
       repair: async () => {
@@ -459,7 +464,7 @@ test('three-term cap updates existing results without another LLM call and prese
   }));
   r.original = structuredClone(r.current);
   r.status = 'PASSED';
-  const run = await new ValidationService(
+  const run = await new AiValidationService(
     store,
     model({
       review: async () => {
@@ -474,3 +479,23 @@ test('three-term cap updates existing results without another LLM call and prese
   assert.equal(result.termLimit!.removedTerms.join(','), '발표');
   assert.equal(rules(result.current, run.snapshot).length, 0);
 });
+
+for (const invalid of [false, true])
+  test(`AI validation is disabled by default and rules still apply (invalid=${invalid})`, async () => {
+    const store = new Store();
+    if (invalid) store.run.snapshot.results[0]!.current.draft!.title = '';
+    const forbidden = model({
+      review: async () => {
+        throw new Error('AI_MUST_NOT_RUN');
+      },
+      repair: async () => {
+        throw new Error('AI_MUST_NOT_RUN');
+      },
+    });
+    const run = await new ValidationService(store, forbidden).execute('source');
+    assert.equal(run.snapshot.aiValidationEnabled, false);
+    assert.equal(run.snapshot.results[0]!.status, invalid ? 'HELD' : 'PASSED');
+    assert.equal(run.snapshot.results[0]!.repair, undefined);
+    assert.equal(run.snapshot.results[0]!.reviews[0]!.semantic, undefined);
+    assert.equal(run.snapshot.usage.length, 0);
+  });

@@ -6,6 +6,7 @@ export async function writeValidationReport(run, path) {
   const lines = [
     '# 4단계 생성 결과 검증',
     '',
+    `- 검증 모드: ${s.aiValidationEnabled === false ? '규칙 전용 (AI 검증·재생성 비활성화)' : '규칙 + AI'}`,
     `- 실행 ID: ${run.id}`,
     `- 생성 실행 ID: ${run.generationRunId}`,
     `- 통과 ${s.results.filter((r) => r.status === 'PASSED').length} / 보류 ${s.results.filter((r) => r.status === 'HELD').length}`,

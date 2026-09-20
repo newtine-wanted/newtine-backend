@@ -42,7 +42,7 @@ if (v) {
 }
 const interruptedValidationFile = process.argv[8];
 if (interruptedValidationFile)
-  phases.push(['중단된 4단계 시도', JSON.parse(await readFile(interruptedValidationFile, 'utf8'))]);
+  phases.push(['이전 AI 검증 실행', JSON.parse(await readFile(interruptedValidationFile, 'utf8'))]);
 const lines = [
   '# 뉴스 파이프라인 전체 재실행 결과',
   '',
@@ -52,6 +52,9 @@ const lines = [
     ? '- 4단계 검증 완료. 5단계 공개 전 결과입니다. 아래 생성 상세는 검증 후 최종값이며 보류 여부와 수정 전후는 검증 상세에 기록합니다.'
     : '- 4단계 검증·5단계 공개 전 초안입니다.',
   '',
+  ...(v?.aiValidationEnabled === false
+    ? ['- 4단계 AI 검증·재생성 비활성화: 규칙 검사 결과입니다.', '']
+    : []),
   '| 처리 | 결과 |',
   '| --- | ---: |',
   `| 검색어 | ${d.results.length} |`,

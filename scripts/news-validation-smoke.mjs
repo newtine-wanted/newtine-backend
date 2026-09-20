@@ -8,6 +8,11 @@ import { GENERATIONS } from '../dist/apps/batch/src/generation/generation.types.
 import { calculateScores, eventTime } from '../dist/apps/batch/src/generation/generation.policy.js';
 import { ValidationRepository } from '../dist/apps/batch/src/validation/validation.repository.js';
 import { ValidationService } from '../dist/apps/batch/src/validation/validation.service.js';
+class AiValidationService extends ValidationService {
+  constructor(store, model) {
+    super(store, model, undefined, true);
+  }
+}
 assert.equal(process.env.DB_HOST, '127.0.0.1');
 assert.equal(process.env.DB_PORT, '55432');
 assert.equal(process.env.DB_NAME, 'news_discovery_local');
@@ -133,7 +138,7 @@ try {
       return [{ field: 'title', value: '주거 지원 발표' }];
     },
   };
-  const service = new ValidationService(store, model);
+  const service = new AiValidationService(store, model);
   await assert.rejects(service.execute(sourceId, at), /API_FAILED/);
   const run = await service.execute(sourceId, at);
   assert.equal(run.snapshot.results[0].status, 'PASSED');
@@ -142,6 +147,21 @@ try {
   await service.execute(sourceId, at);
   assert.equal(calls, 3);
   assert.equal(run.snapshot.results[0].original.draft.title, '정부 주거 지원');
+  const rulesRun = await new ValidationService(store).execute(sourceId, at);
+  assert.notEqual(rulesRun.id, run.id);
+  assert.equal(rulesRun.snapshot.aiValidationEnabled, false);
+  assert.equal(rulesRun.snapshot.results[0].status, 'PASSED');
+  assert.equal(rulesRun.snapshot.results[0].current.draft.title, '정부 주거 지원');
+  assert.equal(rulesRun.snapshot.usage.length, 0);
+  assert.equal(
+    (
+      await sql(em, 'select count(*)::int n from news_validation_runs where generation_run_id=$1', [
+        sourceId,
+      ])
+    )[0].n,
+    2,
+  );
+  assert.equal((await new ValidationService(store).execute(sourceId, at)).id, rulesRun.id);
   const activeSource = await source();
   const active = await store.claim(activeSource, at);
   await assert.rejects(store.claim(activeSource, at), /VALIDATION_ALREADY_RUNNING/);
@@ -157,7 +177,7 @@ try {
   await store.heartbeat(resumed);
   await store.fail(resumed, 'SMOKE_COMPLETE');
   const heldSource = await source();
-  const held = await new ValidationService(store, {
+  const held = await new AiValidationService(store, {
     usage: [],
     review: async () => ({
       findings: [{ field: 'title', category: 'FACT', reason: '반복 실패', articleIds: [] }],
