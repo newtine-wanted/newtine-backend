@@ -19,6 +19,7 @@ substitutions:
   _REGION: asia-northeast3
   _IMAGE_REPOSITORY: cloud-run-source-deploy/newtine-backend
   _IMAGE: newtine
+  _BATCH_IMAGE: newtine-batch
   _SERVICE: newtine
   _TTSC_CACHE_BUCKET: workvoys-newtine-ttsc-cache
   _TTSC_CACHE_PREFIX: newtine-backend
@@ -145,21 +146,49 @@ steps:
         done
 
   - name: gcr.io/cloud-builders/docker
-    id: build-image
+    id: build-api-image
+    waitFor:
+      - build-application
     args:
       - build
+      - --target
+      - api
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_IMAGE_REPOSITORY}/${_IMAGE}:$COMMIT_SHA
       - .
 
   - name: gcr.io/cloud-builders/docker
-    id: push-image
+    id: push-api-image
+    waitFor:
+      - build-api-image
     args:
       - push
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_IMAGE_REPOSITORY}/${_IMAGE}:$COMMIT_SHA
 
+  - name: gcr.io/cloud-builders/docker
+    id: build-batch-image
+    waitFor:
+      - build-application
+    args:
+      - build
+      - --target
+      - batch
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_IMAGE_REPOSITORY}/${_BATCH_IMAGE}:$COMMIT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    id: push-batch-image
+    waitFor:
+      - build-batch-image
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_IMAGE_REPOSITORY}/${_BATCH_IMAGE}:$COMMIT_SHA
+
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    id: deploy
+    id: deploy-api
+    waitFor:
+      - push-api-image
     entrypoint: gcloud
     args:
       - run

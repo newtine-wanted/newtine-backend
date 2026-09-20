@@ -20,6 +20,7 @@ services:
   api:
     build:
       context: .
+      target: api
     environment:
       # The runtime image omits devDependencies, so local development uses
       # explicit JSON logging instead of the optional pino-pretty transport.
@@ -73,6 +74,7 @@ services:
   migrate:
     build:
       context: .
+      target: api
     command: ["node", "scripts/migrate.mjs", "up"]
     environment:
       NODE_ENV: development
@@ -91,6 +93,7 @@ services:
       - tools
     build:
       context: .
+      target: batch
     command: ["node", "dist/apps/batch/src/main.js", "databaseCheck"]
     environment:
       NODE_ENV: development
@@ -122,6 +125,7 @@ services:
       - reports
     build:
       context: .
+      target: batch
     command: ["node", "dist/apps/batch/src/main.js", "reportWorker"]
     environment:
       NODE_ENV: development
