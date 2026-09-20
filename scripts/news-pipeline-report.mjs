@@ -55,6 +55,9 @@ const lines = [
   ...(v?.aiValidationEnabled === false
     ? ['- 4단계 AI 검증·재생성 비활성화: 규칙 검사 결과입니다.', '']
     : []),
+  ...(v?.validationMode === 'TONE'
+    ? ['- 4단계는 규칙 및 공격적·편향적 표현만 검사합니다.', '']
+    : []),
   '| 처리 | 결과 |',
   '| --- | ---: |',
   `| 검색어 | ${d.results.length} |`,

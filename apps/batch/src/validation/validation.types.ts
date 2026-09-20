@@ -22,9 +22,20 @@ export const FIELDS = [
   'glossary',
 ] as const;
 export type Field = (typeof FIELDS)[number];
+export const TONE_FIELDS = [
+  'title',
+  'integratedSummary',
+  'summaryLines',
+  'viewpoints',
+  'sharedConditionalImpact',
+  'impacts',
+  'importanceReason',
+  'followUp',
+  'glossary',
+] as const satisfies readonly Field[];
 export interface Finding {
   field: Field | 'source' | 'scores';
-  category: 'RULE' | 'FACT' | 'CONSISTENCY' | 'UX';
+  category: 'RULE' | 'TONE';
   reason: string;
   articleIds: string[];
 }
@@ -44,6 +55,7 @@ export interface ValidationResult {
   status?: 'PASSED' | 'HELD';
 }
 export interface ValidationSnapshot {
+  validationMode?: 'AI' | 'RULES_ONLY' | 'TONE';
   aiValidationEnabled?: boolean;
   at: string;
   generationAt: string;

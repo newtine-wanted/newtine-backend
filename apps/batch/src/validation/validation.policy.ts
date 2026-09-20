@@ -2,6 +2,7 @@ import { calculateScores, eventTime, termKey } from '../generation/generation.po
 import { GENERATIONS, type GenerationResult } from '../generation/generation.types.js';
 import {
   FIELDS,
+  TONE_FIELDS,
   type Field,
   type Finding,
   type Patch,
@@ -178,8 +179,8 @@ export function checkedReview(value: Review, r: GenerationResult): Review {
     value.findings.some(
       (f) =>
         !f ||
-        ![...FIELDS, 'source', 'scores'].includes(f.field) ||
-        !['FACT', 'CONSISTENCY', 'UX'].includes(f.category) ||
+        !(TONE_FIELDS as readonly string[]).includes(f.field) ||
+        f.category !== 'TONE' ||
         !text(f.reason) ||
         !Array.isArray(f.articleIds) ||
         f.articleIds.some((id) => !r.articles.some((a) => a.articleId === id)),

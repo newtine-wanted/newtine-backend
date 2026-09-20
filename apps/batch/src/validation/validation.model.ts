@@ -2,7 +2,7 @@ import { newsPrompt } from '../ai/news-prompt.js';
 import { DEFAULT_OPENAI_TEXT_MODEL } from '../ai/ai-model.defaults.js';
 import type { GenerationResult, Usage } from '../generation/generation.types.js';
 import {
-  FIELDS,
+  TONE_FIELDS,
   type Field,
   type Finding,
   type Patch,
@@ -20,7 +20,6 @@ export class ValidationOpenAiModel implements ValidationModel {
   readonly usage: Usage[] = [];
   constructor(
     private readonly apiKey: string,
-    private readonly uxWriting: string,
     private readonly request: typeof fetch = fetch,
   ) {}
   private input(result: GenerationResult, context: ValidationSnapshot, repair = false) {
@@ -50,35 +49,29 @@ export class ValidationOpenAiModel implements ValidationModel {
       })),
     };
   }
-  async review(result: GenerationResult, context: ValidationSnapshot): Promise<Review> {
+  async review(result: GenerationResult, _context: ValidationSnapshot): Promise<Review> {
+    void _context; // Tone review intentionally excludes source articles and DB context.
+    const fields = TONE_FIELDS.filter(
+      (f) => !(result.draft?.sharedConditionalImpact && f === 'impacts'),
+    );
+    const draft = Object.fromEntries(
+      fields
+        .filter((f) => f !== 'glossary')
+        .map((f) => [f, result.draft?.[f as keyof NonNullable<GenerationResult['draft']>]]),
+    );
     return this.json(
       'review',
-      newsPrompt('validation-review', { uxWriting: this.uxWriting }),
-      this.input(result, context),
+      newsPrompt('validation-review'),
+      { draft, glossary: result.glossary },
       obj({
         findings: {
           type: 'array',
           maxItems: 30,
           items: obj({
-            field: {
-              type: 'string',
-              enum: [
-                ...FIELDS.filter(
-                  (f) =>
-                    !(
-                      result.eventAtSource === 'FIRST_REPORT' &&
-                      ['eventAt', 'eventEvidence'].includes(f)
-                    ) && !(result.draft?.sharedConditionalImpact && f === 'impacts'),
-                ),
-                'source',
-              ],
-            },
-            category: { type: 'string', enum: ['FACT', 'CONSISTENCY', 'UX'] },
+            field: { type: 'string', enum: fields },
+            category: { type: 'string', enum: ['TONE'] },
             reason: { type: 'string', minLength: 1 },
-            articleIds: {
-              type: 'array',
-              items: { type: 'string', enum: result.articles.map((a) => a.articleId) },
-            },
+            articleIds: { type: 'array', maxItems: 0, items: { type: 'string' } },
           }),
         },
       }),
@@ -93,7 +86,6 @@ export class ValidationOpenAiModel implements ValidationModel {
     const value = await this.json<{ patches: { field: Field; valueJson: string }[] }>(
       'repair',
       newsPrompt('validation-repair', {
-        uxWriting: this.uxWriting,
         maxTrackingDays: context.config.maxTrackingDays,
       }),
       { ...this.input(result, context, true), findings, allowedFields: fields },

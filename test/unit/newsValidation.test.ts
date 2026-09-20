@@ -18,7 +18,7 @@ import type {
   ValidationStore,
   ValidationModel,
 } from '@newtine/batch/validation/validation.types.js';
-class AiValidationService extends ValidationService {
+class ToneValidationService extends ValidationService {
   constructor(store: ValidationStore, model: ValidationModel) {
     super(store, model, undefined, true);
   }
@@ -148,9 +148,9 @@ function model(overrides: Partial<ValidationModel> = {}): ValidationModel {
 test('valid content passes without requiring independent evidence groups', async () => {
   const store = new Store();
   assert.equal(rules(store.run.snapshot.results[0]!.current, store.run.snapshot).length, 0);
-  const run = await new AiValidationService(store, model()).execute('source');
+  const run = await new ToneValidationService(store, model()).execute('source');
   assert.equal(run.snapshot.results[0]!.status, 'PASSED');
-  const again = await new AiValidationService(
+  const again = await new ToneValidationService(
     store,
     model({
       review: async () => {
@@ -166,7 +166,7 @@ test('rule failure bypasses initial semantic call and repairs only failed field'
   item.current.draft!.title = '';
   item.original = structuredClone(item.current);
   let calls = 0;
-  const run = await new AiValidationService(
+  const run = await new ToneValidationService(
     store,
     model({
       review: async () => {
@@ -190,14 +190,14 @@ test('rule failure bypasses initial semantic call and repairs only failed field'
 test('semantic failure repairs once and holds on repeated failure', async () => {
   const store = new Store();
   let repairs = 0;
-  const run = await new AiValidationService(
+  const run = await new ToneValidationService(
     store,
     model({
       review: async () => ({
         findings: [
           {
             field: 'title',
-            category: 'FACT',
+            category: 'TONE',
             reason: '제목에 근거 없는 단정',
             articleIds: [articles[0]!.articleId],
           },
@@ -215,11 +215,11 @@ test('semantic failure repairs once and holds on repeated failure', async () => 
 });
 test('invalid patch cannot mutate unrelated fields and is held', async () => {
   const store = new Store();
-  const run = await new AiValidationService(
+  const run = await new ToneValidationService(
     store,
     model({
       review: async () => ({
-        findings: [{ field: 'title', category: 'UX', reason: '제목 수정', articleIds: [] }],
+        findings: [{ field: 'title', category: 'TONE', reason: '제목 수정', articleIds: [] }],
       }),
       repair: async () => [{ field: 'integratedSummary', value: '무단 수정' }],
     }),
@@ -255,7 +255,7 @@ test('wrong DB codes, references, scores and shared impacts fail rules', () => {
 test('malformed repaired field is rejected by final rules', async () => {
   const store = new Store();
   store.run.snapshot.results[0]!.current.draft!.summaryLines = [];
-  const run = await new AiValidationService(
+  const run = await new ToneValidationService(
     store,
     model({ repair: async () => [{ field: 'summaryLines', value: null }] }),
   ).execute('source');
@@ -269,7 +269,7 @@ test('failed final API call resumes without repeating successful repair', async 
     review: async () => {
       calls++;
       if (calls === 1)
-        return { findings: [{ field: 'title', category: 'UX', reason: '수정', articleIds: [] }] };
+        return { findings: [{ field: 'title', category: 'TONE', reason: '수정', articleIds: [] }] };
       if (calls === 2) throw new Error('NETWORK');
       return { findings: [] };
     },
@@ -278,7 +278,7 @@ test('failed final API call resumes without repeating successful repair', async 
       return [{ field: 'title', value: '지원 발표' }];
     },
   });
-  const service = new AiValidationService(store, m);
+  const service = new ToneValidationService(store, m);
   await assert.rejects(service.execute('source'), /NETWORK/);
   const run = await service.execute('source');
   assert.equal(repairs, 1);
@@ -292,7 +292,7 @@ test('review rejects invented references and patch rejects duplicate or unknown 
     checkedReview(
       {
         findings: [
-          { field: 'title', category: 'FACT', reason: '사실 오류', articleIds: ['invented'] },
+          { field: 'title', category: 'TONE', reason: '과도한 비하', articleIds: ['invented'] },
         ],
       },
       r,
@@ -312,7 +312,7 @@ test('review rejects invented references and patch rejects duplicate or unknown 
 });
 test('model loads external review prompt, uses configured model and captures usage', async () => {
   let request: Record<string, unknown> = {};
-  const m = new ValidationOpenAiModel('test', 'UX_GUIDE', (async (_url, init) => {
+  const m = new ValidationOpenAiModel('test', (async (_url, init) => {
     request = JSON.parse(String(init?.body));
     return new Response(
       JSON.stringify({
@@ -329,7 +329,11 @@ test('model loads external review prompt, uses configured model and captures usa
   const s = snapshot();
   await m.review(s.results[0]!.current, s);
   assert.equal(request.model, 'gpt-5.4-mini-2026-03-17');
-  assert.ok(String(request.instructions).includes('UX_GUIDE'));
+  assert.ok(String(request.instructions).includes('공격적이거나 편향된'));
+  const input = JSON.parse(String(request.input));
+  assert.equal(input.articles, undefined);
+  assert.equal(input.catalog, undefined);
+  assert.equal(input.draft.llmEstimatedImportance, undefined);
   assert.equal(m.usage[0]!.cachedInputTokens, 50);
 });
 
@@ -340,7 +344,7 @@ test('dependent shared impact fields repair together and preserve unrelated fiel
     description: '주거 지원 대상인 사람이라면 지원을 받을 수 있어요.',
     articleIds: [articles[0]!.articleId],
   };
-  const run = await new AiValidationService(
+  const run = await new ToneValidationService(
     store,
     model({
       review: async () =>
@@ -349,8 +353,8 @@ test('dependent shared impact fields repair together and preserve unrelated fiel
               findings: [
                 {
                   field: 'sharedConditionalImpact',
-                  category: 'CONSISTENCY',
-                  reason: '공통 대상 조건 필요',
+                  category: 'TONE',
+                  reason: '공통 영향의 비하 표현 수정',
                   articleIds: [articles[0]!.articleId],
                 },
               ],
@@ -373,7 +377,7 @@ test('dependent shared impact fields repair together and preserve unrelated fiel
 test('bad computed scores are recomputed without a repair LLM call', async () => {
   const store = new Store();
   store.run.snapshot.results[0]!.current.scores!.freshness = 2;
-  const run = await new AiValidationService(
+  const run = await new ToneValidationService(
     store,
     model({
       repair: async () => {
@@ -393,7 +397,7 @@ test('FIRST_REPORT discards an unverified event proposal without failing or expo
   assert.equal(r.eventAtSource, 'FIRST_REPORT');
   assert.equal(rules(r, s).length, 0);
   let payload: { input?: string } = {};
-  const m = new ValidationOpenAiModel('test', 'UX', (async (_url, init) => {
+  const m = new ValidationOpenAiModel('test', (async (_url, init) => {
     payload = JSON.parse(String(init?.body));
     return new Response(
       JSON.stringify({
@@ -404,9 +408,9 @@ test('FIRST_REPORT discards an unverified event proposal without failing or expo
   }) as typeof fetch);
   await m.review(r, s);
   const input = JSON.parse(payload.input!);
-  assert.equal(input.draft.eventAt, null);
-  assert.equal(input.draft.eventEvidence, null);
-  assert.equal(input.eventTimeMode, 'FIRST_REPORT');
+  assert.equal(input.draft.eventAt, undefined);
+  assert.equal(input.draft.eventEvidence, undefined);
+  assert.equal(input.eventTimeMode, undefined);
   assert.equal(input.computed, undefined);
   assert.equal(input.scores, undefined);
   assert.equal(r.draft!.eventAt, '2030-01-01T00:00:00Z');
@@ -433,7 +437,7 @@ test('review projects shared impact once and excludes computed-only fields from 
       };
     };
   } = {};
-  const m = new ValidationOpenAiModel('test', 'UX', (async (_url, init) => {
+  const m = new ValidationOpenAiModel('test', (async (_url, init) => {
     payload = JSON.parse(String(init?.body));
     return new Response(
       JSON.stringify({
@@ -444,7 +448,6 @@ test('review projects shared impact once and excludes computed-only fields from 
   }) as typeof fetch);
   await m.review(r, s);
   const input = JSON.parse(payload.input!);
-  assert.equal(input.impactMode, 'SHARED_CONDITIONAL');
   assert.equal(input.draft.impacts, undefined);
   assert.equal(input.draft.sharedConditionalImpact.description, '대상자라면 지원받아요.');
   const allowed = payload.text!.format.schema.properties.findings.items.properties.field.enum;
@@ -464,7 +467,7 @@ test('three-term cap updates existing results without another LLM call and prese
   }));
   r.original = structuredClone(r.current);
   r.status = 'PASSED';
-  const run = await new AiValidationService(
+  const run = await new ToneValidationService(
     store,
     model({
       review: async () => {
@@ -499,3 +502,30 @@ for (const invalid of [false, true])
     assert.equal(run.snapshot.results[0]!.reviews[0]!.semantic, undefined);
     assert.equal(run.snapshot.usage.length, 0);
   });
+
+for (const finding of [
+  { field: 'title', category: 'FACT' },
+  { field: 'title', category: 'CONSISTENCY' },
+  { field: 'title', category: 'UX' },
+  { field: 'classification', category: 'TONE' },
+  { field: 'source', category: 'TONE' },
+]) {
+  test(`tone review rejects out-of-scope findings: ${finding.category}/${finding.field}`, () => {
+    assert.throws(
+      () =>
+        checkedReview(
+          {
+            findings: [
+              {
+                ...finding,
+                reason: '범위 밖 판정',
+                articleIds: [],
+              },
+            ],
+          } as Parameters<typeof checkedReview>[0],
+          snapshot().results[0]!.current,
+        ),
+      /INVALID_VALIDATION_REVIEW/,
+    );
+  });
+}

@@ -13,7 +13,7 @@ export class ValidationRepository implements ValidationStore {
     at: Date,
     aiValidationEnabled = false,
   ): Promise<ValidationRun> {
-    const mode = aiValidationEnabled ? 'AI' : 'RULES_ONLY';
+    const mode = aiValidationEnabled ? 'TONE' : 'RULES_ONLY';
     return this.em.transactional(async (em) => {
       await executePostgresSql(em, 'select pg_advisory_xact_lock(92020004)');
       const previous = await executePostgresSql<RunRow[]>(
@@ -41,6 +41,7 @@ export class ValidationRepository implements ValidationStore {
       if (active.length) throw new Error('VALIDATION_ALREADY_RUNNING');
       const snapshot: ValidationSnapshot = {
         aiValidationEnabled,
+        validationMode: mode,
         at: at.toISOString(),
         generationAt: sources[0]!.snapshot.at,
         config: sources[0]!.snapshot.config,

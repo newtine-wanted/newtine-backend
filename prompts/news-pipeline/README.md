@@ -20,3 +20,5 @@ UX 가이드 원본은 `docs/news-pipeline/direction/ux-writing.md`이며 생성
 
 - `validation-review.md`: 기사 사실·모순·UX 검증. 독립 취재 근거 개수 조건 없음.
 - `validation-repair.md`: 실패 필드 및 연결 필드만 1회 수정.
+
+4단계 `validation-review.md`는 공격적·편향적 표현만 검사한다. 사실 일치·내용 모순·일반 UX 라이팅은 검사하지 않는다. `validation-repair.md`는 실패 필드의 형식 또는 표현만 한 번 수정한다.

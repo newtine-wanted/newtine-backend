@@ -8,7 +8,7 @@ import { GENERATIONS } from '../dist/apps/batch/src/generation/generation.types.
 import { calculateScores, eventTime } from '../dist/apps/batch/src/generation/generation.policy.js';
 import { ValidationRepository } from '../dist/apps/batch/src/validation/validation.repository.js';
 import { ValidationService } from '../dist/apps/batch/src/validation/validation.service.js';
-class AiValidationService extends ValidationService {
+class ToneValidationService extends ValidationService {
   constructor(store, model) {
     super(store, model, undefined, true);
   }
@@ -128,7 +128,7 @@ try {
       calls++;
       if (calls === 1)
         return {
-          findings: [{ field: 'title', category: 'UX', reason: '제목 수정', articleIds: [] }],
+          findings: [{ field: 'title', category: 'TONE', reason: '제목 수정', articleIds: [] }],
         };
       if (calls === 2) throw new Error('API_FAILED');
       return { findings: [] };
@@ -138,7 +138,7 @@ try {
       return [{ field: 'title', value: '주거 지원 발표' }];
     },
   };
-  const service = new AiValidationService(store, model);
+  const service = new ToneValidationService(store, model);
   await assert.rejects(service.execute(sourceId, at), /API_FAILED/);
   const run = await service.execute(sourceId, at);
   assert.equal(run.snapshot.results[0].status, 'PASSED');
@@ -147,6 +147,13 @@ try {
   await service.execute(sourceId, at);
   assert.equal(calls, 3);
   assert.equal(run.snapshot.results[0].original.draft.title, '정부 주거 지원');
+  assert.equal(run.snapshot.validationMode, 'TONE');
+  // Simulate a completed legacy AI run: the new policy must not reuse its verdict.
+  await sql(em, "update news_validation_runs set validation_mode='AI' where id=$1", [run.id]);
+  const toneRun = await service.execute(sourceId, at);
+  assert.notEqual(toneRun.id, run.id);
+  assert.equal(toneRun.snapshot.validationMode, 'TONE');
+  assert.equal(toneRun.snapshot.results[0].original.draft.title, '정부 주거 지원');
   const rulesRun = await new ValidationService(store).execute(sourceId, at);
   assert.notEqual(rulesRun.id, run.id);
   assert.equal(rulesRun.snapshot.aiValidationEnabled, false);
@@ -159,7 +166,7 @@ try {
         sourceId,
       ])
     )[0].n,
-    2,
+    3,
   );
   assert.equal((await new ValidationService(store).execute(sourceId, at)).id, rulesRun.id);
   const activeSource = await source();
@@ -177,10 +184,10 @@ try {
   await store.heartbeat(resumed);
   await store.fail(resumed, 'SMOKE_COMPLETE');
   const heldSource = await source();
-  const held = await new AiValidationService(store, {
+  const held = await new ToneValidationService(store, {
     usage: [],
     review: async () => ({
-      findings: [{ field: 'title', category: 'FACT', reason: '반복 실패', articleIds: [] }],
+      findings: [{ field: 'title', category: 'TONE', reason: '반복 실패', articleIds: [] }],
     }),
     repair: async () => [{ field: 'title', value: '지원 발표' }],
   }).execute(heldSource, at);

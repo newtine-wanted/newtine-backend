@@ -1,3 +1,4 @@
+import { Migration20260920000500NewsValidationTone } from '../dist/apps/batch/src/validation/validation-tone.migration.js';
 import { Migration20260920000400NewsValidationMode } from '../dist/apps/batch/src/validation/validation-mode.migration.js';
 /* global console, process, AbortController */
 import 'reflect-metadata';
@@ -21,6 +22,7 @@ export async function validationOrm() {
     Migration20260920000200NewsGeneration,
     Migration20260920000300NewsValidation,
     Migration20260920000400NewsValidationMode,
+    Migration20260920000500NewsValidationTone,
   );
   return MikroORM.init(options);
 }
@@ -53,10 +55,7 @@ async function main() {
       const service = new ValidationService(
         new ValidationRepository(orm.em.fork()),
         config.aiValidationEnabled
-          ? new ValidationOpenAiModel(
-              process.env.OPENAI_API_KEY ?? '',
-              await readFile('docs/news-pipeline/direction/ux-writing.md', 'utf8'),
-            )
+          ? new ValidationOpenAiModel(process.env.OPENAI_API_KEY ?? '')
           : null,
         (event) => console.log(JSON.stringify({ event: 'news.validation.progress', ...event })),
         config.aiValidationEnabled,
@@ -66,14 +65,14 @@ async function main() {
       await mkdir(directory, { recursive: true });
       const file = resolve(
         directory,
-        `${run.generationRunId}-${config.aiValidationEnabled ? 'ai' : 'rules-only'}-validated.json`,
+        `${run.generationRunId}-${config.aiValidationEnabled ? 'tone' : 'rules-only'}-validated.json`,
       );
       await writeFile(file, JSON.stringify(run.snapshot, null, 2));
       await writeValidationReport(
         run,
         resolve(
           directory,
-          `${run.generationRunId}-${config.aiValidationEnabled ? 'ai' : 'rules-only'}-report.md`,
+          `${run.generationRunId}-${config.aiValidationEnabled ? 'tone' : 'rules-only'}-report.md`,
         ),
       );
       const counts = Object.fromEntries(
