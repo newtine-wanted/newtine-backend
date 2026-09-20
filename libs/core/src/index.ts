@@ -113,6 +113,7 @@ export type {
   AgeGroup as IssueAgeGroup,
   FeedBatchItemRecord,
   FeedBatchRecord,
+  FeedBatchSaveResult,
   FeedAlgorithmSnapshot,
   FeedContinuation,
   FeedOwner,

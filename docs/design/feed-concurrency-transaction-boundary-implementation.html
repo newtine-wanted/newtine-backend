@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="/api/feed의 동일 세션 직렬화와 긴 트랜잭션을 줄여 피드 조회 지연과 커넥션 점유를 완화" />
+    <meta name="audience" content="NEWTINE 피드 API 개발자와 Cloud Run·PostgreSQL 운영자" />
+    <meta name="problem" content="조회 중심의 피드 요청이 프로세스 락과 넓은 DB transaction 경계 때문에 동시 요청을 대기시키고 커넥션 풀 압박을 만들 수 있음" />
+    <meta name="core-flow" content="커서·소유권 확인 → 짧은 읽기 준비 → transaction 밖 추천 계산 → 짧은 DB commit claim → commit 후 카드 hydration → 멱등 응답" />
+    <meta name="artifact-phase" content="implementation-control" />
+    <meta name="intensity" content="high-risk" />
+    <meta name="lifecycle" content="구현 완료" />
+    <meta name="traceability" content="2026-09-20 /api/feed latency investigation / feed-concurrency-transaction worktree" />
+    <title>/api/feed 동시성·트랜잭션 경계 개선 구현 기록</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; color: #1f2937; background: #f3f6fa; }
+      body { max-width: 1120px; margin: 0 auto; padding: 24px 18px 60px; line-height: 1.65; }
+      header, section, aside { background: #fff; border: 1px solid #d9e1ea; border-radius: 12px; padding: 22px; margin: 18px 0; }
+      h1, h2, h3 { line-height: 1.3; }
+      h1 { margin-top: 0; }
+      nav { display: flex; flex-wrap: wrap; gap: 14px; margin: 16px 0; }
+      a { color: #145ea8; }
+      dt { font-weight: 700; }
+      dd { margin: 0 0 10px; }
+      table { width: 100%; border-collapse: collapse; font-size: 14px; }
+      th, td { border: 1px solid #cfd8e3; padding: 10px; text-align: left; vertical-align: top; }
+      caption, figcaption { text-align: left; font-weight: 700; margin: 10px 0; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #eef3f8; padding: 14px; border-radius: 8px; }
+      code { overflow-wrap: anywhere; }
+      .status { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #d9f2df; color: #1d6330; font-weight: 700; }
+      .risk { border-left: 4px solid #bd6b14; background: #fff7e7; }
+      .decision { border-left: 4px solid #2b6cb0; background: #eef6ff; }
+      .control-slide { display: none; }
+      .control-slide.active { display: block; }
+      .control-nav { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+      .control-nav button { border: 1px solid #9db1c4; border-radius: 7px; padding: 8px 12px; background: #f4f8fb; cursor: pointer; }
+      .control-nav button:disabled { opacity: .45; cursor: not-allowed; }
+      .control-result { display: none; margin-top: 14px; padding: 12px; border-radius: 8px; background: #edf8ef; border: 1px solid #a8d5ae; }
+      .control-result.visible { display: block; }
+      .progress, .small { color: #536273; font-size: 14px; }
+      label { display: block; margin: 8px 0; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>구현 제어 기록 · <span class="status">현재: 구현 완료</span></p>
+      <h1>/api/feed 동시성·트랜잭션 경계 개선</h1>
+      <dl>
+        <dt>purpose · 목적</dt>
+        <dd>/api/feed의 동일 세션 직렬화와 긴 transaction 점유를 줄여 p95/p99 지연과 connection pool 압박을 완화한다.</dd>
+        <dt>audience · 사용자</dt>
+        <dd>피드 API를 운영·연결하는 백엔드 개발자, Cloud Run·PostgreSQL 운영자, 피드 클라이언트 개발자.</dd>
+        <dt>problem · 문제</dt>
+        <dd><code>withLock(sessionId)</code>와 넓은 <code>transactionManager.execute()</code> 경계가 조회·추천·hydration 동안 요청과 DB connection을 붙잡을 수 있었다.</dd>
+        <dt>core-flow · 핵심 흐름</dt>
+        <dd>커서·소유권 확인 → 읽기 준비 → transaction 밖 후보·추천 계산 → session row lock과 저장만 transaction → commit 후 hydration → canonical batch 응답.</dd>
+        <dt>기준선 승인</dt>
+        <dd><time datetime="2026-09-20">2026-09-20 KST</time> · G1-B, G2-B, G3-A 및 DB commit winner 재사용 범위로 구현 승인됨.</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="문서 목차">
+      <a href="#baseline">기준선·delta</a>
+      <a href="#implementation">구현 상태</a>
+      <a href="#transitions">상태 전이</a>
+      <a href="#issues">이슈·잔여 위험</a>
+      <a href="#verification">검증 근거</a>
+      <a href="#understanding">구현 이해 점검</a>
+      <a href="#review">리뷰</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="baseline">
+          <h2>기준선과 설계 delta</h2>
+          <dl>
+            <dt>baseline-reference</dt>
+            <dd><a href="feed-concurrency-transaction-boundary-design.html">설계 기준선</a> · <code>docs/design/feed-concurrency-transaction-boundary-design.html</code></dd>
+            <dt>승인 범위</dt>
+            <dd>G1-B: process lock 제거 및 DB commit winner 사용. G2-B: read·compute·hydration의 transaction 밖 이동. G3-A: out-of-order <code>n+1</code> 요청의 기존 <code>409 Conflict</code> 유지.</dd>
+            <dt>design-delta</dt>
+            <dd>없음. schema, migration, API cursor 형식, 추천 알고리즘 정책은 변경하지 않았다. 저장 결과를 표현하기 위해 repository port에 <code>SAVED | EXISTING</code> 반환 타입만 추가했다.</dd>
+          </dl>
+        </section>
+
+        <section id="implementation">
+          <h2>current-implementation · 현재 구현(as-built)</h2>
+          <figure>
+            <figcaption>실제 요청 경계의 텍스트 흐름</figcaption>
+            <pre>findFeedSession / findFeedBatch
+  → previous batches·interaction·context·candidate read
+  → recommendFeed (transaction 없음)
+  → transactionManager.execute(saveFeedBatch)
+       → session row PESSIMISTIC_WRITE
+       → owner·expiry·status·nextBatchNo·existing batch 재검증
+       → batch와 session 상태 flush
+  → canonical batch 재조회 / 카드 hydration (transaction 없음)</pre>
+          </figure>
+          <h3>implementation-status · 구현 상태</h3>
+          <table>
+            <caption>변경 파일과 책임</caption>
+            <thead><tr><th>경계</th><th>변경</th><th>상태</th></tr></thead>
+            <tbody>
+              <tr><th scope="row"><code>apps/api/src/issue/issueFeed.service.ts</code></th><td><code>withLock</code> 제거. 읽기·추천은 일반 호출, <code>saveFeedBatch</code>만 transaction으로 감싼다. loser는 <code>EXISTING</code> canonical batch를 재조회한다.</td><td>구현됨</td></tr>
+              <tr><th scope="row"><code>apps/api/src/issue/repository/issueCardQuery.repository.ts</code></th><td>row lock 조건에 owner를 포함하고, 기존 batch면 <code>EXISTING</code>, 실제 저장이면 <code>SAVED</code>를 반환한다.</td><td>구현됨</td></tr>
+              <tr><th scope="row"><code>libs/core/src/issue/repository/type/issueQuery.repository.ts</code></th><td>저장 결과 port 타입을 명시한다.</td><td>구현됨</td></tr>
+              <tr><th scope="row"><code>test/fixtures/issue/inMemoryIssueQuery.repository.ts</code> 및 테스트</th><td>winner 결과를 표현하고 transaction 경계 회귀를 고정한다.</td><td>구현됨</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="transitions">
+          <h2>영향받은 상태 전이·불변식</h2>
+          <table>
+            <caption>동시 요청의 commit 전이</caption>
+            <thead><tr><th>단계</th><th>승자</th><th>패자</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">읽기·추천</th><td colspan="2">각자 병렬로 계산할 수 있다. 이 단계는 DB write transaction을 점유하지 않는다.</td></tr>
+              <tr><th scope="row">session row lock</th><td>fresh session을 확인하고 같은 <code>sessionId + batchNo</code>를 저장한다.</td><td>승자가 commit한 뒤 row lock을 얻고 existing batch를 확인한다.</td></tr>
+              <tr><th scope="row">응답</th><td><code>SAVED</code> 후 canonical batch를 읽어 hydration한다.</td><td><code>EXISTING</code> 후 승자 batch를 읽어 같은 결과를 반환한다.</td></tr>
+            </tbody>
+          </table>
+          <ul>
+            <li>동일 <code>sessionId + batchNo</code>에는 DB primary key로 하나의 batch만 존재한다.</li>
+            <li>commit에서 owner, 만료, 완료 상태, <code>nextBatchNo</code>를 다시 확인한다.</li>
+            <li>읽기 중 session이 바뀌면 저장 단계의 conflict/expired 오류가 최종 상태를 보호한다.</li>
+          </ul>
+        </section>
+
+        <section id="issues">
+          <h2>issue-register · 이슈 레지스터</h2>
+          <table>
+            <caption>구현 중 발견·확인한 이슈</caption>
+            <thead><tr><th>상태</th><th>증상·원인</th><th>조치·근거</th><th>잔여 위험</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">해결됨</th><td>관리된 worktree에서 첫 <code>npm run typecheck</code>가 <code>EPERM</code>으로 cache·<code>tsbuildinfo</code>를 쓰지 못했다.</td><td>권한 승인 후 동일 명령을 재실행해 통과했다.</td><td>없음</td></tr>
+              <tr><th scope="row">해당 없음</th><td>코드·schema·API 계약의 추가 변경</td><td>diff와 typecheck로 확인했다.</td><td>없음</td></tr>
+              <tr><th scope="row">보류</th><td>실제 Cloud Run에서 p95/p99와 pool wait를 측정하지 않았다.</td><td>운영 부하 검증 단계의 후속 작업으로 남겼다.</td><td>중복 추천 계산으로 CPU가 늘 수 있고, 실제 병목이 pool 외부라면 별도 개선이 필요하다.</td></tr>
+            </tbody>
+          </table>
+          <h3>residual-risks · 잔여 위험</h3>
+          <aside class="risk"><strong>운영 제어 보류 조건:</strong> 기술 구현은 완료됐지만, production revision의 실제 latency·pool wait 개선은 부하/관측 데이터 없이 확정할 수 없다. 배포 후 sampled pool wait와 same-cursor winner/loser 지표를 확인해야 한다.</aside>
+        </section>
+
+        <section id="verification">
+          <h2>verification-evidence · 검증 근거</h2>
+          <table>
+            <caption>실행한 명령과 결과</caption>
+            <thead><tr><th>명령</th><th>결과</th><th>범위</th></tr></thead>
+            <tbody>
+              <tr><th scope="row"><code>npm run typecheck</code></th><td><samp>exit 0</samp></td><td>전체 TypeScript 타입 검사</td></tr>
+              <tr><th scope="row"><code>npm run lint</code></th><td><samp>exit 0</samp></td><td>apps/libs/scripts/test ESLint</td></tr>
+              <tr><th scope="row"><code>npm run build:api</code></th><td><samp>exit 0</samp></td><td>API production compile</td></tr>
+              <tr><th scope="row"><code>npm run test:jest -- test/unit/issueCardQuery.test.ts test/unit/inMemoryIssueQuery.repository.test.ts test/unit/issueCardQuery.repository.test.ts</code></th><td><samp>3 suites passed, 29 tests passed</samp></td><td>동시 batch winner, repository lock/write, transaction 경계 회귀</td></tr>
+              <tr><th scope="row"><code>npm run test:unit</code></th><td><samp>47 suites passed, 241 tests passed</samp></td><td>전체 unit 회귀</td></tr>
+            </tbody>
+          </table>
+          <h3>verification-gaps · 검증 공백</h3>
+          <p class="small">실제 PostgreSQL lock wait, connection pool 대기, Cloud Run 다중 instance, commit 실패 주입은 로컬 단위 테스트에 포함하지 않았다.</p>
+        </section>
+
+        <section id="understanding">
+          <h2>구현 이해 점검</h2>
+          <p>이 점검은 기술 검증과 별도의 운영 이해 기록이다. 현재는 <strong>미실시</strong>이며, 브라우저 선택 결과는 이 대화로 자동 전달되지 않는다.</p>
+          <div id="questions" aria-live="polite">
+            <p class="progress" id="progress">질문 1 / 4 · 답변 0 / 4</p>
+            <div class="control-slide active" data-index="0">
+              <fieldset><legend>IC-01 같은 session/batch 두 요청의 최종 동작은?</legend>
+                <label><input type="radio" name="ic-01" value="a" /> 두 추천 결과를 모두 저장한다.</label>
+                <label><input type="radio" name="ic-01" value="b" /> DB commit에서 하나만 저장하고 다른 요청은 canonical winner를 재조회한다.</label>
+                <label><input type="radio" name="ic-01" value="c" /> Cloud Run instance-local lock이 자동으로 조정한다.</label>
+              </fieldset>
+              <div class="control-result" data-result="0"><strong data-status></strong><p data-explanation></p><p data-next></p></div>
+            </div>
+            <div class="control-slide" data-index="1">
+              <fieldset><legend>IC-02 transaction 안에 남아야 하는 최소 작업은?</legend>
+                <label><input type="radio" name="ic-02" value="a" /> 후보 query부터 카드 hydration까지 전부다.</label>
+                <label><input type="radio" name="ic-02" value="b" /> session row lock, fresh state 재검증, batch/session 상태 저장이다.</label>
+                <label><input type="radio" name="ic-02" value="c" /> 추천 알고리즘 계산만이다.</label>
+              </fieldset>
+              <div class="control-result" data-result="1"><strong data-status></strong><p data-explanation></p><p data-next></p></div>
+            </div>
+            <div class="control-slide" data-index="2">
+              <fieldset><legend>IC-03 읽기 중 session이 먼저 전진하면?</legend>
+                <label><input type="radio" name="ic-03" value="a" /> stale preparation 결과를 무조건 덮어쓴다.</label>
+                <label><input type="radio" name="ic-03" value="b" /> commit 단계의 row lock과 nextBatchNo 검증이 저장을 막고 기존 conflict 계약을 따른다.</label>
+                <label><input type="radio" name="ic-03" value="c" /> process lock이 없으므로 무조건 500이 된다.</label>
+              </fieldset>
+              <div class="control-result" data-result="2"><strong data-status></strong><p data-explanation></p><p data-next></p></div>
+            </div>
+            <div class="control-slide" data-index="3">
+              <fieldset><legend>IC-04 배포 후 개선 여부를 판단할 첫 운영 증거는?</legend>
+                <label><input type="radio" name="ic-04" value="a" /> 대표 후보 query의 평균 실행 시간만 본다.</label>
+                <label><input type="radio" name="ic-04" value="b" /> API p95/p99와 pool wait, same-cursor winner/loser를 같은 revision에서 비교한다.</label>
+                <label><input type="radio" name="ic-04" value="c" /> 로그를 모든 query에 무제한으로 남긴다.</label>
+              </fieldset>
+              <div class="control-result" data-result="3"><strong data-status></strong><p data-explanation></p><p data-next></p></div>
+            </div>
+            <div class="control-nav">
+              <button type="button" id="previous" disabled>이전</button>
+              <button type="button" id="submit">답변 확인</button>
+              <button type="button" id="next">다음</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="control-state">
+          <h2>implementation-control-state · 구현 제어 상태</h2>
+          <dl>
+            <dt>상태</dt><dd><span class="status">구현 완료</span></dd>
+            <dt>technical status</dt><dd>승인된 코드 범위 구현 및 typecheck·lint·API compile·전체 unit 검증 완료.</dd>
+            <dt>implementation issues</dt><dd>코드 이슈는 해당 없음. 운영 부하와 pool wait의 실측은 보류.</dd>
+            <dt>developer operational understanding</dt><dd>미실시. 위 self-check는 브라우저에서 답변할 수 있으나 결과는 자동 전달되지 않는다.</dd>
+          </dl>
+        </section>
+
+        <section id="review">
+          <h2>review · 코드 리뷰</h2>
+          <dl>
+            <dt>리뷰 유형</dt><dd>자기 변경 리뷰 · Codex가 구현한 worktree 변경을 현재 승인 설계·실제 diff·검증 결과와 대조함.</dd>
+            <dt>리뷰 상태</dt><dd><span class="status">검토 완료</span></dd>
+            <dt>검토 범위</dt><dd><code>IssueFeedService</code>, <code>IssueCardQueryRepository</code>, repository port·fixture·feed unit test 및 동시성·트랜잭션 상태 전이.</dd>
+          </dl>
+          <table>
+            <caption>리뷰 finding</caption>
+            <thead><tr><th>ID</th><th>상태·심각도</th><th>근거</th><th>영향과 조치</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">R-01</th><td>accepted · non-blocking risk</td><td><code>issueFeed.service.ts:89-198</code>에서 same session의 read·recommendation이 더 이상 process lock으로 합쳐지지 않는다.</td><td>동시 요청이 늘면 중복 후보 조회·추천 계산이 CPU/DB read QPS를 키울 수 있다. 현재 승인 설계의 의도된 trade-off이며, 배포 후 p95/p99·pool wait·winner/loser를 보고 필요하면 bounded single-flight를 별도 설계한다.</td></tr>
+              <tr><th scope="row">R-02</th><td>open · non-blocking verification gap</td><td>단위 테스트는 in-memory winner와 transaction 경계를 확인하지만 실제 PostgreSQL의 두 transaction 간 <code>PESSIMISTIC_WRITE</code> 대기·<code>EXISTING</code> 경로는 실행하지 않았다.</td><td>코드 경로와 schema 불변식은 일치하고 전체 unit은 통과했다. 배포 전 staging PostgreSQL에서 동일 <code>sessionId + batchNo</code> 동시 요청을 2개 instance/worker로 재현할 필요가 있다.</td></tr>
+            </tbody>
+          </table>
+          <h3>락 필요성 판정</h3>
+          <p>현재 저장 구현에서는 필요하다. <code>feed_batches</code>의 primary key만으로는 동시 요청의 loser를 정상적인 <code>EXISTING</code> 결과로 만들 수 없고, <code>feed_sessions.next_batch_no</code>와 추천 상태 필드의 read-check-write도 보호해야 한다. 락을 없애려면 단순 삭제가 아니라 조건부 atomic claim과 <code>INSERT ... ON CONFLICT</code> 기반으로 저장 경계를 다시 설계해야 한다.</p>
+          <aside class="decision"><strong>리뷰 판단:</strong> <em>non-blocking risk만 있음</em>. 승인 범위와 구현은 일치하고, 검증된 코드 오류·상태 손상·API 계약 위반은 발견하지 못했다. 이 판단은 production 배포 승인이나 실제 latency 개선 확정이 아니다.</aside>
+        </section>
+      </article>
+    </main>
+
+    <script>
+      (() => {
+        const slides = [...document.querySelectorAll('.control-slide')];
+        const answers = ['b', 'b', 'b', 'b'];
+        const explanations = [
+          'winner는 DB row lock과 batch key로 결정되고, loser는 저장된 batch를 반환한다.',
+          '읽기·추천·hydration은 transaction 밖이고 상태 commit만 보호한다.',
+          'stale 결과는 fresh nextBatchNo 검증에서 저장되지 않는다.',
+          '단일 SQL 속도만으로는 HTTP 대기와 pool 경합을 설명할 수 없다.',
+        ];
+        let index = 0;
+        const progress = document.getElementById('progress');
+        const previous = document.getElementById('previous');
+        const next = document.getElementById('next');
+        const submit = document.getElementById('submit');
+        const update = () => {
+          slides.forEach((slide, slideIndex) => slide.classList.toggle('active', slideIndex === index));
+          previous.disabled = index === 0;
+          next.disabled = index === slides.length - 1;
+          const answered = slides.filter((slide) => slide.querySelector('input:checked')).length;
+          progress.textContent = `질문 ${index + 1} / ${slides.length} · 답변 ${answered} / ${slides.length}`;
+        };
+        submit.addEventListener('click', () => {
+          const slide = slides[index];
+          const selected = slide.querySelector('input:checked');
+          const result = slide.querySelector('[data-result]');
+          if (!selected) return;
+          result.querySelector('[data-status]').textContent = selected.value === answers[index] ? '상태: 확립' : '상태: 보류';
+          result.querySelector('[data-explanation]').textContent = explanations[index];
+          result.querySelector('[data-next]').textContent = selected.value === answers[index] ? '다음 운영 점검으로 진행할 수 있다.' : '변경된 코드 경계와 검증 공백을 다시 확인한다.';
+          result.classList.add('visible');
+          update();
+        });
+        previous.addEventListener('click', () => { index -= 1; update(); });
+        next.addEventListener('click', () => { index += 1; update(); });
+        update();
+      })();
+    </script>
+  </body>
+</html>

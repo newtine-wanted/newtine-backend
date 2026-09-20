@@ -102,6 +102,39 @@ test('feed batch generation is owned by the supplied transaction manager', async
   assert.equal(transactionCalls, 2);
 });
 
+test('feed preparation stays outside the transaction and only the save is transactional', async () => {
+  const repository = new InMemoryIssueQueryRepository({ issues: [issue(1)] });
+  let transactionDepth = 0;
+  const originalFindCandidates = repository.findCandidates.bind(repository);
+  repository.findCandidates = async (excludedIssueIds, limit, scope) => {
+    assert.equal(transactionDepth, 0);
+    return originalFindCandidates(excludedIssueIds, limit, scope);
+  };
+  const originalSaveFeedBatch = repository.saveFeedBatch.bind(repository);
+  repository.saveFeedBatch = async (session, batch) => {
+    assert.equal(transactionDepth, 1);
+    return originalSaveFeedBatch(session, batch);
+  };
+  const transactionManager: TransactionManager = {
+    execute: async (work) => {
+      transactionDepth += 1;
+      try {
+        return await work();
+      } finally {
+        transactionDepth -= 1;
+      }
+    },
+  };
+  const service = new IssueFeedService(repository, transactionManager);
+  const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
+
+  await service.getBatch({
+    owner: { kind: 'MEMBER', userId: USER_ID },
+    sessionId: session.sessionId,
+    batchNo: 0,
+  });
+});
+
 test('guest feed uses an anonymous owner and skips member context reads', async () => {
   let contextCalls = 0;
   let interactionCalls = 0;
