@@ -12,6 +12,9 @@
 
 timeout: 1800s
 
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 substitutions:
   _REGION: asia-northeast3
   _IMAGE_REPOSITORY: cloud-run-source-deploy/newtine-backend
