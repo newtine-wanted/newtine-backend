@@ -36,22 +36,22 @@ export function rules(r: GenerationResult, s: ValidationSnapshot): Finding[] {
   }
   for (const field of ['title', 'integratedSummary', 'importanceReason'] as const)
     if (!text(d[field])) fail(field, '비어 있지 않은 문자열이 필요합니다.');
-  if (
-    !(
-      d.eventAt === null ||
-      (text(d.eventAt) &&
-        Number.isFinite(Date.parse(d.eventAt)) &&
-        Date.parse(d.eventAt) <= Date.parse(s.generationAt))
+  // A discarded proposal is audit data. FIRST_REPORT is checked against the
+  // selected articles below; do not reinterpret it as a confirmed event time.
+  if (!(d.eventAt === null || typeof d.eventAt === 'string'))
+    fail('eventAt', '사건 시각 제안은 문자열 또는 null이어야 합니다.');
+  if (!(d.eventEvidence === null || typeof d.eventEvidence === 'string'))
+    fail('eventEvidence', '사건 근거 제안은 문자열 또는 null이어야 합니다.');
+  if (r.eventAtSource === 'ARTICLE_EVENT') {
+    if (
+      !text(d.eventAt) ||
+      !Number.isFinite(Date.parse(d.eventAt)) ||
+      Date.parse(d.eventAt) > Date.parse(s.generationAt)
     )
-  )
-    fail('eventAt', '사건 시각은 생성 기준 시각 이전의 날짜 또는 null이어야 합니다.');
-  if (!(d.eventEvidence === null || text(d.eventEvidence)))
-    fail('eventEvidence', '사건 근거는 원문 인용 또는 null이어야 합니다.');
-  if (
-    d.eventAt !== null &&
-    (!text(d.eventEvidence) || !r.articles.some((a) => a.body.includes(d.eventEvidence!)))
-  )
-    fail('eventEvidence', '사건 시각의 원문 근거가 없습니다.');
+      fail('eventAt', '확정 사건 시각은 생성 기준 시각 이전이어야 합니다.');
+    if (!text(d.eventEvidence) || !r.articles.some((a) => a.body.includes(d.eventEvidence!)))
+      fail('eventEvidence', '확정 사건 시각의 원문 근거가 없습니다.');
+  }
   if (!Array.isArray(d.summaryLines) || d.summaryLines.length !== 3 || !d.summaryLines.every(text))
     fail('summaryLines', '요약은 비어 있지 않은 3줄이어야 합니다.');
   if (

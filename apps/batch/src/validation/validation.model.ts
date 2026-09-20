@@ -25,12 +25,19 @@ export class ValidationOpenAiModel implements ValidationModel {
   ) {}
   private input(result: GenerationResult, context: ValidationSnapshot) {
     return {
-      draft: result.draft,
+      draft: {
+        ...result.draft,
+        eventAt: result.eventAtSource === 'ARTICLE_EVENT' ? result.draft?.eventAt : null,
+        eventEvidence:
+          result.eventAtSource === 'ARTICLE_EVENT' ? result.draft?.eventEvidence : null,
+      },
       classification: result.classification,
       glossary: result.glossary,
-      eventAt: result.eventAt,
-      eventAtSource: result.eventAtSource,
-      scores: result.scores,
+      computed: {
+        eventAt: result.eventAt,
+        eventAtSource: result.eventAtSource,
+        scores: result.scores,
+      },
       generationAt: context.generationAt,
       catalog: context.catalog,
       articles: result.articles.map((a) => ({

@@ -40,6 +40,9 @@ if (v) {
   if (v.results.length !== generated.length) throw new Error('VALIDATION_COUNT_MISMATCH');
   phases.push(['4단계', v]);
 }
+const interruptedValidationFile = process.argv[8];
+if (interruptedValidationFile)
+  phases.push(['중단된 4단계 시도', JSON.parse(await readFile(interruptedValidationFile, 'utf8'))]);
 const lines = [
   '# 뉴스 파이프라인 전체 재실행 결과',
   '',

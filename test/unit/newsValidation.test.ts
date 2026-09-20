@@ -379,3 +379,28 @@ test('bad computed scores are recomputed without a repair LLM call', async () =>
   assert.equal(run.snapshot.results[0]!.status, 'PASSED');
   assert.ok(run.snapshot.results[0]!.current.scores!.freshness <= 1);
 });
+
+test('FIRST_REPORT discards an unverified event proposal without failing or exposing it as fact', async () => {
+  const s = snapshot(),
+    r = s.results[0]!.current;
+  r.draft!.eventAt = '2030-01-01T00:00:00Z';
+  r.draft!.eventEvidence = '기사에 없는 시각';
+  assert.equal(r.eventAtSource, 'FIRST_REPORT');
+  assert.equal(rules(r, s).length, 0);
+  let payload: { input?: string } = {};
+  const m = new ValidationOpenAiModel('test', 'UX', (async (_url, init) => {
+    payload = JSON.parse(String(init?.body));
+    return new Response(
+      JSON.stringify({
+        status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: '{"findings":[]}' }] }],
+      }),
+    );
+  }) as typeof fetch);
+  await m.review(r, s);
+  const input = JSON.parse(payload.input!);
+  assert.equal(input.draft.eventAt, null);
+  assert.equal(input.draft.eventEvidence, null);
+  assert.equal(input.computed.eventAtSource, 'FIRST_REPORT');
+  assert.equal(r.draft!.eventAt, '2030-01-01T00:00:00Z');
+});

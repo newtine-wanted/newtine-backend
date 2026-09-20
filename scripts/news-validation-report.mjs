@@ -9,6 +9,7 @@ export async function writeValidationReport(run, path) {
     `- 실행 ID: ${run.id}`,
     `- 생성 실행 ID: ${run.generationRunId}`,
     `- 통과 ${s.results.filter((r) => r.status === 'PASSED').length} / 보류 ${s.results.filter((r) => r.status === 'HELD').length}`,
+    `- 최초 통과 ${s.results.filter((r) => r.status === 'PASSED' && !r.repair).length} / 수정 후 통과 ${s.results.filter((r) => r.status === 'PASSED' && r.repair).length} / 수정 시도 ${s.results.filter((r) => r.repair).length}`,
     '- 독립 취재 근거 최소 2개 조건은 사용하지 않습니다. 5단계 저장·공개는 수행하지 않았습니다.',
     `- 호출 ${s.usage.length}회, 입력 ${s.usage.reduce((n, u) => n + (u.inputTokens ?? 0), 0)} / 출력 ${s.usage.reduce((n, u) => n + (u.outputTokens ?? 0), 0)} 토큰, 추정 $${cost.usd.toFixed(6)} USD${cost.incomplete ? ' (사용량 누락 있음)' : ''}`,
     '',
