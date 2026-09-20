@@ -58,22 +58,32 @@ function createRepository(state: FakeState) {
   const topicOrder = new Map<string, number>(
     CATEGORY_CATALOG.map((topic) => [topic.code, topic.displayOrder]),
   );
+  const userRecord = {
+    id: userId,
+    email: null,
+    passwordHash: null,
+    role: 'USER',
+    onboardingStatus: state.status,
+    onboardingCompletedAt: state.completedAt,
+    ageGroup: state.ageGroup,
+    createdAt: new Date('2026-09-13T00:00:00.000Z'),
+  };
 
   const entityManager = {
     getContext: () => entityManager,
-    findOne: async (schema: unknown, _where: unknown, options?: { lockMode?: unknown }) => {
+    findOne: async (
+      schema: unknown,
+      _where: unknown,
+      options?: { lockMode?: unknown; refresh?: boolean },
+    ) => {
       if (schema !== UserSchema) return null;
       state.calls.push(options?.lockMode === undefined ? 'findOne:User' : 'findOne:User:locked');
-      return {
-        id: userId,
-        email: null,
-        passwordHash: null,
-        role: 'USER',
-        onboardingStatus: state.status,
-        onboardingCompletedAt: state.completedAt,
-        ageGroup: state.ageGroup,
-        createdAt: new Date('2026-09-13T00:00:00.000Z'),
-      };
+      if (options?.refresh === true) {
+        userRecord.onboardingStatus = state.status;
+        userRecord.onboardingCompletedAt = state.completedAt;
+        userRecord.ageGroup = state.ageGroup;
+      }
+      return userRecord;
     },
     find: async (schema: unknown, where: FakeFindWhere) => {
       if (schema === UserCategoryPreferenceSchema) {

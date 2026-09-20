@@ -145,18 +145,24 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     await this.replaceEntityPreferences(userId, command.entityIds);
     await this.replaceRegionPreferences(userId, command.regionCodes);
 
+    const onboardingCompletedAt = user.onboardingCompletedAt ?? new Date();
     const updated = await this.currentEntityManager().nativeUpdate(
       UserSchema,
       { id: userId },
       {
         ageGroup: command.ageGroup,
         onboardingStatus: OnboardingStatus.Completed,
-        onboardingCompletedAt: user.onboardingCompletedAt ?? new Date(),
+        onboardingCompletedAt,
       },
     );
     if (updated !== 1) {
       throw new Error('온보딩 상태를 완료로 전환하지 못했습니다.');
     }
+
+    // nativeUpdate intentionally bypasses the identity-map change tracking.
+    // Refresh the locked entity so the snapshot returned from this same
+    // transaction reflects the committed write rather than the pre-update row.
+    await this.currentEntityManager().findOne(UserSchema, { id: userId }, { refresh: true });
 
     return this.requireSnapshot(userId);
   }
@@ -182,6 +188,10 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     if (updated !== 1) {
       throw new Error('온보딩 상태를 건너뛰기로 전환하지 못했습니다.');
     }
+
+    // See completeOnboarding: nativeUpdate does not refresh the locked entity
+    // already held by this EntityManager.
+    await this.currentEntityManager().findOne(UserSchema, { id: userId }, { refresh: true });
 
     return this.requireSnapshot(userId);
   }
