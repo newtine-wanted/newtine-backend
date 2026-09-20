@@ -331,9 +331,7 @@ test('exact duplicates are merged before semantic comparison while retaining all
     store,
     { search: async (q) => [article('동일 기사', `https://example.com/${encodeURIComponent(q)}`)] },
     model({
-      groups: async () => {
-        throw new Error('UNNECESSARY_LLM_CALL');
-      },
+      groups: async () => [[0]],
     }),
   ).execute(config, at);
   assert.equal(run.snapshot.candidates!.length, 1);
@@ -372,7 +370,7 @@ test('duplicate-only response keeps one representative and preserves unmentioned
         output: [
           {
             type: 'message',
-            content: [{ type: 'output_text', text: JSON.stringify({ duplicates }) }],
+            content: [{ type: 'output_text', text: JSON.stringify({ duplicates, excluded: [] }) }],
           },
         ],
       }),
@@ -543,4 +541,71 @@ test('representative must be an evidence index, not merely an existing article',
       /INVALID_REPRESENTATIVE_INDEX/,
     );
   }
+});
+
+test('final review excludes a single hyperlocal candidate and records its reason', async () => {
+  const client = new DiscoveryOpenAiModel(
+    'test',
+    (async () =>
+      new Response(
+        JSON.stringify({
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify({
+                    duplicates: [],
+                    excluded: [{ index: 0, reason: 'HYPERLOCAL' }],
+                  }),
+                },
+              ],
+            },
+          ],
+        }),
+      )) as typeof fetch,
+  );
+  assert.deepEqual(await client.groups(['용인 능원초 등굣길 승하차구역 조성']), []);
+  assert.deepEqual(client.excludedCandidates, [{ index: 0, reason: 'HYPERLOCAL' }]);
+  const store = new Store();
+  store.catalogQueries = [query()];
+  const m = model({
+    groups: async () => [],
+    excludedCandidates: [{ index: 0, reason: 'HYPERLOCAL' }],
+  });
+  const run = await new DiscoveryService(
+    store,
+    { search: async () => [article('용인 능원초 등굣길 승하차구역 조성')] },
+    m,
+  ).execute(config, at);
+  assert.equal(run.snapshot.candidates!.length, 0);
+  assert.equal(run.snapshot.excludedCandidates![0]!.reason, 'HYPERLOCAL');
+});
+test('final review rejects an index shared by exclusion and duplicate groups', async () => {
+  const client = new DiscoveryOpenAiModel(
+    'test',
+    (async () =>
+      new Response(
+        JSON.stringify({
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify({
+                    duplicates: [{ keepIndex: 0, duplicateIndexes: [1] }],
+                    excluded: [{ index: 0, reason: 'IRRELEVANT' }],
+                  }),
+                },
+              ],
+            },
+          ],
+        }),
+      )) as typeof fetch,
+  );
+  await assert.rejects(client.groups(['A', 'B']), /INVALID_DUPLICATE_INDEX/);
 });

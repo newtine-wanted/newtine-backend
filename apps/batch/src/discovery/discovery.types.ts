@@ -45,6 +45,7 @@ export interface DiscoverySnapshot {
   tracks?: TrackingIssue[];
   results: QueryResult[];
   candidates?: Candidate[];
+  excludedCandidates?: { candidate: Candidate; reason: 'IRRELEVANT' | 'HYPERLOCAL' }[];
   usage: { stage: string; model: string; inputTokens?: number; outputTokens?: number }[];
 }
 export interface DiscoveryRun {
@@ -64,6 +65,7 @@ export interface DiscoveryStore {
   fail(run: DiscoveryRun, reason: string): Promise<void>;
 }
 export interface DiscoveryModel {
+  excludedCandidates?: { index: number; reason: 'IRRELEVANT' | 'HYPERLOCAL' }[];
   usage?: DiscoverySnapshot['usage'];
   extract(
     titles: string[],

@@ -153,10 +153,17 @@ export class DiscoveryService {
       const candidates = [...exact.values()].map(mergeCandidates);
       if (candidates.length > limits.maxCandidates) throw new Error('CANDIDATE_LIMIT_EXCEEDED');
       const groups =
-        candidates.length > 1
+        candidates.length > 0
           ? await this.model.groups(candidates.map((c) => c.title))
           : candidates.map((_, i) => [i]);
-      validateGroups(groups, candidates.length);
+      const excluded = candidates.length ? (this.model.excludedCandidates ?? []) : [];
+      if (excluded.some((e) => !['IRRELEVANT', 'HYPERLOCAL'].includes(e.reason)))
+        throw new Error('INVALID_EXCLUDED_CANDIDATE');
+      validateGroups([...groups, ...excluded.map((e) => [e.index])], candidates.length);
+      snapshot.excludedCandidates = excluded.map((e) => ({
+        candidate: candidates[e.index]!,
+        reason: e.reason,
+      }));
       snapshot.candidates = groups.map((g) => mergeCandidates(g.map((i) => candidates[i]!)));
       check();
       snapshot.usage.push(...(this.model.usage?.splice(0) ?? []));
