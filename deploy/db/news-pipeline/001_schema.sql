@@ -1,6 +1,18 @@
--- Apply after the application base schema (issues and issue_details).
+-- Existing application tables AND their production data are already present.
+-- Add only pipeline-owned tables/indexes; never initialize or rewrite application data.
 -- Preserves existing pipeline rows, including historical validation modes.
+-- Apply with psql -X -v ON_ERROR_STOP=1 -f this-file.sql.
 begin;
+
+-- Fail before creating anything if the existing application schema is missing.
+do $$
+begin
+  if to_regclass('issues') is null or to_regclass('issue_details') is null
+    or to_regclass('issue_categories') is null or to_regclass('regions') is null
+    or to_regclass('entities') is null then
+    raise exception 'Existing application schema is required; this script does not create or seed it';
+  end if;
+end $$;
 
 create table if not exists news_discovery_runs (
   id uuid primary key,
