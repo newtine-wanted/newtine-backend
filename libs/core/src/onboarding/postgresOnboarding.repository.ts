@@ -1,9 +1,26 @@
-import { EntityManager } from '@mikro-orm/core';
+import { EntityManager, LockMode } from '@mikro-orm/core';
 import { Injectable } from '@nestjs/common';
 
 import { generateUuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
 import type { CategoryCode } from '@newtine/core/common/category/category.catalog.js';
-import { OnboardingException, OnboardingExceptionCode } from './onboarding.exception.js';
+import {
+  IssueCategorySchema,
+  OnboardingEntitySchema,
+  RegionSchema,
+  UserCategoryPreferenceSchema,
+  UserEntityPreferenceSchema,
+  UserRegionPreferenceSchema,
+} from './persistence/onboarding.persistence.entity.js';
+import { UserIssueContributionSchema } from '../interest/persistence/interest.persistence.entity.js';
+import {
+  UserSchema,
+  type UserPersistenceEntity,
+} from '../user/persistence/user.persistence.entity.js';
+import {
+  OnboardingException,
+  OnboardingExceptionCode,
+  type OnboardingSelectionDerivationAnomaly,
+} from './onboarding.exception.js';
 import { ONBOARDING_OPTIONS } from './onboarding.options.js';
 import {
   EntityType,
@@ -18,42 +35,50 @@ import {
   type OnboardingStateWithPreferences,
 } from './onboarding.model.js';
 
-interface UserRow {
-  readonly id: string;
-  readonly onboarding_status: string;
-  readonly onboarding_completed_at: Date | string | null;
-  readonly age_group: string | null;
-}
-
-interface SnapshotRow extends UserRow {
-  readonly topic_weights: unknown;
-  readonly entity_weights: unknown;
-  readonly region_weights: unknown;
-  readonly region_codes: unknown;
-}
-
 interface EntityRow {
   readonly id: string;
   readonly name: string;
   readonly type: string;
-  readonly subtitle: string | null;
+  readonly subtitle: string | null | undefined;
   readonly aliases: string[];
+  readonly isActive: boolean;
 }
 
-interface CountRow {
-  readonly total: number | string;
+interface CategoryResidualRow {
+  readonly category_code: CategoryCode;
+  readonly aggregate_weight: unknown;
+  readonly action_weight: unknown;
 }
 
-interface CategoryRow {
-  readonly code: CategoryCode;
+interface CategoryPreferenceRow {
+  readonly categoryCode: string;
+  readonly weight: unknown;
 }
 
-interface RegionRow {
-  readonly region_code: string;
+interface EntityPreferenceRow {
+  readonly entityId: string;
+  readonly weight: unknown;
 }
 
-interface RunResult {
-  readonly affectedRows: number;
+interface RegionPreferenceRow {
+  readonly regionCode: string;
+  readonly weight: unknown;
+}
+
+interface ContributionRow {
+  readonly categoryCode: string;
+  readonly actionScore: unknown;
+  readonly dwellScore: unknown;
+}
+
+interface SnapshotData {
+  readonly user: UserPersistenceEntity;
+  readonly categoryPreferences: readonly CategoryPreferenceRow[];
+  readonly entityPreferences: readonly EntityPreferenceRow[];
+  readonly regionPreferences: readonly RegionPreferenceRow[];
+  readonly categoryResiduals: readonly CategoryResidualRow[];
+  readonly topicCodes: readonly CategoryCode[];
+  readonly entityIds: readonly string[];
 }
 
 /**
@@ -75,41 +100,24 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
 
   async searchEntities(command: EntitySearchCommand): Promise<EntitySearchResult> {
     const prefix = command.query?.trim() || null;
-    const type = command.type ?? null;
-    const params = [
-      prefix === null ? null : `${escapeLikePrefix(prefix)}%`,
-      prefix === null ? null : `${escapeLikePrefix(prefix)}%`,
-      type,
-      type,
-    ];
-    const where = `
-      WHERE is_active = TRUE
-        AND (?::text IS NULL OR name ILIKE ?::text)
-        AND (?::text IS NULL OR type = ?::text)
-    `;
-    const count = await this.queryOne<CountRow>(
-      `SELECT COUNT(*)::int AS total FROM entities ${where}`,
-      params,
-    );
-    const rows = await this.queryRows<EntityRow>(
-      `
-        SELECT id::text AS id,
-               name,
-               type,
-               subtitle,
-               COALESCE(aliases, ARRAY[]::text[]) AS aliases
-          FROM entities
-          ${where}
-         ORDER BY name ASC, id ASC
-         LIMIT ?::int
-        OFFSET ?::int
-      `,
-      [...params, command.limit, command.offset],
+    const where = {
+      isActive: true,
+      ...(prefix === null ? {} : { name: { $ilike: `${escapeLikePrefix(prefix)}%` } }),
+      ...(command.type === undefined ? {} : { type: command.type }),
+    };
+    const [rows, total] = await this.currentEntityManager().findAndCount(
+      OnboardingEntitySchema,
+      where,
+      {
+        limit: command.limit,
+        offset: command.offset,
+        orderBy: { name: 'asc', id: 'asc' },
+      },
     );
 
     return {
       items: rows.map((row) => this.toEntity(row)),
-      total: Number(count?.total ?? 0),
+      total,
       limit: command.limit,
       offset: command.offset,
     };
@@ -128,63 +136,33 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     if (user === undefined) {
       throw this.userNotFound();
     }
-    if (user.onboarding_status !== OnboardingStatus.Pending) {
-      return this.requireSnapshot(user.id);
-    }
 
     const selection = await this.validateSelection(command);
+    const categoryResiduals = await this.loadCategoryResiduals(userId);
+    this.assertCategoryResiduals(userId, categoryResiduals);
 
-    for (const categoryCode of selection.categoryCodes) {
-      await this.execute(
-        `
-          INSERT INTO user_category_preferences
-            (user_category_preferences_id, user_id, category_code, weight)
-          VALUES (?::uuid, ?::uuid, ?::text, 2)
-          ON CONFLICT (user_id, category_code)
-          DO UPDATE SET weight = user_category_preferences.weight + 2
-        `,
-        [generateUuidV7(), userId, categoryCode],
-      );
-    }
-    for (const entityId of command.entityIds) {
-      await this.execute(
-        `
-          INSERT INTO user_entity_preferences
-            (user_entity_preferences_id, user_id, entity_id, weight)
-          VALUES (?::uuid, ?::uuid, ?::uuid, 2)
-          ON CONFLICT (user_id, entity_id)
-          DO UPDATE SET weight = user_entity_preferences.weight + 2
-        `,
-        [generateUuidV7(), userId, entityId],
-      );
-    }
-    for (const regionCode of command.regionCodes) {
-      await this.execute(
-        `
-          INSERT INTO user_region_preferences
-            (id, user_id, region_code, weight)
-          VALUES (?::uuid, ?::uuid, ?::text, 1)
-          ON CONFLICT (user_id, region_code)
-          DO UPDATE SET weight = user_region_preferences.weight + 1
-        `,
-        [generateUuidV7(), userId, regionCode],
-      );
-    }
+    await this.replaceCategoryPreferences(userId, selection.categoryCodes, categoryResiduals);
+    await this.replaceEntityPreferences(userId, command.entityIds);
+    await this.replaceRegionPreferences(userId, command.regionCodes);
 
-    const updated = await this.execute(
-      `
-        UPDATE users
-           SET age_group = ?::text,
-               onboarding_status = 'COMPLETED',
-               onboarding_completed_at = now()
-         WHERE id = ?::uuid
-           AND onboarding_status = 'PENDING'
-      `,
-      [command.ageGroup, userId],
+    const onboardingCompletedAt = user.onboardingCompletedAt ?? new Date();
+    const updated = await this.currentEntityManager().nativeUpdate(
+      UserSchema,
+      { id: userId },
+      {
+        ageGroup: command.ageGroup,
+        onboardingStatus: OnboardingStatus.Completed,
+        onboardingCompletedAt,
+      },
     );
-    if (updated.affectedRows !== 1) {
+    if (updated !== 1) {
       throw new Error('온보딩 상태를 완료로 전환하지 못했습니다.');
     }
+
+    // nativeUpdate intentionally bypasses the identity-map change tracking.
+    // Refresh the locked entity so the snapshot returned from this same
+    // transaction reflects the committed write rather than the pre-update row.
+    await this.currentEntityManager().findOne(UserSchema, { id: userId }, { refresh: true });
 
     return this.requireSnapshot(userId);
   }
@@ -194,24 +172,26 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     if (user === undefined) {
       throw this.userNotFound();
     }
-    if (user.onboarding_status !== OnboardingStatus.Pending) {
+    if (user.onboardingStatus !== OnboardingStatus.Pending) {
       return this.requireSnapshot(user.id);
     }
 
-    const updated = await this.execute(
-      `
-        UPDATE users
-           SET age_group = NULL,
-               onboarding_status = 'SKIPPED',
-               onboarding_completed_at = NULL
-         WHERE id = ?::uuid
-           AND onboarding_status = 'PENDING'
-      `,
-      [userId],
+    const updated = await this.currentEntityManager().nativeUpdate(
+      UserSchema,
+      { id: userId, onboardingStatus: OnboardingStatus.Pending },
+      {
+        ageGroup: null,
+        onboardingStatus: OnboardingStatus.Skipped,
+        onboardingCompletedAt: null,
+      },
     );
-    if (updated.affectedRows !== 1) {
+    if (updated !== 1) {
       throw new Error('온보딩 상태를 건너뛰기로 전환하지 못했습니다.');
     }
+
+    // See completeOnboarding: nativeUpdate does not refresh the locked entity
+    // already held by this EntityManager.
+    await this.currentEntityManager().findOne(UserSchema, { id: userId }, { refresh: true });
 
     return this.requireSnapshot(userId);
   }
@@ -264,10 +244,9 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
       );
     }
 
-    const categoryRows = await this.queryRows<CategoryRow>(
-      `SELECT code FROM issue_categories WHERE code IN (?)`,
-      [command.topicCodes],
-    );
+    const categoryRows = await this.currentEntityManager().find(IssueCategorySchema, {
+      code: { $in: [...topicCodes] },
+    });
     if (categoryRows.length !== topicCodes.size) {
       throw new OnboardingException(
         OnboardingExceptionCode.InvalidSelection,
@@ -276,10 +255,10 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     }
 
     if (entityIds.size > 0) {
-      const activeEntities = await this.queryRows<{ id: string }>(
-        `SELECT id::text AS id FROM entities WHERE id IN (?) AND is_active = TRUE`,
-        [command.entityIds],
-      );
+      const activeEntities = await this.currentEntityManager().find(OnboardingEntitySchema, {
+        id: { $in: [...entityIds] },
+        isActive: true,
+      });
       if (activeEntities.length !== entityIds.size) {
         throw new OnboardingException(
           OnboardingExceptionCode.InvalidSelection,
@@ -289,10 +268,9 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     }
 
     if (regionCodes.size > 0) {
-      const regions = await this.queryRows<RegionRow>(
-        `SELECT code AS region_code FROM regions WHERE code IN (?)`,
-        [command.regionCodes],
-      );
+      const regions = await this.currentEntityManager().find(RegionSchema, {
+        code: { $in: [...regionCodes] },
+      });
       if (regions.length !== regionCodes.size) {
         throw new OnboardingException(
           OnboardingExceptionCode.InvalidSelection,
@@ -301,56 +279,152 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
       }
     }
 
-    return { categoryCodes: categoryRows.map((row) => row.code) };
+    return { categoryCodes: categoryRows.map((row) => row.code as CategoryCode) };
   }
 
-  private async findUser(userId: string, lock: boolean): Promise<UserRow | undefined> {
-    return this.queryOne<UserRow>(
-      `
-        SELECT id::text AS id,
-               onboarding_status,
-               onboarding_completed_at,
-               age_group
-          FROM users
-         WHERE id = ?::uuid
-         ${lock ? 'FOR UPDATE' : ''}
-      `,
-      [userId],
-    );
+  private async loadCategoryResiduals(userId: string): Promise<readonly CategoryResidualRow[]> {
+    const entityManager = this.currentEntityManager();
+    const categoryPreferences = (await entityManager.find(UserCategoryPreferenceSchema, {
+      userId,
+    })) as readonly CategoryPreferenceRow[];
+    const contributions = (await entityManager.find(UserIssueContributionSchema, {
+      userId,
+    })) as readonly ContributionRow[];
+    return deriveCategoryResiduals(categoryPreferences, contributions);
   }
 
-  private async findSnapshot(userId: string): Promise<SnapshotRow | undefined> {
-    return this.queryOne<SnapshotRow>(
-      `
-        SELECT u.id::text AS id,
-               u.onboarding_status,
-               u.onboarding_completed_at,
-               u.age_group,
-               COALESCE((
-                 SELECT jsonb_object_agg(p.category_code, p.weight)
-                   FROM user_category_preferences p
-                  WHERE p.user_id = u.id
-               ), '{}'::jsonb) AS topic_weights,
-               COALESCE((
-                 SELECT jsonb_object_agg(p.entity_id::text, p.weight)
-                   FROM user_entity_preferences p
-                  WHERE p.user_id = u.id
-               ), '{}'::jsonb) AS entity_weights,
-               COALESCE((
-                 SELECT jsonb_object_agg(p.region_code, p.weight)
-                   FROM user_region_preferences p
-                  WHERE p.user_id = u.id
-               ), '{}'::jsonb) AS region_weights,
-               COALESCE((
-                 SELECT jsonb_agg(p.region_code ORDER BY p.region_code)
-                   FROM user_region_preferences p
-                  WHERE p.user_id = u.id
-               ), '[]'::jsonb) AS region_codes
-          FROM users u
-         WHERE u.id = ?::uuid
-      `,
-      [userId],
+  private assertCategoryResiduals(userId: string, rows: readonly CategoryResidualRow[]): void {
+    const anomalies = rows
+      .filter((row) => !isAllowedCategoryResidual(categoryResidual(row)))
+      .map(toSelectionDerivationAnomaly);
+    if (anomalies.length > 0) {
+      throw this.selectionDerivationAnomaly(userId, anomalies);
+    }
+  }
+
+  private async replaceCategoryPreferences(
+    userId: string,
+    selectedCategoryCodes: readonly CategoryCode[],
+    residuals: readonly CategoryResidualRow[],
+  ): Promise<void> {
+    const actionWeights = new Map(
+      residuals.map((row) => [row.category_code, numeric(row.action_weight)]),
     );
+    const selected = new Set(selectedCategoryCodes);
+    const categoryCodes = new Set([...actionWeights.keys(), ...selected]);
+
+    const entityManager = this.currentEntityManager();
+    await entityManager.nativeDelete(UserCategoryPreferenceSchema, { userId });
+    const rows = [...categoryCodes].sort().map((categoryCode) => ({
+      userCategoryPreferencesId: generateUuidV7(),
+      userId,
+      categoryCode,
+      weight: (actionWeights.get(categoryCode) ?? 0) + (selected.has(categoryCode) ? 2 : 0),
+    }));
+    if (rows.length > 0) {
+      await entityManager.insertMany(UserCategoryPreferenceSchema, rows);
+    }
+  }
+
+  private async replaceEntityPreferences(
+    userId: string,
+    entityIds: readonly string[],
+  ): Promise<void> {
+    const entityManager = this.currentEntityManager();
+    await entityManager.nativeDelete(UserEntityPreferenceSchema, { userId });
+    const rows = entityIds.map((entityId) => ({
+      userEntityPreferenceId: generateUuidV7(),
+      userId,
+      entityId,
+      weight: 2,
+    }));
+    if (rows.length > 0) {
+      await entityManager.insertMany(UserEntityPreferenceSchema, rows);
+    }
+  }
+
+  private async replaceRegionPreferences(
+    userId: string,
+    regionCodes: readonly string[],
+  ): Promise<void> {
+    const entityManager = this.currentEntityManager();
+    await entityManager.nativeDelete(UserRegionPreferenceSchema, { userId });
+    const rows = regionCodes.map((regionCode) => ({
+      id: generateUuidV7(),
+      userId,
+      regionCode,
+      weight: 1,
+    }));
+    if (rows.length > 0) {
+      await entityManager.insertMany(UserRegionPreferenceSchema, rows);
+    }
+  }
+
+  private async findUser(
+    userId: string,
+    lock: boolean,
+  ): Promise<UserPersistenceEntity | undefined> {
+    const user = await this.currentEntityManager().findOne(
+      UserSchema,
+      { id: userId },
+      lock ? { lockMode: LockMode.PESSIMISTIC_WRITE } : undefined,
+    );
+    return user ?? undefined;
+  }
+
+  private async findSnapshot(userId: string): Promise<SnapshotData | undefined> {
+    const entityManager = this.currentEntityManager();
+    const user = await entityManager.findOne(UserSchema, { id: userId });
+    if (user === null) return undefined;
+
+    const categoryPreferences = (await entityManager.find(UserCategoryPreferenceSchema, {
+      userId,
+    })) as readonly CategoryPreferenceRow[];
+    const entityPreferences = (await entityManager.find(UserEntityPreferenceSchema, {
+      userId,
+    })) as readonly EntityPreferenceRow[];
+    const regionPreferences = (await entityManager.find(UserRegionPreferenceSchema, {
+      userId,
+    })) as readonly RegionPreferenceRow[];
+    const contributions = (await entityManager.find(UserIssueContributionSchema, {
+      userId,
+    })) as readonly ContributionRow[];
+    const categoryResiduals = deriveCategoryResiduals(categoryPreferences, contributions);
+
+    const topicCandidates = categoryResiduals.filter((row) => categoryResidual(row) === 2);
+    const topicCategories =
+      topicCandidates.length === 0
+        ? []
+        : await entityManager.find(IssueCategorySchema, {
+            code: { $in: topicCandidates.map((row) => row.category_code) },
+          });
+    const topicCategoryOrder = new Map(
+      topicCategories.map((category) => [category.code, category.displayOrder]),
+    );
+    const topicCodes = topicCandidates
+      .filter((row) => topicCategoryOrder.has(row.category_code))
+      .sort((left, right) => {
+        const orderDifference =
+          (topicCategoryOrder.get(left.category_code) ?? Number.MAX_SAFE_INTEGER) -
+          (topicCategoryOrder.get(right.category_code) ?? Number.MAX_SAFE_INTEGER);
+        return orderDifference !== 0
+          ? orderDifference
+          : left.category_code.localeCompare(right.category_code);
+      })
+      .map((row) => row.category_code);
+
+    return {
+      user,
+      categoryPreferences,
+      entityPreferences,
+      regionPreferences,
+      categoryResiduals,
+      topicCodes,
+      entityIds: entityPreferences
+        .filter((preference) => numeric(preference.weight) > 0)
+        .map((preference) => preference.entityId)
+        .sort(),
+    };
   }
 
   private async requireSnapshot(userId: string): Promise<OnboardingStateWithPreferences> {
@@ -361,22 +435,28 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     return this.toSnapshot(snapshot);
   }
 
-  private toSnapshot(snapshot: SnapshotRow): OnboardingStateWithPreferences {
+  private toSnapshot(snapshot: SnapshotData): OnboardingStateWithPreferences {
+    const anomalies = snapshot.categoryResiduals
+      .filter((row) => !isAllowedCategoryResidual(categoryResidual(row)))
+      .map(toSelectionDerivationAnomaly);
+    if (anomalies.length > 0) {
+      throw this.selectionDerivationAnomaly(snapshot.user.id, anomalies);
+    }
+
     const preferences: OnboardingPreferenceSnapshot = {
-      topicWeights: parseWeightObject(snapshot.topic_weights),
-      entityWeights: parseWeightObject(snapshot.entity_weights),
-      regionWeights: parseWeightObject(snapshot.region_weights),
+      topicWeights: toWeightObject(snapshot.categoryPreferences, 'categoryCode'),
+      entityWeights: toWeightObject(snapshot.entityPreferences, 'entityId'),
+      regionWeights: toWeightObject(snapshot.regionPreferences, 'regionCode'),
     };
 
     return {
-      userId: snapshot.id as OnboardingStateWithPreferences['userId'],
-      status: snapshot.onboarding_status as OnboardingStateWithPreferences['status'],
-      completedAt:
-        snapshot.onboarding_completed_at === null
-          ? null
-          : new Date(snapshot.onboarding_completed_at),
-      ageGroup: snapshot.age_group as OnboardingStateWithPreferences['ageGroup'],
-      regionCodes: parseStringArray(snapshot.region_codes),
+      userId: snapshot.user.id as OnboardingStateWithPreferences['userId'],
+      status: snapshot.user.onboardingStatus as OnboardingStateWithPreferences['status'],
+      completedAt: snapshot.user.onboardingCompletedAt,
+      topicCodes: snapshot.topicCodes,
+      entityIds: snapshot.entityIds,
+      ageGroup: snapshot.user.ageGroup as OnboardingStateWithPreferences['ageGroup'],
+      regionCodes: snapshot.regionPreferences.map((preference) => preference.regionCode).sort(),
       preferences,
     };
   }
@@ -399,32 +479,24 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     );
   }
 
+  private selectionDerivationAnomaly(
+    userId: string,
+    anomalies: readonly OnboardingSelectionDerivationAnomaly[],
+  ): OnboardingException {
+    return new OnboardingException(
+      OnboardingExceptionCode.SelectionDerivationAnomaly,
+      '관심 설정 aggregate의 derived selection을 계산할 수 없습니다.',
+      undefined,
+      {
+        kind: 'selection_derivation_anomaly',
+        userId,
+        anomalies,
+      },
+    );
+  }
+
   private currentEntityManager(): EntityManager {
     return this.entityManager.getContext(false);
-  }
-
-  private async queryRows<T extends object>(sql: string, params: unknown[] = []): Promise<T[]> {
-    const entityManager = this.currentEntityManager();
-    return (await entityManager
-      .getConnection()
-      .execute(sql, params, 'all', entityManager.getTransactionContext())) as T[];
-  }
-
-  private async queryOne<T extends object>(
-    sql: string,
-    params: unknown[] = [],
-  ): Promise<T | undefined> {
-    const entityManager = this.currentEntityManager();
-    return (await entityManager
-      .getConnection()
-      .execute(sql, params, 'get', entityManager.getTransactionContext())) as T | undefined;
-  }
-
-  private async execute(sql: string, params: unknown[] = []): Promise<RunResult> {
-    const entityManager = this.currentEntityManager();
-    return (await entityManager
-      .getConnection()
-      .execute(sql, params, 'run', entityManager.getTransactionContext())) as RunResult;
   }
 }
 
@@ -436,28 +508,80 @@ function escapeLikePrefix(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
 }
 
-function parseWeightObject(value: unknown): Record<string, number> {
-  const object = parseJsonValue(value);
-  if (object === null || Array.isArray(object) || typeof object !== 'object') {
-    return {};
-  }
-  return Object.fromEntries(Object.entries(object).map(([key, weight]) => [key, Number(weight)]));
+function numeric(value: unknown): number {
+  return typeof value === 'number' ? value : Number(value);
 }
 
-function parseStringArray(value: unknown): string[] {
-  const array = parseJsonValue(value);
-  return Array.isArray(array)
-    ? array.filter((item): item is string => typeof item === 'string')
-    : [];
+function toWeightObject(
+  rows: readonly CategoryPreferenceRow[],
+  key: 'categoryCode',
+): Record<string, number>;
+function toWeightObject(
+  rows: readonly EntityPreferenceRow[],
+  key: 'entityId',
+): Record<string, number>;
+function toWeightObject(
+  rows: readonly RegionPreferenceRow[],
+  key: 'regionCode',
+): Record<string, number>;
+function toWeightObject(
+  rows: readonly (CategoryPreferenceRow | EntityPreferenceRow | RegionPreferenceRow)[],
+  key: 'categoryCode' | 'entityId' | 'regionCode',
+): Record<string, number> {
+  return Object.fromEntries(
+    rows.map((row) => [
+      String((row as unknown as Record<string, unknown>)[key]),
+      numeric(row.weight),
+    ]),
+  );
 }
 
-function parseJsonValue(value: unknown): unknown {
-  if (typeof value !== 'string') {
-    return value;
+function deriveCategoryResiduals(
+  categoryPreferences: readonly CategoryPreferenceRow[],
+  contributions: readonly ContributionRow[],
+): readonly CategoryResidualRow[] {
+  const totals = new Map<string, { aggregateWeight: number; actionWeight: number }>();
+
+  for (const preference of categoryPreferences) {
+    const current = totals.get(preference.categoryCode) ?? { aggregateWeight: 0, actionWeight: 0 };
+    current.aggregateWeight += numeric(preference.weight);
+    totals.set(preference.categoryCode, current);
   }
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return null;
+  for (const contribution of contributions) {
+    const current = totals.get(contribution.categoryCode) ?? {
+      aggregateWeight: 0,
+      actionWeight: 0,
+    };
+    current.actionWeight += numeric(contribution.actionScore) + numeric(contribution.dwellScore);
+    totals.set(contribution.categoryCode, current);
   }
+
+  return [...totals.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([categoryCode, weights]) => ({
+      category_code: categoryCode as CategoryCode,
+      aggregate_weight: weights.aggregateWeight,
+      action_weight: weights.actionWeight,
+    }));
+}
+
+function categoryResidual(row: CategoryResidualRow): number {
+  return numeric(row.aggregate_weight) - numeric(row.action_weight);
+}
+
+function toSelectionDerivationAnomaly(
+  row: CategoryResidualRow,
+): OnboardingSelectionDerivationAnomaly {
+  const aggregateWeight = numeric(row.aggregate_weight);
+  const actionWeight = numeric(row.action_weight);
+  return {
+    categoryCode: row.category_code,
+    aggregateWeight,
+    actionWeight,
+    residual: aggregateWeight - actionWeight,
+  };
+}
+
+function isAllowedCategoryResidual(value: number): boolean {
+  return Number.isFinite(value) && (value === 0 || value === 2);
 }

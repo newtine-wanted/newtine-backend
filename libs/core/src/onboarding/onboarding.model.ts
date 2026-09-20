@@ -63,6 +63,8 @@ export interface OnboardingState {
   readonly userId: UuidV7;
   readonly status: OnboardingStatusValue;
   readonly completedAt: Date | null;
+  readonly topicCodes: readonly CategoryCode[];
+  readonly entityIds: readonly string[];
   readonly ageGroup: AgeGroupValue | null;
   readonly regionCodes: readonly string[];
 }

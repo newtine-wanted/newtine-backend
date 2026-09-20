@@ -154,7 +154,11 @@ export type {
   CompleteOnboardingCommand,
 } from './onboarding/onboarding.model.js';
 export { OnboardingException, OnboardingExceptionCode } from './onboarding/onboarding.exception.js';
-export type { OnboardingExceptionCodeValue } from './onboarding/onboarding.exception.js';
+export type {
+  OnboardingExceptionCodeValue,
+  OnboardingExceptionDiagnostic,
+  OnboardingSelectionDerivationAnomaly,
+} from './onboarding/onboarding.exception.js';
 export {
   ONBOARDING_AGE_GROUPS,
   ONBOARDING_OPTIONS,

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>온보딩 관심사 재설정 구현 리뷰</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        line-height: 1.6;
+        color: #172033;
+        background: #f4f6fa;
+      }
+      body {
+        max-width: 1160px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      header,
+      article,
+      aside {
+        background: #fff;
+        border: 1px solid #dfe4ec;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+      h1,
+      h2 {
+        line-height: 1.25;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 16px 0 24px;
+      }
+      nav a {
+        color: #1558b0;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 12px 0 20px;
+      }
+      th,
+      td {
+        border: 1px solid #dfe4ec;
+        padding: 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: #f7f9fc;
+      }
+      code,
+      samp {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .p1 {
+        color: #a11a1a;
+        font-weight: 700;
+      }
+      .p2 {
+        color: #8a4b00;
+        font-weight: 700;
+      }
+      .status {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 10px;
+        background: #fff0d6;
+        color: #8a4b00;
+        font-weight: 700;
+      }
+      figure {
+        margin: 16px 0;
+        padding: 16px;
+        background: #f7f9fc;
+        border-radius: 8px;
+      }
+      footer {
+        color: #526078;
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>온보딩 관심사 재설정 구현 리뷰</h1>
+      <dl>
+        <dt>리뷰 유형</dt>
+        <dd>자기 변경(self-change) read-only review</dd>
+        <dt>작성자 / 리뷰어</dt>
+        <dd>Codex / Codex</dd>
+        <dt>저장소·브랜치</dt>
+        <dd>
+          <code>newtine-backend</code> · <code>codex/onboarding-preference-reconfiguration</code>
+        </dd>
+        <dt>범위</dt>
+        <dd>
+          온보딩 complete overwrite, derived selection 응답, action contribution 보존, 생성 계약과
+          회귀 테스트
+        </dd>
+        <dt>상태</dt>
+        <dd><span class="status">재리뷰 완료 · blocker 없음</span></dd>
+      </dl>
+    </header>
+
+    <nav aria-label="리뷰 탐색">
+      <a href="#intent">범위와 의도</a>
+      <a href="#flow">실제 흐름</a>
+      <a href="#findings">발견 사항</a>
+      <a href="#verification">검증</a>
+      <a href="#verdict">판단</a>
+    </nav>
+
+    <main>
+      <article id="intent">
+        <h2>범위와 의도</h2>
+        <p>
+          기존 <code>POST /api/me/onboarding/complete</code>를 PENDING·SKIPPED·COMPLETED 모두에서
+          full replacement로 동작시키고, 별도 snapshot table 없이 category aggregate와 known action
+          contribution에서 <code>topicCodes</code>·<code>entityIds</code>를 계산하는 변경을
+          검토했다.
+        </p>
+        <p>
+          <code>user_interaction_events</code>와 <code>user_issue_contributions</code>를 삭제하지
+          않고, 기존 category action 합계에 새 onboarding base를 다시 적용하는 것이 핵심 불변식이다.
+        </p>
+      </article>
+
+      <article id="flow">
+        <h2>실제 구현 흐름</h2>
+        <figure>
+          <figcaption>POST complete의 상태·데이터 흐름</figcaption>
+          <ol>
+            <li>user row를 <code>FOR UPDATE</code>로 잠근다.</li>
+            <li>새 full payload를 검증하고 category residual이 0 또는 2인지 확인한다.</li>
+            <li>category preference를 action 합계 + 새 topic base로 삭제·재삽입한다.</li>
+            <li>entity/region preference를 새 payload로 삭제·재삽입한다.</li>
+            <li>age/status/completedAt을 갱신하고 derived response를 읽는다.</li>
+          </ol>
+          <p>
+            GET은 단일 SQL statement의 CTE로 category residual, topic codes, entity ids를 계산하고
+            anomaly면 내부 오류를 발생시킨다.
+          </p>
+        </figure>
+      </article>
+
+      <article id="findings">
+        <h2>발견 사항</h2>
+        <table>
+          <caption>
+            findings and reclassification
+          </caption>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>심각도</th>
+              <th>상태</th>
+              <th>근거와 영향</th>
+              <th>최소 조치</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">REV-001</th>
+              <td class="p2">P2 · 검증 보강</td>
+              <td>non-blocking</td>
+              <td>
+                이전 리뷰에서 실제 PostgreSQL 경로 미검증을 P1 blocker로 분류했지만 과했다.
+                <code>onboarding.service.ts:32-40</code>가 top-level transaction을 소유하고,
+                <code>postgresOnboarding.repository.ts:523-545</code>가 ambient transaction
+                context를 사용하며, complete/action 양쪽이 user row를 잠근다. 기존
+                PostgreSQL·Compose smoke와 transaction-manager 검증도 있어 구현 wiring 자체의 결함은
+                확인되지 않는다. 다만 이 변경의 새 overwrite/rollback 시나리오를 직접 수행하는 DB
+                smoke는 없다.
+              </td>
+              <td>
+                release 전 disposable PostgreSQL에서 overwrite, action/event 보존, GET derived
+                response, 중간 INSERT 실패 rollback을 한 번 더 확인하면 된다. merge blocker는
+                아니다.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">REV-002</th>
+              <td class="p2">P2 · 테스트 보강</td>
+              <td>non-blocking</td>
+              <td>
+                기존 동일 payload retry 테스트가 다른 payload overwrite 테스트로 바뀌었다
+                (<code>test/unit/onboarding.test.ts:103-132</code>). 현재 테스트는 같은 payload를 두
+                번 보냈을 때 action/base가 누적되지 않는다는 핵심 멱등성 계약을 직접 증명하지
+                않는다. 다만 구현은 매번 현재 action 합계 + 선택 base로 delete/reinsert하고 완료
+                시각을 보존하므로, 현재 코드에서 누적 버그가 관찰된 것은 아니다.
+              </td>
+              <td>
+                동일 payload를 두 번 보낸 뒤 topic/entity/region weight와 completedAt이 동일한
+                회귀를 추가한다. acceptance blocker가 아니라 회귀 방지용 보강이다.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">REV-003</th>
+              <td class="p2">P2</td>
+              <td>해결됨</td>
+              <td>
+                설계 계약은 topic catalog/order, entity id, region code 기준의 안정된 순서를
+                요구했다. production GET을 topic <code>issue_categories.display_order</code>와
+                region code 순서로 고쳤고, InMemory adapter도 같은 contract로 맞췄다.
+              </td>
+              <td>해결: SQL/InMemory 정렬 회귀를 추가했다.</td>
+            </tr>
+            <tr>
+              <th scope="row">REV-004</th>
+              <td class="p2">P2</td>
+              <td>해결됨</td>
+              <td>
+                residual anomaly에 user id와 category별 aggregate/action/residual context를 담고,
+                global exception filter가 이를 내부 <code>diagnostic.onboarding</code>에 기록하도록
+                고쳤다. HTTP response에는 기존처럼 generic 500만 노출한다.
+              </td>
+              <td>
+                해결: exception logging 회귀를 추가했다. metric/alert 연결은 운영 설정 범위다.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">REV-005</th>
+              <td>해당 없음</td>
+              <td>철회</td>
+              <td>
+                이전 지적은 정상 상태 전이를 벗어난 stale row를 전제로 했다. 유효한 writer에서는
+                <code>skipOnboarding</code>이 timestamp를 NULL로 만들고, complete는 COMPLETED
+                overwrite의 기존 timestamp만 보존한다. legacy 데이터 정합성 검사를 범위에 넣지 않는
+                한 구현 결함으로 볼 근거가 없다.
+              </td>
+              <td>
+                별도 수정 불필요. legacy 상태 정합성을 별도 운영 범위로 잡을 때만 데이터 점검을
+                추가한다.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article id="verification">
+        <h2>검증 증거와 공백</h2>
+        <ul>
+          <li>focused onboarding·adapter·exception tests: 31개 통과.</li>
+          <li>unit tests: 47 suites / 246 tests 통과.</li>
+          <li>contracts, generated typecheck, format, lint, build 통과.</li>
+          <li>integration: 2 suites / 11 tests 통과, DB 환경 의존 3 suites는 skip.</li>
+          <li>
+            새 onboarding overwrite/rollback 전용 PostgreSQL smoke는 미실시. 이는 transaction wiring
+            blocker가 아니라 정확한 새 SQL branch의 선택적 coverage gap이다.
+          </li>
+          <li>
+            서비스 transaction boundary, repository의 ambient transaction context, user row lock,
+            기존 PostgreSQL/Compose smoke 및 transaction-manager 회귀를 확인했다.
+          </li>
+        </ul>
+      </article>
+
+      <aside>
+        <strong>잔여 위험:</strong> 새 overwrite SQL branch의 직접 DB smoke가 없고, anomaly
+        metric/alert 연결은 운영 설정에서 확인해야 한다. 모두 non-blocking risk이며, 현재 구현에서
+        transaction 연결 단절이나 데이터 삭제 결함은 확인되지 않았다.
+      </aside>
+
+      <article id="verdict">
+        <h2>리뷰 판단</h2>
+        <p>
+          <strong>판정: blocker 없음.</strong> REV-001은 P1 오탐/과대 분류로 철회하고 exact DB smoke
+          보강으로 낮췄다. REV-002는 코드 결함이 아닌 멱등성 회귀 테스트 공백으로 P2에 남겼다.
+          REV-003(순서 계약)과 REV-004(anomaly 운영 진단)는 구현·회귀 검증으로 해결했고, REV-005는
+          정상 상태 범위 밖의 가정이라 철회한다.
+        </p>
+      </article>
+    </main>
+
+    <footer>
+      본 문서는 구현 전·후 리뷰 증거와 후속 조치를 기록한다. 구현 제어 상태는 연결된 구현 문서에
+      기록한다.
+    </footer>
+  </body>
+</html>
