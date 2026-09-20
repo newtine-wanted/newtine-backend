@@ -3,6 +3,7 @@ import {
   IssueException,
   IssueExceptionCode,
   type FeedBatchRecord,
+  type FeedBatchSaveResult,
   type FeedAlgorithmSnapshot,
   type FeedOwner,
   type FeedSessionRecord,
@@ -98,9 +99,12 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
       .map(cloneBatch);
   }
 
-  async saveFeedBatch(session: FeedSessionRecord, batch: FeedBatchRecord): Promise<void> {
+  async saveFeedBatch(
+    session: FeedSessionRecord,
+    batch: FeedBatchRecord,
+  ): Promise<FeedBatchSaveResult> {
     const key = batchKey(batch.sessionId, batch.batchNo);
-    if (this.batches.has(key)) return;
+    if (this.batches.has(key)) return 'EXISTING';
     const currentSession = this.sessions.get(session.id);
     const previousBatches = [...this.batches.values()]
       .filter((storedBatch) => storedBatch.sessionId === session.id)
@@ -119,6 +123,7 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     }
     this.batches.set(key, cloneBatch(batch));
     this.sessions.set(session.id, cloneSession(session));
+    return 'SAVED';
   }
 
   async findCandidates(

@@ -2,7 +2,12 @@ import type { Request, Response } from 'express';
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from '@nestjs/common';
 import { PinoLogger } from 'nestjs-pino';
 
-import { DomainException, ErrorCode, exceptionDiagnostic } from '@newtine/core';
+import {
+  DomainException,
+  ErrorCode,
+  exceptionDiagnostic,
+  OnboardingException,
+} from '@newtine/core';
 
 import { toApiException } from '@newtine/api/common/exception/domainException.mapper.js';
 import { ApiException, httpStatusTitle } from '@newtine/api/common/exception/api.exception.js';
@@ -39,9 +44,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     };
 
     if (problem.status >= HttpStatus.INTERNAL_SERVER_ERROR) {
+      const diagnostic = exceptionDiagnostic(exception);
+      if (exception instanceof OnboardingException && exception.diagnostic !== undefined) {
+        diagnostic.onboarding = exception.diagnostic;
+      }
       this.writeError({
         ...logContext,
-        diagnostic: exceptionDiagnostic(exception),
+        diagnostic,
       });
     } else {
       this.writeWarning(logContext);

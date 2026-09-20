@@ -46,6 +46,7 @@
             <li>cache key는 Linux amd64·Node 24·<code>package-lock.json</code> hash로 분리하고, cache read/write 실패는 배포를 막지 않는다.</li>
             <li>plugin archive는 임시 파일에 먼저 생성하고 성공 시에만 최종 경로로 rename한다. packaging 실패 시 stale·partial archive를 제거해 업로드하지 않는다.</li>
             <li>trigger가 사용자 지정 서비스 계정을 사용하므로 <code>options.logging: CLOUD_LOGGING_ONLY</code>를 지정해 Google Cloud Logging으로 build log를 보낸다. 서비스 계정에는 <code>roles/logging.logWriter</code>가 필요하다.</li>
+            <li><code>build-application</code> step은 Go 기반 ttsc plugin compile 전에 <code>ca-certificates</code>를 설치해 <code>proxy.golang.org</code> TLS 검증을 보장한다.</li>
             <li><code>ttsc-cache-lifecycle.json</code>은 <code>newtine-backend/</code> prefix의 30일 안전망으로 유지한다. 정확한 최신 3개 보존은 <code>prune-ttsc-cache</code> 단계가 담당한다.</li>
             <li>cache write는 trusted main/deployment trigger 전용으로 운영한다. cache 전용 bucket은 soft delete를 비활성화하고 lifecycle을 적용해야 한다.</li>
           </ul>

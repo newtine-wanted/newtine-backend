@@ -941,6 +941,205 @@
         ],
         "type": "object"
       },
+      "OnboardingStateResult": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "oneOf": [
+              {
+                "const": "COMPLETED"
+              },
+              {
+                "const": "PENDING"
+              },
+              {
+                "const": "SKIPPED"
+              }
+            ],
+            "readOnly": true
+          },
+          "completedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "readOnly": true
+          },
+          "topicCodes": {
+            "items": {
+              "oneOf": [
+                {
+                  "const": "climate"
+                },
+                {
+                  "const": "education"
+                },
+                {
+                  "const": "finance"
+                },
+                {
+                  "const": "health"
+                },
+                {
+                  "const": "housing"
+                },
+                {
+                  "const": "labor"
+                },
+                {
+                  "const": "local"
+                },
+                {
+                  "const": "politics"
+                },
+                {
+                  "const": "security"
+                },
+                {
+                  "const": "welfare"
+                }
+              ]
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          },
+          "entityIds": {
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          },
+          "ageGroup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ],
+            "readOnly": true
+          },
+          "regionCodes": {
+            "items": {
+              "type": "string"
+            },
+            "readOnly": true,
+            "type": "array",
+            "x-readonly-array": true
+          }
+        },
+        "required": [
+          "status",
+          "completedAt",
+          "topicCodes",
+          "entityIds",
+          "ageGroup",
+          "regionCodes"
+        ],
+        "type": "object"
+      },
+      "CompleteOnboardingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "topicCodes": {
+            "items": {
+              "oneOf": [
+                {
+                  "const": "climate"
+                },
+                {
+                  "const": "education"
+                },
+                {
+                  "const": "finance"
+                },
+                {
+                  "const": "health"
+                },
+                {
+                  "const": "housing"
+                },
+                {
+                  "const": "labor"
+                },
+                {
+                  "const": "local"
+                },
+                {
+                  "const": "politics"
+                },
+                {
+                  "const": "security"
+                },
+                {
+                  "const": "welfare"
+                }
+              ]
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "type": "array"
+          },
+          "entityIds": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "ageGroup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "const": "AGE_19_34"
+              },
+              {
+                "const": "AGE_35_49"
+              },
+              {
+                "const": "AGE_50_64"
+              },
+              {
+                "const": "AGE_65_PLUS"
+              }
+            ]
+          },
+          "regionCodes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 17,
+            "type": "array"
+          }
+        },
+        "required": [
+          "topicCodes",
+          "entityIds",
+          "ageGroup",
+          "regionCodes"
+        ],
+        "type": "object"
+      },
       "MetadataCategoryResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1167,24 +1366,219 @@
         "required": [],
         "type": "object"
       },
-      "OnboardingStateResult": {
+      "InterestAnalysisResponse": {
         "additionalProperties": false,
         "properties": {
-          "status": {
+          "asOf": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period": {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "ROLLING_DAYS",
+                "title": null,
+                "description": null
+              },
+              "days": {
+                "type": "number"
+              },
+              "startAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "endAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "timeZone": {
+                "const": "Asia/Seoul",
+                "title": null,
+                "description": null
+              }
+            },
+            "required": [
+              "type",
+              "days",
+              "startAt",
+              "endAt",
+              "timeZone"
+            ],
+            "type": "object"
+          },
+          "sampleStatus": {
             "oneOf": [
               {
-                "const": "COMPLETED"
+                "const": "EMPTY"
               },
               {
-                "const": "PENDING"
+                "const": "LOW_SAMPLE"
               },
               {
-                "const": "SKIPPED"
+                "const": "READY"
               }
-            ],
-            "readOnly": true
+            ]
           },
-          "completedAt": {
+          "minimumSampleSize": {
+            "type": "number"
+          },
+          "issueCount": {
+            "type": "number"
+          },
+          "likedIssueCount": {
+            "type": "number"
+          },
+          "categoryCounts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "oneOf": [
+                    {
+                      "const": "climate"
+                    },
+                    {
+                      "const": "education"
+                    },
+                    {
+                      "const": "finance"
+                    },
+                    {
+                      "const": "health"
+                    },
+                    {
+                      "const": "housing"
+                    },
+                    {
+                      "const": "labor"
+                    },
+                    {
+                      "const": "local"
+                    },
+                    {
+                      "const": "politics"
+                    },
+                    {
+                      "const": "security"
+                    },
+                    {
+                      "const": "welfare"
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "name",
+                "count"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "asOf",
+          "period",
+          "sampleStatus",
+          "minimumSampleSize",
+          "issueCount",
+          "likedIssueCount",
+          "categoryCounts"
+        ],
+        "type": "object"
+      },
+      "LikedIssuesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "issueId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "category": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "oneOf": [
+                        {
+                          "const": "climate"
+                        },
+                        {
+                          "const": "education"
+                        },
+                        {
+                          "const": "finance"
+                        },
+                        {
+                          "const": "health"
+                        },
+                        {
+                          "const": "housing"
+                        },
+                        {
+                          "const": "labor"
+                        },
+                        {
+                          "const": "local"
+                        },
+                        {
+                          "const": "politics"
+                        },
+                        {
+                          "const": "security"
+                        },
+                        {
+                          "const": "welfare"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "likedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "thumbnailUrl": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "issueId",
+                "title",
+                "category",
+                "likedAt",
+                "thumbnailUrl"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "totalCount": {
+            "type": "number"
+          },
+          "nextCursor": {
             "oneOf": [
               {
                 "type": "null"
@@ -1192,129 +1586,65 @@
               {
                 "type": "string"
               }
-            ],
-            "readOnly": true
-          },
-          "ageGroup": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "const": "AGE_19_34"
-              },
-              {
-                "const": "AGE_35_49"
-              },
-              {
-                "const": "AGE_50_64"
-              },
-              {
-                "const": "AGE_65_PLUS"
-              }
-            ],
-            "readOnly": true
-          },
-          "regionCodes": {
-            "items": {
-              "type": "string"
-            },
-            "readOnly": true,
-            "type": "array",
-            "x-readonly-array": true
+            ]
           }
         },
         "required": [
-          "status",
-          "completedAt",
-          "ageGroup",
-          "regionCodes"
+          "items",
+          "totalCount",
+          "nextCursor"
         ],
         "type": "object"
       },
-      "CompleteOnboardingRequest": {
+      "LikedIssuesQuery": {
         "additionalProperties": false,
         "properties": {
-          "topicCodes": {
-            "items": {
-              "oneOf": [
-                {
-                  "const": "climate"
-                },
-                {
-                  "const": "education"
-                },
-                {
-                  "const": "finance"
-                },
-                {
-                  "const": "health"
-                },
-                {
-                  "const": "housing"
-                },
-                {
-                  "const": "labor"
-                },
-                {
-                  "const": "local"
-                },
-                {
-                  "const": "politics"
-                },
-                {
-                  "const": "security"
-                },
-                {
-                  "const": "welfare"
-                }
-              ]
-            },
-            "maxItems": 10,
-            "minItems": 1,
-            "type": "array"
-          },
-          "entityIds": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "maxItems": 100,
-            "type": "array"
-          },
-          "ageGroup": {
+          "categoryCode": {
             "oneOf": [
               {
-                "type": "null"
+                "const": "climate"
               },
               {
-                "const": "AGE_19_34"
+                "const": "education"
               },
               {
-                "const": "AGE_35_49"
+                "const": "finance"
               },
               {
-                "const": "AGE_50_64"
+                "const": "health"
               },
               {
-                "const": "AGE_65_PLUS"
+                "const": "housing"
+              },
+              {
+                "const": "labor"
+              },
+              {
+                "const": "local"
+              },
+              {
+                "const": "politics"
+              },
+              {
+                "const": "security"
+              },
+              {
+                "const": "welfare"
               }
             ]
           },
-          "regionCodes": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 17,
-            "type": "array"
+          "cursor": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
           }
         },
-        "required": [
-          "topicCodes",
-          "entityIds",
-          "ageGroup",
-          "regionCodes"
-        ],
+        "required": [],
         "type": "object"
       },
       "IssueInteractionResponse": {
@@ -1978,287 +2308,6 @@
             "maxLength": 4096,
             "minLength": 1,
             "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "InterestAnalysisResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "asOf": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "period": {
-            "additionalProperties": false,
-            "properties": {
-              "type": {
-                "const": "ROLLING_DAYS",
-                "title": null,
-                "description": null
-              },
-              "days": {
-                "type": "number"
-              },
-              "startAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "endAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "timeZone": {
-                "const": "Asia/Seoul",
-                "title": null,
-                "description": null
-              }
-            },
-            "required": [
-              "type",
-              "days",
-              "startAt",
-              "endAt",
-              "timeZone"
-            ],
-            "type": "object"
-          },
-          "sampleStatus": {
-            "oneOf": [
-              {
-                "const": "EMPTY"
-              },
-              {
-                "const": "LOW_SAMPLE"
-              },
-              {
-                "const": "READY"
-              }
-            ]
-          },
-          "minimumSampleSize": {
-            "type": "number"
-          },
-          "issueCount": {
-            "type": "number"
-          },
-          "likedIssueCount": {
-            "type": "number"
-          },
-          "categoryCounts": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "code": {
-                  "oneOf": [
-                    {
-                      "const": "climate"
-                    },
-                    {
-                      "const": "education"
-                    },
-                    {
-                      "const": "finance"
-                    },
-                    {
-                      "const": "health"
-                    },
-                    {
-                      "const": "housing"
-                    },
-                    {
-                      "const": "labor"
-                    },
-                    {
-                      "const": "local"
-                    },
-                    {
-                      "const": "politics"
-                    },
-                    {
-                      "const": "security"
-                    },
-                    {
-                      "const": "welfare"
-                    }
-                  ]
-                },
-                "name": {
-                  "type": "string"
-                },
-                "count": {
-                  "type": "number"
-                }
-              },
-              "required": [
-                "code",
-                "name",
-                "count"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "asOf",
-          "period",
-          "sampleStatus",
-          "minimumSampleSize",
-          "issueCount",
-          "likedIssueCount",
-          "categoryCounts"
-        ],
-        "type": "object"
-      },
-      "LikedIssuesResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "items": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "issueId": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "title": {
-                  "type": "string"
-                },
-                "category": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "code": {
-                      "oneOf": [
-                        {
-                          "const": "climate"
-                        },
-                        {
-                          "const": "education"
-                        },
-                        {
-                          "const": "finance"
-                        },
-                        {
-                          "const": "health"
-                        },
-                        {
-                          "const": "housing"
-                        },
-                        {
-                          "const": "labor"
-                        },
-                        {
-                          "const": "local"
-                        },
-                        {
-                          "const": "politics"
-                        },
-                        {
-                          "const": "security"
-                        },
-                        {
-                          "const": "welfare"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "name"
-                  ],
-                  "type": "object"
-                },
-                "likedAt": {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                "thumbnailUrl": {
-                  "type": "null"
-                }
-              },
-              "required": [
-                "issueId",
-                "title",
-                "category",
-                "likedAt",
-                "thumbnailUrl"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "totalCount": {
-            "type": "number"
-          },
-          "nextCursor": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "totalCount",
-          "nextCursor"
-        ],
-        "type": "object"
-      },
-      "LikedIssuesQuery": {
-        "additionalProperties": false,
-        "properties": {
-          "categoryCode": {
-            "oneOf": [
-              {
-                "const": "climate"
-              },
-              {
-                "const": "education"
-              },
-              {
-                "const": "finance"
-              },
-              {
-                "const": "health"
-              },
-              {
-                "const": "housing"
-              },
-              {
-                "const": "labor"
-              },
-              {
-                "const": "local"
-              },
-              {
-                "const": "politics"
-              },
-              {
-                "const": "security"
-              },
-              {
-                "const": "welfare"
-              }
-            ]
-          },
-          "cursor": {
-            "maxLength": 512,
-            "minLength": 1,
-            "type": "string"
-          },
-          "limit": {
-            "maximum": 50,
-            "minimum": 1,
-            "type": "integer"
           }
         },
         "required": [],
@@ -3101,6 +3150,173 @@
         "x-samchon-controller": "PipelineController"
       }
     },
+    "/api/me/onboarding": {
+      "get": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "getMyOnboarding"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/api/me/onboarding/complete": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteOnboardingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "complete"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
+    "/api/me/onboarding/skip": {
+      "post": {
+        "tags": [],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is required.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server could not complete the request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-samchon-accessor": [
+          "me",
+          "onboarding",
+          "skip"
+        ],
+        "x-samchon-controller": "OnboardingController"
+      }
+    },
     "/api/metadata/categories": {
       "get": {
         "tags": [],
@@ -3299,7 +3515,7 @@
         "x-samchon-controller": "MetadataController"
       }
     },
-    "/api/me/onboarding": {
+    "/api/me/interest-analysis": {
       "get": {
         "tags": [],
         "parameters": [],
@@ -3309,7 +3525,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
+                  "$ref": "#/components/schemas/InterestAnalysisResponse"
                 }
               }
             }
@@ -3342,33 +3558,79 @@
         ],
         "x-samchon-accessor": [
           "me",
-          "onboarding",
-          "getMyOnboarding"
+          "interest_analysis",
+          "getAnalysis"
         ],
-        "x-samchon-controller": "OnboardingController"
+        "x-samchon-controller": "InterestController"
       }
     },
-    "/api/me/onboarding/complete": {
-      "post": {
+    "/api/me/liked-issues": {
+      "get": {
         "tags": [],
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CompleteOnboardingRequest"
-              }
-            }
+        "parameters": [
+          {
+            "name": "categoryCode",
+            "in": "query",
+            "schema": {
+              "oneOf": [
+                {
+                  "const": "climate"
+                },
+                {
+                  "const": "education"
+                },
+                {
+                  "const": "finance"
+                },
+                {
+                  "const": "health"
+                },
+                {
+                  "const": "housing"
+                },
+                {
+                  "const": "labor"
+                },
+                {
+                  "const": "local"
+                },
+                {
+                  "const": "politics"
+                },
+                {
+                  "const": "security"
+                },
+                {
+                  "const": "welfare"
+                }
+              ]
+            },
+            "required": false
           },
-          "required": true
-        },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            },
+            "required": false
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
+                  "$ref": "#/components/schemas/LikedIssuesResponse"
                 }
               }
             }
@@ -3411,59 +3673,10 @@
         ],
         "x-samchon-accessor": [
           "me",
-          "onboarding",
-          "complete"
+          "liked_issues",
+          "getLikedIssues"
         ],
-        "x-samchon-controller": "OnboardingController"
-      }
-    },
-    "/api/me/onboarding/skip": {
-      "post": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResult"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "onboarding",
-          "skip"
-        ],
-        "x-samchon-controller": "OnboardingController"
+        "x-samchon-controller": "InterestController"
       }
     },
     "/api/issues/{issueId}/interactions": {
@@ -4043,170 +4256,6 @@
           "getFeed"
         ],
         "x-samchon-controller": "FeedController"
-      }
-    },
-    "/api/me/interest-analysis": {
-      "get": {
-        "tags": [],
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InterestAnalysisResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "interest_analysis",
-          "getAnalysis"
-        ],
-        "x-samchon-controller": "InterestController"
-      }
-    },
-    "/api/me/liked-issues": {
-      "get": {
-        "tags": [],
-        "parameters": [
-          {
-            "name": "categoryCode",
-            "in": "query",
-            "schema": {
-              "oneOf": [
-                {
-                  "const": "climate"
-                },
-                {
-                  "const": "education"
-                },
-                {
-                  "const": "finance"
-                },
-                {
-                  "const": "health"
-                },
-                {
-                  "const": "housing"
-                },
-                {
-                  "const": "labor"
-                },
-                {
-                  "const": "local"
-                },
-                {
-                  "const": "politics"
-                },
-                {
-                  "const": "security"
-                },
-                {
-                  "const": "welfare"
-                }
-              ]
-            },
-            "required": false
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            },
-            "required": false
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "number"
-            },
-            "required": false
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LikedIssuesResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request is invalid.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication is required.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server could not complete the request.",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-samchon-accessor": [
-          "me",
-          "liked_issues",
-          "getLikedIssues"
-        ],
-        "x-samchon-controller": "InterestController"
       }
     },
     "/api/health": {

@@ -33,7 +33,13 @@
     "contracts:swagger": "node scripts/openapi.mjs",
     "contracts:e2e": "npm run contracts:clean && nestia e2e && node scripts/prefix-generated-api.mjs",
     "contracts:all": "npm run contracts:sdk && npm run contracts:e2e && npm run contracts:swagger",
-    "contracts:check": "npm run contracts:all && npm run test:contracts && npm run typecheck:generated"
+    "contracts:check": "npm run contracts:all && npm run test:contracts && npm run typecheck:generated",
+    "news:discovery": "node scripts/news-discovery.mjs",
+    "news:collection": "node scripts/news-collection.mjs",
+    "news:generation": "node scripts/news-generation.mjs",
+    "news:validation": "node scripts/news-validation.mjs",
+    "news:pipeline": "node scripts/news-pipeline.mjs",
+    "test:news-runner": "node --test test/scripts/newsPipeline.check.mjs"
   },
   "dependencies": {
     "@mikro-orm/core": "7.2.0",

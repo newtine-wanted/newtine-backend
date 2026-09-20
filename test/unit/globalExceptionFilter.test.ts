@@ -10,7 +10,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 
-import { DomainException, IssueException, IssueExceptionCode } from '@newtine/core';
+import {
+  DomainException,
+  IssueException,
+  IssueExceptionCode,
+  OnboardingException,
+  OnboardingExceptionCode,
+} from '@newtine/core';
 import { GlobalExceptionFilter } from '@newtine/api/common/filter/globalExceptionFilter.js';
 
 class TestDomainException extends DomainException<string> {
@@ -107,6 +113,40 @@ test('GlobalExceptionFilter hides unexpected exception details', () => {
     detail: '요청 처리 중 오류가 발생했습니다.',
     code: 'INTERNAL_ERROR',
   });
+});
+
+test('GlobalExceptionFilter preserves onboarding anomaly context in internal logs only', () => {
+  const logs: LogEntry[] = [];
+  const filter = createFilter(logs);
+  const { state, host } = createHost();
+  const exception = new OnboardingException(
+    OnboardingExceptionCode.SelectionDerivationAnomaly,
+    '관심 설정 aggregate의 derived selection을 계산할 수 없습니다.',
+    undefined,
+    {
+      kind: 'selection_derivation_anomaly',
+      userId: '0199f000-0000-7000-8000-000000000001',
+      anomalies: [
+        {
+          categoryCode: 'housing',
+          aggregateWeight: 3,
+          actionWeight: 0,
+          residual: 3,
+        },
+      ],
+    },
+  );
+
+  filter.catch(exception, host as never);
+
+  assert.deepEqual(state.body, {
+    title: 'Internal Server Error',
+    status: 500,
+    detail: '요청 처리 중 오류가 발생했습니다.',
+    code: 'INTERNAL_ERROR',
+  });
+  const log = logs[0]?.args[0] as { diagnostic?: { onboarding?: unknown } };
+  assert.deepEqual(log.diagnostic?.onboarding, exception.diagnostic);
 });
 
 test('GlobalExceptionFilter hides internal HttpException payloads', () => {

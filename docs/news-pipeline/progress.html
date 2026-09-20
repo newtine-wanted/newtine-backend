@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEWTINE 뉴스 파이프라인 · 구현 현황</title>
+<meta name="description" content="direction.md 기준으로 파이프라인 5단계의 소단계별 구현 현황을 관리하는 보드">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#f4f6f9; --card:#fff; --card-2:#f2f5f9; --col:#eaeef4;
+  --line:#dfe4ec; --line-2:#c8d1de;
+  --text:#16202e; --text-2:#4e5b6d; --text-3:#7a8797;
+  --brand:#0f9d76; --blue:#2b7fd4; --amber:#a86f08; --coral:#d9503c; --violet:#6f52d9;
+  --r:14px; --r-s:9px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",Pretendard,"Noto Sans KR","Segoe UI",sans-serif;
+  line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1400px;margin:0 auto;padding:26px 18px 70px}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}
+
+header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+h1{font-size:1.45rem;margin:0 0 4px;letter-spacing:-.02em}
+.sub{color:var(--text-3);font-size:.84rem;margin:0}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:22px 0 10px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r-s);padding:11px 13px}
+.stat b{display:block;font-size:1.4rem;line-height:1.2;letter-spacing:-.02em}
+.stat span{color:var(--text-3);font-size:.74rem}
+.stat.ok b{color:var(--brand)} .stat.blue b{color:var(--blue)}
+.stat.amber b{color:var(--amber)} .stat.violet b{color:var(--violet)}
+.stat.coral b{color:var(--coral)}
+
+.bar{height:8px;border-radius:99px;background:var(--card-2);border:1px solid var(--line);overflow:hidden;margin-bottom:8px}
+.bar i{display:block;height:100%;background:var(--brand)}
+.barlabel{color:var(--text-3);font-size:.76rem;margin-bottom:26px}
+
+/* stage rail = filter */
+.steps{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.step{background:var(--card);border:1px solid var(--line);border-radius:var(--r-s);
+  padding:10px 11px;position:relative;cursor:pointer;text-align:left;font:inherit;color:inherit}
+.step:hover{border-color:var(--line-2)}
+.step.done{border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
+.step.now{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 9%,var(--card))}
+.step.partial{border-color:var(--amber);background:color-mix(in srgb,var(--amber) 9%,var(--card))}
+.step.none{border-style:dashed}
+.step[aria-pressed="true"]{outline:2px solid var(--violet);outline-offset:1px}
+.step .no{font-family:ui-monospace,Menlo,monospace;font-size:.68rem;color:var(--text-3)}
+.step.done .no{color:var(--brand)} .step.now .no{color:var(--blue)} .step.partial .no{color:var(--amber)}
+.step b{display:block;font-size:.82rem;font-weight:650;letter-spacing:-.01em;margin:2px 0 4px}
+.step span.d{display:block;font-size:.72rem;color:var(--text-3);line-height:1.45}
+.step .mark{position:absolute;top:9px;right:10px;font-size:.72rem;color:var(--text-3)}
+.step.done .mark{color:var(--brand)} .step.now .mark{color:var(--blue)} .step.partial .mark{color:var(--amber)}
+.step .mini{display:block;width:100%;height:4px;border-radius:99px;background:var(--card-2);margin-top:7px;overflow:hidden;line-height:0}
+.step .mini i{display:block;height:4px;background:var(--brand)}
+
+.filterbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:22px}
+.filterbar .hint{color:var(--text-3);font-size:.75rem}
+.allbtn{font:inherit;font-size:.75rem;padding:4px 12px;border-radius:99px;cursor:pointer;
+  background:var(--card);border:1px solid var(--line-2);color:var(--text-2)}
+.allbtn[aria-pressed="true"]{background:var(--violet);border-color:var(--violet);color:#fff}
+
+/* board */
+.board{display:grid;grid-template-columns:repeat(4,minmax(270px,1fr));gap:12px;align-items:start}
+.col{background:var(--col);border:1px solid var(--line);border-radius:var(--r);padding:12px}
+.colhead{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.dot{width:8px;height:8px;border-radius:99px;flex:none}
+.colhead h3{font-size:.85rem;margin:0;font-weight:700;letter-spacing:-.01em}
+.count{margin-left:auto;font-size:.72rem;color:var(--text-3);background:var(--card);
+  border:1px solid var(--line);border-radius:99px;padding:1px 8px}
+.colnote{color:var(--text-3);font-size:.74rem;margin:-6px 0 12px}
+.empty{color:var(--text-3);font-size:.76rem;padding:10px 2px;display:none}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-s);
+  padding:11px 12px;margin-bottom:9px}
+.card:last-of-type{margin-bottom:0}
+.card.hi{border-color:color-mix(in srgb,var(--coral) 45%,var(--line))}
+.badge{font-size:.62rem;background:color-mix(in srgb,var(--brand) 14%,var(--card));
+  color:var(--brand);border:1px solid color-mix(in srgb,var(--brand) 35%,transparent);
+  border-radius:5px;padding:0 5px;margin-left:5px;vertical-align:1px;font-weight:600}
+.card h4{margin:0 0 5px;font-size:.9rem;font-weight:650;letter-spacing:-.01em}
+.card p{margin:0;font-size:.81rem;color:var(--text-2)}
+.card .foot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px}
+.key{font-family:ui-monospace,Menlo,monospace;font-size:.7rem;color:var(--text-3)}
+.tag{font-size:.68rem;padding:1px 7px;border-radius:99px;border:1px solid var(--line-2);color:var(--text-3)}
+.tag.llm{color:var(--violet);border-color:color-mix(in srgb,var(--violet) 40%,transparent)}
+.tag.api{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 40%,transparent)}
+.tag.db{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent)}
+.tag.rule{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 40%,transparent)}
+.stepchip{font-size:.66rem;color:var(--text-3);background:var(--card-2);border-radius:5px;padding:1px 6px}
+.who{margin-left:auto;font-size:.68rem;border-radius:99px;padding:1px 8px;border:1px solid var(--line-2);color:var(--text-3)}
+
+/* sub-steps */
+.subs{margin-top:9px;padding:8px 0 0;border-top:1px dashed var(--line);display:grid;gap:5px}
+.subs li{list-style:none;font-size:.77rem;color:var(--text-2);padding-left:18px;position:relative;line-height:1.5}
+.subs{padding-left:0;margin-bottom:0}
+.subs li::before{position:absolute;left:0;font-size:.75rem}
+.subs li.d::before{content:"\2713";color:var(--brand)}
+.subs li.p::before{content:"\25D1";color:var(--amber)}
+.subs li.n::before{content:"\25CB";color:var(--text-3)}
+.subs li.x::before{content:"\00D7";color:var(--coral)}
+.subs li em{font-style:normal;color:var(--text-3);font-size:.94em}
+.xref{margin:8px 0 0;font-size:.75rem;color:var(--text-3);line-height:1.5;
+  padding-left:2px;border-left:0}
+.subprog{display:flex;align-items:center;gap:7px;margin-top:8px}
+.subprog .bar2{display:block;flex:1;height:5px;border-radius:99px;background:var(--card-2);border:1px solid var(--line);overflow:hidden;line-height:0}
+.subprog .bar2 i{display:block;height:3px;background:var(--brand)}
+.subprog span{font-size:.68rem;color:var(--text-3);font-family:ui-monospace,Menlo,monospace}
+
+h2{font-size:1rem;margin:38px 0 12px;display:flex;align-items:center;gap:8px}
+h2::before{content:"";width:3px;height:15px;background:var(--brand);border-radius:2px}
+
+.lead2{color:var(--text-2);font-size:.85rem;margin:0 0 14px}
+.fills{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:11px}
+.fill{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--amber);
+  border-radius:var(--r-s);padding:13px 15px}
+.fill>b{display:block;font-size:.9rem;margin-bottom:5px}
+.fill .what{margin:0;font-size:.81rem;color:var(--text-2)}
+.pill{font-size:.66rem;border-radius:99px;padding:1px 8px;margin-left:6px;
+  border:1px solid var(--line-2);color:var(--text-3);font-weight:500;vertical-align:1px}
+.pill.empty{color:var(--coral);border-color:color-mix(in srgb,var(--coral) 40%,transparent)}
+.pill.zero{color:var(--coral);border-color:color-mix(in srgb,var(--coral) 40%,transparent)}
+.pill.ops{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 40%,transparent)}
+.pill.defer{color:var(--text-3)}
+.pill.review{color:var(--violet);border-color:color-mix(in srgb,var(--violet) 40%,transparent)}
+ul.plain2{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+ul.plain2 li{font-size:.79rem;color:var(--text-2);line-height:1.55;
+  padding-left:11px;position:relative}
+ul.plain2 li::before{content:"";position:absolute;left:0;top:8px;width:4px;height:4px;
+  border-radius:99px;background:var(--line-2)}
+ul.plain2 li b{color:var(--text)}
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+.rule{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--brand);
+  border-radius:var(--r-s);padding:11px 13px}
+.rule b{display:block;font-size:.85rem;margin-bottom:3px}
+.rule span{font-size:.79rem;color:var(--text-2)}
+
+table{width:100%;border-collapse:collapse;font-size:.82rem;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r-s);overflow:hidden}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--text-3);font-weight:600;font-size:.73rem;background:var(--card-2)}
+tr:last-child td{border-bottom:none}
+td.ok{color:var(--brand);font-weight:600}
+td.warn{color:var(--amber);font-weight:600}
+td.no{color:var(--coral);font-weight:600}
+.scroll{overflow-x:auto}
+
+footer{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--text-3);font-size:.75rem}
+@media (max-width:1100px){.board{grid-template-columns:repeat(2,minmax(260px,1fr))}.steps{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:620px){.board{grid-template-columns:1fr}.steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div>
+    <h1>뉴스 파이프라인 — 구현 현황 보드</h1>
+    <p class="sub"><code>direction/direction.md</code> 5단계 설계 기준 · 갱신 2026-09-20 · 최근 커밋 <code>7624f0f</code></p>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat blue"><b>2</b><span>단계 로컬 검증 완료</span></div>
+  <div class="stat violet"><b>113 → 81</b><span>후보 → 기사 선정</span></div>
+  <div class="stat ok"><b>359</b><span>선정된 기사</span></div>
+  <div class="stat amber"><b>1</b><span>계획 중 (3단계)</span></div>
+  <div class="stat coral"><b>2</b><span>미착수 단계</span></div>
+  <div class="stat"><b>0</b><span>공개된 이슈</span></div>
+</div>
+
+<div class="bar"><i style="width:45%"></i></div>
+<p class="barlabel"><b>1·2단계가 실제로 끝까지 돌았습니다.</b> 검색어 34개 → 후보 133개 → 중복 정리 113개 → <b>기사 선정 81개(기사 359건)</b>. 오류·재시도 없이 완료했습니다. 3단계는 계획이 나왔고 <b>중요도·최신성 계산식이 처음으로 제안</b>됐습니다. 4·5단계는 기존 워커 코드만 있고 새 구조로는 미착수입니다.</p>
+
+<div class="steps" id="rail">
+  <button class="step done" aria-pressed="false" data-stage="1">
+    <span class="mark">✔</span><span class="no">1단계</span><b>대상 이슈 탐색</b>
+    <span class="d">실행·승인 완료 · 후보 3개/검색어로 축소</span>
+    <span class="mini"><i style="width:95%"></i></span></button>
+  <button class="step done" aria-pressed="false" data-stage="2">
+    <span class="mark">✔</span><span class="no">2단계</span><b>기사 수집·선별</b>
+    <span class="d">전체 실행 완료 · 사용자 검토 대기</span>
+    <span class="mini"><i style="width:90%"></i></span></button>
+  <button class="step now" aria-pressed="false" data-stage="3">
+    <span class="mark">▶</span><span class="no">3단계</span><b>파생 데이터 생성</b>
+    <span class="d">계획 확정 · 점수 계산식 제안됨 · 구현 전</span>
+    <span class="mini"><i style="width:15%"></i></span></button>
+  <button class="step none" aria-pressed="false" data-stage="4">
+    <span class="mark">⏸</span><span class="no">4단계</span><b>생성 결과 검증</b>
+    <span class="d">기존 워커에 코드는 있음 · 새 구조로는 미착수</span>
+    <span class="mini"><i style="width:10%"></i></span></button>
+  <button class="step none" aria-pressed="false" data-stage="5">
+    <span class="mark">⏸</span><span class="no">5단계</span><b>저장 및 공개</b>
+    <span class="d">기존 워커에 코드는 있음 · 공개된 이슈 0건</span>
+    <span class="mini"><i style="width:10%"></i></span></button>
+  <button class="step none" aria-pressed="false" data-stage="6">
+    <span class="mark">⏸</span><span class="no">운영</span><b>실행 주기</b>
+    <span class="d">수동 실행만 · 배포·스케줄 등록은 범위 밖</span>
+    <span class="mini"><i style="width:25%"></i></span></button>
+</div>
+
+<div class="filterbar">
+  <button class="allbtn" id="allbtn" aria-pressed="true">전체 보기</button>
+  <span class="hint">위 단계 카드를 누르면 그 단계의 작업만 보입니다</span>
+</div>
+
+<div class="board" id="board">
+
+  <div class="col" data-col="verified">
+    <div class="colhead"><span class="dot" style="background:var(--blue)"></span><h3>로컬 검증 완료</h3><span class="count">0</span></div>
+    <p class="colnote">실제 외부 API와 DB로 끝까지 돌려본 것</p>
+
+    <div class="card hi" data-stage="2">
+      <h4>기사 재검색과 선별 <span class="badge">NEW</span></h4>
+      <p>후보 113개를 전부 처리해 <b>81개에 기사를 붙였습니다.</b> 기사 합계 359건(고유 URL 345건).</p>
+      <ul class="subs">
+        <li class="d">검색용 제목으로 최신 50건 조회 <em>· 최근 7일 · URL·제목 중복 제거</em></li>
+        <li class="d"><b>대표 기사 제목 기준</b>으로 동일 사건만 선별 <em>· 같은 주제의 별개 행사·발표는 제외</em></li>
+        <li class="d">언론사 우선순위 → 최신순 → URL 순 최대 5건</li>
+        <li class="d">도메인·하위도메인 매칭 <em>· fakekbs.co.kr 같은 접미사 위조 차단</em></li>
+        <li class="d"><code>SELECTED</code> 81 / <code>INSUFFICIENT_ARTICLES</code> 32 / <code>DUPLICATE</code> 0</li>
+        <li class="d">선정 기사 전부 7일 이내 · 미래 기사 없음 확인</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:100%"></i></span><span>6/6</span></div>
+      <div class="foot"><span class="key">NP-2.2</span><span class="stepchip">2단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="2">
+      <h4>기존 이슈 중복 판정 <span class="badge">NEW</span></h4>
+      <p>공개된 이슈와 비교합니다. 다만 <b>이번 실행에서는 한 번도 호출되지 않았습니다</b> — 비교 대상인 공개 이슈가 0건이라서요.</p>
+      <ul class="subs">
+        <li class="d"><code>pg_trgm</code> 유사도 상위 10개 조회 <em>· published_at 기준 최근 7일</em></li>
+        <li class="d">LLM은 같은 사건의 중복만 반환 <em>· 새 전개는 중복 아님</em></li>
+        <li class="d">중복이면 네이버 검색을 <b>아예 생략</b></li>
+        <li class="p">실제 호출 검증은 못 함 <em>· 공개 이슈가 생겨야 확인 가능</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:75%"></i></span><span>3/4</span></div>
+      <div class="foot"><span class="key">NP-2.1</span><span class="stepchip">2단계</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card hi" data-stage="1">
+      <h4>카테고리·지역 기반 탐색</h4>
+      <p>토픽 17 + 지역 17을 각각 검색해 후보 133개를 만들고 중복 정리 후 113개를 넘겼습니다.</p>
+      <ul class="subs">
+        <li class="d">검색어별 최신순 50건 · 최근 24시간만</li>
+        <li class="d"><b>LLM에 제목 배열만 전송</b> <em>· 본문·URL·언론사 미전송</em></li>
+        <li class="d">후보 상한 <b>3개로 축소</b> <span class="badge">비용 절감</span></li>
+        <li class="d">대표 기사 번호를 함께 선택해 후보에 저장</li>
+        <li class="d">입력을 <code>{index, title}</code>로 명시 <em>· 모델이 순서를 잘못 세던 문제 해결</em></li>
+        <li class="p">활성 정치 주체가 없어 인물·기관 검색은 미포함</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:83%"></i></span><span>5/6</span></div>
+      <div class="foot"><span class="key">NP-1.2</span><span class="stepchip">1단계</span><span class="tag api">네이버</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="1">
+      <h4>후속 보도 탐색</h4>
+      <p>추적 중·기한 남음·부모 이슈 공개인 행만 골라 검색하고 부모 ID를 보존합니다.</p>
+      <ul class="subs">
+        <li class="d">추적 대상 필터 + 마지막 확인 이후 기사만</li>
+        <li class="d">이슈명 + keywords + 연결된 인물/기관 이름 검색</li>
+        <li class="d">명백한 새 전개만 채택 · 부모 연결 보존</li>
+        <li class="d">실패 시 확인 시각 전진 안 함</li>
+      </ul>
+      <p class="xref">↪ 추적 행을 <b>만들어 주는 쪽</b>은 3단계(NP-3.6)입니다.</p>
+      <div class="subprog"><span class="bar2"><i style="width:100%"></i></span><span>4/4</span></div>
+      <div class="foot"><span class="key">NP-1.3</span><span class="stepchip">1단계</span><span class="tag api">네이버</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="1">
+      <h4>후보 중복 정리</h4>
+      <p>후보끼리의 중복을 두 번 거릅니다 — 제목 정규화 후 LLM 의미 판정. 133 → 113.</p>
+      <ul class="subs">
+        <li class="d">LLM은 중복 묶음만 응답 · 지목 안 된 후보는 코드가 유지</li>
+        <li class="d">묶음마다 대표 1개 · 근거·검색어·부모 연결 보존</li>
+        <li class="d">범위 밖·중복 번호 거절 <em>· 반복 번호는 정규화</em></li>
+        <li class="d">병합 시 대표 기사도 함께 보존</li>
+      </ul>
+      <p class="xref">↪ 기존 <b>게시 이슈</b>와의 비교는 2단계(NP-2.1)입니다.</p>
+      <div class="subprog"><span class="bar2"><i style="width:100%"></i></span><span>4/4</span></div>
+      <div class="foot"><span class="key">NP-1.4</span><span class="stepchip">1단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="6">
+      <h4>실행 안전장치</h4>
+      <p>중간에 죽어도 저장된 지점부터 재개합니다. 1·2단계 모두 같은 방식입니다.</p>
+      <ul class="subs">
+        <li class="d">단계별 체크포인트 → 실패 후 다음부터 재개</li>
+        <li class="d">임대 잠금 + heartbeat <em>· 만료된 소유자의 저장은 차단</em></li>
+        <li class="d">완료 실행 재요청은 기존 결과 반환</li>
+        <li class="d">상한 초과 시 조용히 누락하지 않고 실패 기록</li>
+        <li class="p">전송 후 기록 전 종료 시 <b>과금 중복 가능</b> <em>· 문서에 명시된 한계</em></li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:80%"></i></span><span>4/5</span></div>
+      <div class="foot"><span class="key">NP-0.1</span><span class="stepchip">운영</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+    <p class="empty">이 단계에 해당하는 작업이 없습니다</p>
+  </div>
+
+  <div class="col" data-col="review">
+    <div class="colhead"><span class="dot" style="background:var(--violet)"></span><h3>사용자 검토 대기</h3><span class="count">0</span></div>
+    <p class="colnote">돌아갔지만 결과 품질은 사람이 봐야 하는 것</p>
+
+    <div class="card hi" data-stage="2">
+      <h4>2단계 전체 실행 결과</h4>
+      <p>선정 81개와 제외 32개가 맞게 갈렸는지, 붙은 기사가 실제로 같은 사건인지 확인이 필요합니다.</p>
+      <ul class="subs">
+        <li class="n">선정 후보와 기사 링크 검토 <em>· .local/news-pipeline-results.md</em></li>
+        <li class="n">기사 부족 제외 32개가 타당한지</li>
+        <li class="n">언론사 초기 목록 22개와 실제 선정 결과</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:0%"></i></span><span>0/3</span></div>
+      <div class="foot"><span class="key">NP-2.R</span><span class="stepchip">2단계</span><span class="tag rule">검토</span><span class="who">사람</span></div>
+    </div>
+
+    <div class="card" data-stage="1">
+      <h4>검색용 제목 품질</h4>
+      <p>대표 기사 기준을 넣어 특정성이 개선됐지만, <b>완전하지는 않다</b>고 문서에 명시돼 있습니다.</p>
+      <ul class="subs">
+        <li class="d">좋은 예 <em>· 노원구 한성숙 태릉골프장 주택공급 교통대책</em></li>
+        <li class="x">남은 문제 <em>· "서울 전역 토허제"처럼 전개가 빠지는 경우</em></li>
+        <li class="n">프롬프트만으로 편집 품질을 보장하지 않음 — 사람 확인 필요</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:33%"></i></span><span>1/3</span></div>
+      <div class="foot"><span class="key">NP-1.5</span><span class="stepchip">1단계</span><span class="tag llm">LLM</span><span class="who">사람</span></div>
+    </div>
+    <p class="empty">이 단계에 해당하는 작업이 없습니다</p>
+  </div>
+
+  <div class="col" data-col="doing">
+    <div class="colhead"><span class="dot" style="background:var(--amber)"></span><h3>계획 확정</h3><span class="count">0</span></div>
+    <p class="colnote">방법이 정해졌고 구현 전 · <code>IN_PROGRESS</code></p>
+
+    <div class="card hi" data-stage="3">
+      <h4>평가 점수 계산식 <span class="badge">처음 제안됨</span></h4>
+      <p>어제까지 "전부 0"이던 항목에 <b>드디어 식이 나왔습니다.</b> LLM 추정치를 일부만 섞는 구조입니다.</p>
+      <ul class="subs">
+        <li class="d">중요도 = 0.4×min(기사수/50,1) + 0.3×min(언론사수/10,1) + 0.3×LLM 추정</li>
+        <li class="d">최신성 = 2<sup>−경과시간/72h</sup></li>
+        <li class="d">기사수·언론사수는 <b>필터 후</b> 기준 <em>· API 전체 검색 건수와 구분</em></li>
+        <li class="n">구현 — 아직 코드 없음</li>
+        <li class="n">미래 예정 시각을 사건 시각으로 쓰지 않기</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:60%"></i></span><span>3/5</span></div>
+      <div class="foot"><span class="key">NP-3.3</span><span class="stepchip">3단계</span><span class="tag rule">계산</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="3">
+      <h4>본문 수집과 생성</h4>
+      <p>선정된 기사 최대 5개의 본문을 받아 제목·사건 시각·요약·영향·관점을 생성합니다.</p>
+      <ul class="subs">
+        <li class="d">본문 2개 미만이면 보류 + 실패 원인 기록</li>
+        <li class="d">시각 불명확 시 최초 보도 시각 사용 + <b>대체 여부 기록</b></li>
+        <li class="d">관점 부족만으로 이슈를 버리지 않음 <em>· 기존 생성기와 달리</em></li>
+        <li class="n">구현 — 아직 코드 없음</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:75%"></i></span><span>3/4</span></div>
+      <div class="foot"><span class="key">NP-3.1</span><span class="stepchip">3단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="3">
+      <h4>분류와 용어 사전</h4>
+      <p>규칙 매칭을 먼저 하고 애매한 것만 LLM에 묻습니다. 용어는 기존 설명을 재사용합니다.</p>
+      <ul class="subs">
+        <li class="d">이름·별칭 규칙 매칭 → 애매한 것만 LLM <em>· 근거 구분 저장</em></li>
+        <li class="d">용어 사전 테이블 신설 + 기존 공개 이슈 용어 재사용</li>
+        <li class="d">세대 테이블은 추가하지 않음 <em>· 기존 4개 코드 사용</em></li>
+        <li class="n">구현 — 아직 코드 없음</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:75%"></i></span><span>3/4</span></div>
+      <div class="foot"><span class="key">NP-3.2</span><span class="stepchip">3단계</span><span class="tag llm">LLM</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="3">
+      <h4>후속 추적 설정</h4>
+      <p>1단계가 소비하는 추적 행을 <b>만들어 주는 쪽</b>입니다. 기간과 검색어 상한이 정해졌습니다.</p>
+      <ul class="subs">
+        <li class="d">추적 기간 1~30일 · 검색어 최대 3개</li>
+        <li class="n">후속 예상 여부 판단</li>
+        <li class="n">실제 등록은 5단계 공개 시 연결</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:33%"></i></span><span>1/3</span></div>
+      <div class="foot"><span class="key">NP-3.6</span><span class="stepchip">3단계</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+    <p class="empty">이 단계에 해당하는 작업이 없습니다</p>
+  </div>
+
+  <div class="col" data-col="none">
+    <div class="colhead"><span class="dot" style="background:var(--text-3)"></span><h3>미착수</h3><span class="count">0</span></div>
+    <p class="colnote">새 구조로는 아직 손대지 않은 것</p>
+
+    <div class="card" data-stage="4">
+      <h4>생성 결과 검증</h4>
+      <p>기존 워커에 규칙 검증과 LLM 의미 검증 코드가 있지만, <b>새 단계 구조에는 연결되지 않았습니다.</b></p>
+      <ul class="subs">
+        <li class="d">기존 워커에 규칙 검증 + LLM 일치 검증 존재</li>
+        <li class="n">새 3단계 결과에 연결</li>
+        <li class="n">파생 데이터 사이 모순 검증</li>
+        <li class="n">UX 라이팅 기준 검증 <em>· 기준 문서는 확보됨</em></li>
+        <li class="n">실패 항목만 재생성</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:20%"></i></span><span>1/5</span></div>
+      <div class="foot"><span class="key">NP-4</span><span class="stepchip">4단계</span><span class="tag rule">규칙</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card hi" data-stage="5">
+      <h4>이슈 저장 및 공개</h4>
+      <p>기존 워커에는 공개 전환이 구현돼 있습니다. 다만 새 파이프라인이 여기까지 닿지 않아 <b>공개된 이슈가 여전히 0건</b>입니다.</p>
+      <ul class="subs">
+        <li class="d">기존 워커의 <code>UNPUBLISHED → PUBLISHED</code> 전환</li>
+        <li class="d">조회 쿼리에 공개 조건 강제</li>
+        <li class="n">새 단계 결과를 실제 이슈로 저장</li>
+        <li class="n">후속 추적 행 등록 연결 <em>· NP-3.6</em></li>
+        <li class="n">임베딩 작업 큐잉 연결</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:40%"></i></span><span>2/5</span></div>
+      <div class="foot"><span class="key">NP-5</span><span class="stepchip">5단계</span><span class="tag db">DB</span><span class="who">AI</span></div>
+    </div>
+
+    <div class="card" data-stage="6">
+      <h4>일 1회 정기 자동 실행</h4>
+      <p>1·2단계가 실제로 도는 게 확인됐는데도 매일 사람이 명령을 쳐야 합니다.</p>
+      <ul class="subs">
+        <li class="d">당일 중복·동시 실행 방어는 이미 있음</li>
+        <li class="n">스케줄러 도입 · 실행 시각 확정</li>
+        <li class="n">1단계 → 2단계 순차 연결</li>
+        <li class="n">실패 알림 경로</li>
+      </ul>
+      <div class="subprog"><span class="bar2"><i style="width:25%"></i></span><span>1/4</span></div>
+      <div class="foot"><span class="key">NP-0.2</span><span class="stepchip">운영</span><span class="tag rule">운영</span><span class="who">사람+AI</span></div>
+    </div>
+    <p class="empty">이 단계에 해당하는 작업이 없습니다</p>
+  </div>
+
+</div>
+
+<h2>1·2단계 전체 실행 기록 (2026-09-20)</h2>
+<div class="scroll">
+<table>
+  <tr><th>구간</th><th>결과</th><th>LLM 호출</th><th>토큰</th></tr>
+  <tr><td>1단계 탐색</td><td>검색어 34개 → 후보 133 → 중복 정리 <b>113</b></td><td>35회</td><td>입력 91,063 / 출력 4,998</td></tr>
+  <tr><td>2단계 수집·선별</td><td>선정 <b>81</b> · 기사 부족 32 · 중복 0</td><td>108회</td><td>입력 224,972 / 출력 3,738</td></tr>
+  <tr><td>선정 기사</td><td>359건 (고유 URL 345건)</td><td>—</td><td>—</td></tr>
+  <tr><td>추정 비용</td><td colspan="3">직전 실행 기준 <b>약 $0.276</b> · gpt-5.4-mini 표준 단가(입력 $0.75 / 출력 $4.50 per 1M) · 캐시 할인 미반영</td></tr>
+  <tr><td>공개된 이슈</td><td class="no">0건</td><td colspan="2">본문 수집·생성·공개는 실행하지 않음</td></tr>
+</table>
+</div>
+
+<h2>구현 점검 결과</h2>
+<div class="scroll">
+<table>
+  <tr><th>확인</th><th>결과</th></tr>
+  <tr><td>단위 테스트 <code>newsDiscovery</code> + <code>newsCollection</code></td><td class="ok">32개 전부 통과</td></tr>
+  <tr><td><code>npm run typecheck</code></td><td class="ok">오류 없음</td></tr>
+  <tr><td>ESLint (discovery · collection)</td><td class="ok">오류 없음</td></tr>
+  <tr><td>도메인 매칭 <em>(접미사 위조 차단)</em></td><td class="ok">가장 긴 도메인 우선 매칭 · <code>fakekbs.co.kr</code> 차단</td></tr>
+  <tr><td>중복 비교 SQL</td><td class="ok"><code>published_at</code> 기준 7일 · 미래 제외 · 상위 10개</td></tr>
+  <tr><td>실패 복구</td><td class="ok">소유자 검증 후 저장 · 실패 시에도 사용량 보존</td></tr>
+  <tr><td>기존 코드 영향</td><td class="ok">기존 워커·API·공통 마이그레이션 변경 없음</td></tr>
+  <tr><td>최대 5건 상한</td><td class="warn">설정이 아닌 코드 상수 <em>· selectArticles의 slice(0,5)</em></td></tr>
+  <tr><td>중복 판정 실제 호출</td><td class="warn">공개 이슈 0건이라 한 번도 실행되지 않음</td></tr>
+</table>
+</div>
+
+<h2>이번 개발 범위 밖</h2>
+<p class="lead2">코드로는 해결되지 않는 것들. 데이터를 넣거나, 값을 정하거나, 운영 환경에서 확인해야 합니다.</p>
+<div class="fills">
+  <div class="fill">
+    <b><code>entities</code> 마스터 데이터 <span class="pill empty">비어 있음</span></b>
+    <p class="what">인물·정당·기관 이름이 그대로 검색어가 됩니다. 비어 있어 실제 실행 검색어가 34개(토픽·지역)뿐이었습니다. 등록 API는 없습니다.</p>
+  </div>
+  <div class="fill">
+    <b>언론사 우선순위 목록 <span class="pill review">사용자 결정</span></b>
+    <p class="what">22개가 모두 동순위(10)로 들어가 있습니다. 서열을 둘지, 어떤 언론사를 넣을지가 검토 대상입니다.</p>
+  </div>
+  <div class="fill">
+    <b>운영 DB 권한 <span class="pill ops">운영</span></b>
+    <p class="what">기본 스키마는 기존 관리 주체 소유. 2단계가 쓰는 <code>pg_trgm</code> 확장 설치 권한이 필요합니다.</p>
+  </div>
+  <div class="fill">
+    <b>배포와 스케줄 등록 <span class="pill ops">운영</span></b>
+    <p class="what">하루 1회만 정해졌고 실행 시각·스케줄러·실패 알림 경로는 미정입니다.</p>
+  </div>
+  <div class="fill">
+    <b>운영 네트워크·자격증명 <span class="pill ops">운영</span></b>
+    <p class="what">네이버·OpenAI 방화벽·DNS 경로와 키의 쿼터·rate limit 확인.</p>
+  </div>
+  <div class="fill">
+    <b>Google Trends <span class="pill defer">추후 개발</span></b>
+    <p class="what">사용자 지시로 이관. 관련 구현은 제거된 상태입니다.</p>
+  </div>
+</div>
+
+<footer>
+  근거: <code>implementation/stage-1-discovery.md</code>(LOCAL_VERIFIED) · <code>stage-2-collection.md</code>(REVIEW_PENDING) ·
+  <code>stage-3-generation.md</code>(IN_PROGRESS) · <code>tests/stage-2-collection.md</code> 실행 기록 ·
+  단위 테스트·타입 검사·ESLint 직접 실행 · 최근 커밋 <code>7624f0f</code>
+</footer>
+
+</div>
+<script>
+(function () {
+  var rail = document.getElementById('rail');
+  var allbtn = document.getElementById('allbtn');
+  var board = document.getElementById('board');
+  var active = null;
+
+  function apply() {
+    var cards = board.querySelectorAll('.card');
+    for (var i = 0; i < cards.length; i++) {
+      var show = active === null || cards[i].getAttribute('data-stage') === active;
+      cards[i].style.display = show ? '' : 'none';
+    }
+    var cols = board.querySelectorAll('.col');
+    for (var j = 0; j < cols.length; j++) {
+      var visible = cols[j].querySelectorAll('.card:not([style*="none"])').length;
+      cols[j].querySelector('.count').textContent = visible;
+      cols[j].querySelector('.empty').style.display = visible === 0 ? 'block' : 'none';
+    }
+    var steps = rail.querySelectorAll('.step');
+    for (var k = 0; k < steps.length; k++) {
+      steps[k].setAttribute('aria-pressed', steps[k].getAttribute('data-stage') === active ? 'true' : 'false');
+    }
+    allbtn.setAttribute('aria-pressed', active === null ? 'true' : 'false');
+  }
+
+  rail.addEventListener('click', function (e) {
+    var btn = e.target.closest('.step');
+    if (!btn) return;
+    var stage = btn.getAttribute('data-stage');
+    active = active === stage ? null : stage;
+    apply();
+  });
+  allbtn.addEventListener('click', function () { active = null; apply(); });
+  apply();
+})();
+</script>
+</body>
+</html>
