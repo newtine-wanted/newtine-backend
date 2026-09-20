@@ -34,11 +34,13 @@ steps:
         cache_key="linux-amd64-node24-${lock_hash}"
         cache_uri="gs://${_TTSC_CACHE_BUCKET}/${_TTSC_CACHE_PREFIX}/${cache_key}/plugins.tgz"
         cache_file=/workspace/.ttsc-plugins.tgz
+        cache_error=/tmp/ttsc-cache-restore-error.txt
 
         mkdir -p /workspace/.cache/ttsc
+        rm -f "${cache_file}" "${cache_error}"
         rm -rf /workspace/.cache/ttsc/plugins
 
-        if gcloud storage cp "${cache_uri}" "${cache_file}"; then
+        if gcloud storage cp "${cache_uri}" "${cache_file}" 2>"${cache_error}"; then
           if tar -xzf "${cache_file}" -C /workspace/.cache/ttsc; then
             echo "Restored ttsc plugin cache: ${cache_key}"
           else
@@ -46,8 +48,14 @@ steps:
             rm -rf /workspace/.cache/ttsc/plugins
           fi
         else
-          echo "No ttsc plugin cache found; continuing with a cold build."
+          if grep -q "matched no objects or files" "${cache_error}"; then
+            echo "No ttsc plugin cache found; continuing with a cold build."
+          else
+            cat "${cache_error}" >&2
+            echo "WARNING: failed to restore ttsc plugin cache; continuing with a cold build."
+          fi
         fi
+        rm -f "${cache_error}"
 
   - name: node:24-bookworm-slim
     id: build-application
