@@ -60,6 +60,9 @@ steps:
     args:
       - -ceu
       - |
+        apt-get update
+        apt-get install --no-install-recommends --yes ca-certificates
+        rm -rf /var/lib/apt/lists/*
         npm ci
         npm run build
         test -d dist
