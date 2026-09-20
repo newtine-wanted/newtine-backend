@@ -36,7 +36,8 @@ const lines = [
   '| --- | ---: |',
   `| 검색어 | ${d.results.length} |`,
   `| 추출 후보 | ${d.results.reduce((n, r) => n + r.candidates.length, 0)} |`,
-  `| 중복 정리 후 후보 | ${d.candidates.length} |`,
+  `| 무관·지엽적 이슈 제외 | ${d.excludedCandidates?.length ?? 0} |`,
+  `| 중복·관련성 정리 후 후보 | ${d.candidates.length} |`,
   `| 2단계 선정 | ${g.results.length} |`,
   `| 2단계 기사 부족 | ${c.results.filter((r) => r.status === 'INSUFFICIENT_ARTICLES').length} |`,
   `| 기존 공개 이슈 중복 | ${c.results.filter((r) => r.status === 'DUPLICATE').length} |`,
@@ -72,6 +73,14 @@ for (const r of g.results)
   lines.push(
     `| ${r.source.candidate.title.replaceAll('|', '\\|')} | ${r.status} | ${r.articles.length} | ${r.draft?.viewpoints?.length ?? 0} |`,
   );
+lines.push(
+  '',
+  '## 1단계 제외 후보',
+  '',
+  ...(d.excludedCandidates ?? []).map(
+    (e) => `- ${e.candidate.title}: ${e.reason === 'HYPERLOCAL' ? '지엽적 이슈' : '관련성 낮음'}`,
+  ),
+);
 const details = resolve(dirname(reportFile), 'news-generation-details.md');
 await writeGenerationReport({ id: '전체 실행 결과', snapshot: g }, details);
 const detailText = await readFile(details, 'utf8');
