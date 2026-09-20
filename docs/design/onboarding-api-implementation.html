@@ -92,7 +92,7 @@
   </head>
   <body>
     <header>
-      <p>구현 제어 · 2026-09-18 route delta · <strong class="state">운영 제어 보류</strong></p>
+      <p>구현 제어 · 2026-09-20 runtime schema fix · <strong class="state">운영 제어 보류</strong></p>
       <h1>온보딩 API 구현 제어</h1>
       <p>
         승인된 온보딩 설계의 실제 변경과 검증을 기록한다. 소셜 로그인과 설정 수정은 이 구현에
@@ -114,7 +114,7 @@
         <dt>review-scope</dt>
         <dd>온보딩 HTTP 계약, 상태 전이, PostgreSQL adapter·migration, 생성 계약과 검증 공백</dd>
         <dt>review-updated</dt>
-        <dd>2026-09-18</dd>
+        <dd>2026-09-20</dd>
         <dt>review-status</dt>
         <dd><strong class="state">검토 완료</strong> · blocker 0건, non-blocking risk 1건</dd>
         <dt>baseline-reference</dt>
@@ -336,6 +336,34 @@
                 </td>
               </tr>
               <tr>
+                <td>해결됨 · 재배포 대기</td>
+                <td>
+                  운영 <code>POST /api/me/onboarding/complete</code>가 <code>entityIds</code> 포함 요청에서
+                  500을 반환했다. Cloud Run trace의 호출 위치는
+                  <code>completeOnboarding</code> 내부 entity preference INSERT였고, 운영 DB 컬럼은
+                  <code>user_entity_preferences_id</code> 복수형인데 저장 SQL과 ORM metadata가
+                  <code>user_entity_preference_id</code> 단수형을 사용했다.
+                </td>
+                <td>
+                  <code>postgresOnboarding.repository.ts</code>와
+                  <code>onboarding.persistence.entity.ts</code>를 운영 DB 컬럼명으로 정합화하고,
+                  동일 오류를 잡는 repository 회귀 assertion을 추가했다. DB migration은 추가하지
+                  않았다. 남은 조치는 새 revision 배포 후 실제 DB-backed complete smoke다.
+                </td>
+              </tr>
+              <tr>
+                <td>환경 제약</td>
+                <td>
+                  <code>docker compose up -d --build --wait db migrate api</code>가 Docker 이미지의
+                  <code>ttsc</code> native plugin 빌드 중 <code>cannot allocate memory</code>로 중단됐다.
+                </td>
+                <td>
+                  호스트의 <code>npm run build:api</code>와 focused tests는 통과했다. Docker Desktop
+                  메모리를 늘린 뒤 disposable PostgreSQL migration과 실제 complete smoke를 다시
+                  실행해야 한다.
+                </td>
+              </tr>
+              <tr>
                 <td>열림</td>
                 <td>실제 authentication guard/principal provider가 없다.</td>
                 <td>
@@ -473,6 +501,18 @@
             <li><code>npm run contracts:check</code> — SDK/E2E/OpenAPI 생성, contract test 6 passed, generated typecheck 통과</li>
             <li><code>npm run test:jest -- test/unit/onboarding.test.ts</code> — 7 passed</li>
             <li><code>npm run test:jest -- test/unit/postgresOnboardingRepository.test.ts</code> — 5 passed</li>
+            <li>
+              2026-09-20 컬럼명 회귀 수정 후
+              <code>npm run test:jest -- test/unit/postgresOnboardingRepository.test.ts test/unit/onboarding.test.ts</code>
+              — 2 suites, 12 tests passed
+            </li>
+            <li>
+              <code>npm run typecheck</code>, <code>npm run build:api</code>, 수정 파일 Prettier check — 통과
+            </li>
+            <li>
+              <code>docker compose up -d --build --wait db migrate api</code> — 미완료; Docker Desktop
+              메모리 부족으로 native compiler가 종료됨
+            </li>
             <li><code>npm test</code> — unit 39 passed, integration 5 passed</li>
             <li><code>npm run test:smoke</code> — health/search/problem/request-id smoke passed</li>
             <li>
@@ -499,6 +539,9 @@
             generated SDK/OpenAPI/E2E는 새 metadata 경로와 전역 <code>/api</code> prefix를 함께
             반영해 재생성·검증했다. 다만 generated stability check는 현재 변경이 아직 HEAD에
             커밋되지 않아 기존 HEAD와의 drift를 보고하므로, 커밋 후 CI에서 재확인해야 한다.
+            이번 수정은 로컬 단위·타입·API build와 운영 DB 컬럼 증거를 확인했지만, 수정된 revision의
+            실제 Cloud Run 배포와 production DB-backed <code>entityIds</code> complete smoke는 아직
+            실행하지 않았다. Docker Desktop 메모리 부족으로 local Compose DB-backed smoke도 미완료다.
             production PostgreSQL base migration과 실제 운영 데이터에 대한 호환성, 실제 인증
             principal, 운영 대상 명단 적재, 설정 수정 API는 이번 구현에서 검증하지 않는다. delta migration은
             기존 users/entities 등 base table이 먼저 존재하는 환경을 전제로 하며, 기존 category
@@ -531,10 +574,13 @@
           <h2>구현 제어 상태</h2>
           <p>
             <strong>운영 제어 보류</strong>. metadata source controller/service, response mapping,
-            module wiring과 focused test는 완료했다. 전역 <code>/api</code> prefix를 포함한
+            module wiring과 focused test는 완료했다. 운영 DB의
+            <code>user_entity_preferences_id</code> 컬럼에 맞춘 raw SQL·EntitySchema 정합화와
+            회귀 assertion도 완료했다. 전역 <code>/api</code> prefix를 포함한
             generated contract 재생성·검증도 완료했지만, 현재 working tree는 여러 세션의 변경이
-            섞인 미커밋 상태다. production base migration, authentication provider, 운영 entity
-            master와 실제 운영 데이터 연결은 별도 작업 전까지 보류한다.
+            섞인 미커밋 상태다. 새 revision 배포 및 실제 production complete smoke,
+            production base migration, authentication provider, 운영 entity master와 실제 운영 데이터
+            연결은 별도 작업 전까지 보류한다.
             기술 구현 완료와 운영 활성화 가능성을 같은 상태로 표시하지 않는다.
           </p>
         </section>

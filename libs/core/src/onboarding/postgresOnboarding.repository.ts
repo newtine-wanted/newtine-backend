@@ -150,7 +150,7 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
       await this.execute(
         `
           INSERT INTO user_entity_preferences
-            (user_entity_preference_id, user_id, entity_id, weight)
+            (user_entity_preferences_id, user_id, entity_id, weight)
           VALUES (?::uuid, ?::uuid, ?::uuid, 2)
           ON CONFLICT (user_id, entity_id)
           DO UPDATE SET weight = user_entity_preferences.weight + 2

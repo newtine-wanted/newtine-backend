@@ -129,6 +129,13 @@ test('Postgres adapter locks pending users and applies all onboarding preference
   assert.equal(result.preferences.regionWeights.SEOUL, 1);
   assert.match(state.calls[0] ?? '', /FOR UPDATE/);
   assert.equal(state.calls.filter((sql) => sql.startsWith('INSERT INTO')).length, 3);
+  assert.ok(
+    state.calls.some(
+      (sql) =>
+        sql.startsWith('INSERT INTO user_entity_preferences') &&
+        sql.includes('(user_entity_preferences_id, user_id, entity_id, weight)'),
+    ),
+  );
   assert.equal(state.calls.filter((sql) => sql.startsWith('UPDATE users')).length, 1);
   assert.equal(
     state.calls.some((sql) => /\$\d+/.test(sql)),

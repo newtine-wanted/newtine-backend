@@ -52,7 +52,7 @@ export const UserEntityPreferenceSchema = defineEntity({
   name: 'UserEntityPreference',
   tableName: 'user_entity_preferences',
   properties: {
-    userEntityPreferenceId: p.uuid().fieldName('user_entity_preference_id').primary(),
+    userEntityPreferenceId: p.uuid().fieldName('user_entity_preferences_id').primary(),
     userId: p.uuid().fieldName('user_id'),
     entityId: p.uuid().fieldName('entity_id'),
     weight: p.decimal('number').columnType('numeric'),
