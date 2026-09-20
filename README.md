@@ -68,18 +68,6 @@ healthcheck가, 실제 DB 연결은 `databaseCheck` 작업이 확인합니다.
 Compose는 local-only disposable base-schema fixture와 one-shot migration service를 사용해 fresh
 volume의 재현 가능한 인증 검증 환경을 구성합니다.
 
-운영 DB를 배포하기 전에 PostgreSQL 드라이버의 실제 TLS 연결과 `select 1`을 확인하려면 배포 환경의
-환경변수를 주입한 상태에서 다음 명령을 실행합니다. 이 명령은 migration을 실행하지 않고,
-`NODE_ENV=staging|production`, `DB_SSL_MODE=verify-full`, 읽을 수 있는 `DB_SSL_CA_PATH`를 먼저
-검증한 뒤 CA 검증이 포함된 실제 DB 연결을 한 번 수행합니다.
-
-```bash
-NODE_ENV=production npm run db:tls:preflight
-```
-
-스테이징 DB가 없는 현재 로컬 환경에서는 이 검증을 실행할 대상이 없으므로, 배포 파이프라인 또는
-운영 DB 접근이 가능한 일회성 작업에서 수행해야 합니다.
-
 파이프라인 워커는 별도 장기 실행 프로세스로 시작합니다. 운영자가 이전 프로세스 종료를 확인한
 뒤 API로 접수한 실행을 처리합니다. 로컬에서 한 번만 확인하려면
 `PIPELINE_WORKER_ONCE=1 npm run start:batch -- pipelineWorker`를 사용합니다.
@@ -181,8 +169,6 @@ Cloud Run은 `PORT`를 주입하므로 API는 `PORT` → `API_PORT` → `3000` �
 | `DB_NAME`                                 | `newtine`                 | 필수                                                                      |
 | `DB_USER`                                 | `postgres`                | 필수                                                                      |
 | `DB_PASSWORD`                             | `postgres`                | 필수                                                                      |
-| `DB_SSL_MODE`                             | `disable`                 | `verify-full` 필수                                                        |
-| `DB_SSL_CA_PATH`                          | 없음                      | `verify-full` 인증서 파일 경로 필수                                       |
 | `LOG_LEVEL`                               | `debug`                   | 기본 `info`                                                               |
 | `HTTP_SLOW_THRESHOLD_MS`                  | `1000`                    | 필요에 따라 지정                                                          |
 | `RATE_LIMIT_WINDOW_MS`                    | `60000`                   | 공통 quota window(ms)                                                     |

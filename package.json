@@ -13,7 +13,6 @@
     "start:dev:api": "ttsx -P apps/api/tsconfig.app.json apps/api/src/main.ts",
     "db:migrate": "npm run build:api && node scripts/migrate.mjs up",
     "db:migrate:down": "npm run build:api && node scripts/migrate.mjs down",
-    "db:tls:preflight": "npm run build:api && node scripts/db-tls-preflight.mjs",
     "format": "prettier --write \"{apps,libs,scripts,test}/**/*.{ts,mts,mjs,json}\" nestia.config.ts tsconfig.generated.json jest.config.mjs jest.transformer.mjs",
     "format:check": "prettier --check \"{apps,libs,scripts,test}/**/*.{ts,mts,mjs,json}\" nestia.config.ts tsconfig.generated.json jest.config.mjs jest.transformer.mjs",
     "lint": "eslint nestia.config.ts jest.config.mjs jest.transformer.mjs \"{apps,libs,scripts,test}/**/*.{ts,mts,mjs}\"",

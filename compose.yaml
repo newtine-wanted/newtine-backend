@@ -32,7 +32,6 @@ services:
       DB_NAME: ${DB_NAME:-newtine}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      DB_SSL_MODE: disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_SLOW_THRESHOLD_MS: ${HTTP_SLOW_THRESHOLD_MS:-1000}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
@@ -82,7 +81,6 @@ services:
       DB_NAME: ${DB_NAME:-newtine}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      DB_SSL_MODE: disable
     depends_on:
       db:
         condition: service_healthy
@@ -102,7 +100,6 @@ services:
       DB_NAME: ${DB_NAME:-newtine}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      DB_SSL_MODE: disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
       HTTP_SLOW_THRESHOLD_MS: ${HTTP_SLOW_THRESHOLD_MS:-1000}
       NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
@@ -134,7 +131,6 @@ services:
       DB_NAME: ${DB_NAME:-newtine}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      DB_SSL_MODE: disable
       LOG_LEVEL: ${LOG_LEVEL:-info}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       REPORT_AI_MODEL: ${REPORT_AI_MODEL:-}

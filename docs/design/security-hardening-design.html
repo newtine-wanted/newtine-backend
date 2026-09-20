@@ -19,7 +19,7 @@
       name="core-flow"
       content="요청 Origin·입력 검증 → 인증·세션 발급 → DB·외부 호출 경계 → 실패 차단·관측·복구"
     />
-    <title>백엔드 보안 강화 설계 · 설계 승인됨</title>
+    <title>백엔드 보안 강화 설계 · 재승인 필요</title>
     <style>
       :root {
         font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -216,7 +216,7 @@
       <p>
         설계 baseline · <time datetime="2026-09-19">2026-09-19</time> ·
         워크트리 <code>/Users/hyunseok/.codex/worktrees/security-hardening-design/newtine-backend</code> ·
-        강도 <strong>High-risk</strong> · <strong class="state">설계 승인됨</strong>
+        강도 <strong>High-risk</strong> · <strong class="state">재승인 필요</strong>
       </p>
       <h1>백엔드 보안 강화 설계</h1>
       <p>
@@ -247,6 +247,7 @@
       <a href="#evidence">확인된 근거</a>
       <a href="#model">시스템 모델</a>
       <a href="#decisions">의사결정</a>
+      <a href="#reconsideration">TLS 정책 재검토</a>
       <a href="#invariants">불변식</a>
       <a href="#recovery">실패·복구</a>
       <a href="#verification">검증</a>
@@ -261,7 +262,7 @@
           <h3>목표</h3>
           <ul>
             <li>브라우저 form 기반 cross-site 요청이 세션을 발급하거나 세션 상태를 변경하지 못하게 한다.</li>
-            <li>운영 환경에서 DB 연결 암호화 정책이 설정 누락으로 조용히 비활성화되지 않게 한다.</li>
+            <li>DB transport 보안은 provider·네트워크·배포 환경의 책임으로 기록하며, 애플리케이션은 존재하지 않는 CA 자원을 기동 조건으로 요구하지 않는다.</li>
             <li>현재 process-local quota의 수평 확장 잔여 위험을 숨기지 않고 별도 이슈로 추적한다. 이번 작업에는 인프라 투자를 추가하지 않는다.</li>
             <li>관리자 입력과 비싼 조회 경로의 상한을 명시적으로 유지한다.</li>
             <li>SQL Injection·SSRF·authz 방어 불변식을 회귀 테스트로 고정한다.</li>
@@ -271,7 +272,7 @@
           <ul>
             <li>허용되지 않은 Origin의 <code>signup</code>·<code>login</code> 요청은 세션 cookie 없이 거부된다.</li>
             <li>브라우저 same-origin 흐름은 테스트하고, 이번 release에서 non-browser login/signup은 지원하지 않음을 명시적으로 검증한다.</li>
-            <li>운영·staging DB TLS 정책 위반은 기동 또는 연결 단계에서 fail-closed 된다.</li>
+            <li>애플리케이션은 DB TLS mode/CA를 강제하지 않으며, 실제 transport 보안 정책은 provider·네트워크 설정으로 확인한다.</li>
             <li>현재 인스턴스 내부 rate limit의 회귀와 residual risk 기록이 검증된다. 분산 quota는 이번 완료 기준으로 주장하지 않는다.</li>
             <li><code>failedJobIds</code> 및 사용자별 대량 조회가 고정된 상한을 넘지 않는다.</li>
           </ul>
@@ -515,17 +516,71 @@
             <li>G1-A 확정: cookie 발급·회전 경계는 strict Origin allowlist를 사용하고 Origin 부재는 허용하지 않는다.</li>
             <li>G2-A 확정: 브라우저는 same-origin cookie 세션만 사용한다. non-browser client는 이번 release에서 지원하지 않으며, 향후 별도 Bearer/OAuth 계약으로 분리한다.</li>
             <li>G2.1-C 확정: 현재 구현에는 non-browser login/signup endpoint를 추가하지 않는다.</li>
-            <li>G3-A 확정: 애플리케이션이 운영·staging TLS 정책을 강제하며 인프라가 이중 검증한다.</li>
-            <li>G3.1-A 확정: 운영은 <code>verify-full</code> + 명시적 CA, 개발·test만 disable을 허용한다.</li>
+            <li>G3-A baseline은 재검토로 대체됨: DB transport 보안의 최종 소유권은 provider·네트워크에 두고, 애플리케이션은 별도 TLS mode/CA 자원을 강제하지 않는다.</li>
+            <li>G3.1-A baseline은 재검토로 대체됨: <code>DB_SSL_MODE</code>·<code>DB_SSL_CA_PATH</code> 계약과 애플리케이션의 <code>verify-full</code> 강제를 제거한다.</li>
             <li>G4-C 확정: shared rate limit은 이번 범위에서 도입하지 않고 process-local 잔여 위험을 별도 이슈로 남긴다.</li>
             <li>G5-B 확정: AI data egress는 별도 privacy/compliance 이슈로 분리한다.</li>
           </ul>
           <h3>의존 관계</h3>
           <pre>G1 CSRF 방식 ──→ G2 브라우저/non-browser 계약 ──→ auth controller·cookie·integration test 범위
-G3 TLS 소유권 ──→ G3.1 mode/CA 계약 ──→ config schema·runtime bootstrap·deployment verification 범위
+G3 TLS 소유권 ──→ G3.1 mode/CA 계약 ──→ G3.2 runtime ownership decision
 G4 rate limit ──→ 별도 이슈(현재 process-local 잔여 위험)
 G5 data egress ──→ 별도 privacy/compliance issue
-공통 ──→ acceptance criteria·회귀 테스트·운영 관측</pre>
+          공통 ──→ acceptance criteria·회귀 테스트·운영 관측</pre>
+        </section>
+
+        <section id="reconsideration">
+          <h2>4.1 현재 재검토: 운영 DB TLS 자원</h2>
+          <p><strong class="done">결정됨 · G3.2-D · 구현 승인됨</strong></p>
+          <dl>
+            <dt>사용자 제안</dt>
+            <dd>Cloud Run에 CA 파일·Secret Manager 자원이 없으므로 운영 DB의 <code>verify-full</code> 요구를 제거할 수 있는가?</dd>
+            <dt>확인된 근거</dt>
+            <dd>
+              <code>newtine-00015-vq4</code>는 <code>bd02ee0</code> 이미지를 실행했고, Nest가
+              <code>listen()</code> 전에 <code>DB_SSL_MODE</code> 누락으로 <code>exit(1)</code>했다.
+              Cloud Run 서비스 환경변수에는 <code>DB_SSL_MODE</code>와 <code>DB_SSL_CA_PATH</code>가 모두 없었다.
+            </dd>
+            <dt>결정</dt>
+            <dd>애플리케이션은 <code>DB_SSL_MODE</code>와 <code>DB_SSL_CA_PATH</code>를 요구하지 않는다. DB transport 보안은
+              DB provider·네트워크·배포 환경의 설정으로 관리하며, 현재 Cloud Run 서비스에 없는 CA 자원을 애플리케이션 기동 조건으로 만들지 않는다.</dd>
+          </dl>
+          <table>
+            <caption>G3.2 선택지</caption>
+            <thead>
+              <tr>
+                <th scope="col">선택</th>
+                <th scope="col">내용</th>
+                <th scope="col">판단</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">A</th>
+                <td>운영 정책은 유지하고 DB provider의 Root CA를 Secret Manager volume으로 마운트한다.</td>
+                <td class="recommended">권고 · 변경 범위가 가장 작고 평문·MITM 위험을 줄인다.</td>
+              </tr>
+              <tr>
+                <th scope="row">B</th>
+                <td>명시적인 비운영 profile에만 TLS 검증 예외를 허용한다.</td>
+                <td>임시 대안 · production service에 전파되지 않는 격리·검증이 필요하다.</td>
+              </tr>
+              <tr>
+                <th scope="row">C</th>
+                <td>DB 없이 health-only API로 기동하도록 CoreModule 초기화 경계를 바꾼다.</td>
+                <td>범위 큼 · 실제 API 기능과 별도 실행 모드 계약이 필요하다.</td>
+              </tr>
+              <tr>
+                <th scope="row">D</th>
+                <td>애플리케이션의 DB TLS mode/CA 강제를 제거하고 PostgreSQL driver·provider·네트워크 설정에 위임한다.</td>
+                <td class="done">선택 · 현재 배포 자원과 원래 요청에 맞고, DB 의존 API의 기동 경계는 유지한다. transport 보안은 운영 환경에서 별도 확인한다.</td>
+              </tr>
+            </tbody>
+          </table>
+          <aside>
+            <strong>결정:</strong> D. 사용자가 <code>DB_SSL_MODE</code> 제거를 승인했고, TLS 하드닝 커밋 전체가 아니라
+            DB TLS 강제에 해당하는 코드·환경변수·프리플라이트·테스트만 되돌린다. API 포트 수정과 다른 보안 하드닝은 유지한다.
+          </aside>
         </section>
 
         <section id="invariants">
@@ -535,7 +590,7 @@ G5 data egress ──→ 별도 privacy/compliance issue
             <li>이번 범위에서는 Origin 부재 요청을 cookie session endpoint에 허용하지 않는다. 향후 Bearer client는 별도 인증 계약과 endpoint로 설계한다.</li>
             <li>사용자 입력은 SQL 문자열·식별자·URL 요청 옵션에 직접 삽입하지 않고, parameter 또는 고정 allowlist로만 전달한다.</li>
             <li>외부 URL은 scheme/port/userinfo/DNS/public IP/redirect를 매 hop 검증하고 resolve된 주소에 pinning한다.</li>
-            <li>DB 연결 보안 설정이 운영 환경에서 누락되면 연결을 허용하지 않는다.</li>
+            <li>DB transport 보안은 provider·네트워크·배포 환경의 책임으로 기록하며, 애플리케이션은 존재하지 않는 CA 자원을 기동 조건으로 요구하지 않는다.</li>
             <li>이번 범위에서는 rate limit 저장소를 변경하지 않으며, process-local best-effort quota와 수평 확장 우회 위험을 운영 문서에 명시한다.</li>
             <li>사용자·관리자 resource 조회는 principal/role 및 owner predicate를 거친다.</li>
             <li>token, password, cookie, authorization header, 원문 request body는 응답·로그·외부 provider payload에 불필요하게 남기지 않는다.</li>
@@ -560,9 +615,9 @@ G5 data egress ──→ 별도 privacy/compliance issue
               <td>request id, endpoint, decision reason만 기록. credential은 기록하지 않음.</td>
             </tr>
             <tr>
-              <th scope="row">DB TLS 설정 누락/인증서 검증 실패</th>
-              <td>API·batch 기동 또는 DB 연결 실패. 평문 fallback 금지.</td>
-              <td>safe diagnostic으로 설정 key와 원인 유형만 기록하고, 인증서 갱신 runbook으로 복구.</td>
+              <th scope="row">DB 연결 또는 provider transport 설정 실패</th>
+              <td>DB 연결 실패를 정상 startup error로 드러낸다. 애플리케이션은 별도 TLS mode/CA 예외를 추가하지 않는다.</td>
+              <td>DB provider·네트워크 설정과 연결 오류를 운영 환경에서 확인하고 복구한다.</td>
             </tr>
             <tr>
               <th scope="row">수평 확장 rate limit</th>
@@ -601,9 +656,9 @@ G5 data egress ──→ 별도 privacy/compliance issue
               <td>금지 요청과 현재 지원하지 않는 non-browser 요청은 403이고 <code>Set-Cookie</code> 없음. browser same-origin만 세션 발급.</td>
             </tr>
             <tr>
-              <th scope="row">TLS/config</th>
-              <td>개발·test·staging·production config matrix와 실제 PostgreSQL handshake 확인</td>
-              <td>운영 mode에서 TLS 검증 실패가 fail-closed이고, 개발 예외가 운영에 전파되지 않음.</td>
+              <th scope="row">DB connectivity/config</th>
+              <td>필수 DB 환경변수 matrix와 실제 PostgreSQL 연결 경계를 확인</td>
+              <td>애플리케이션이 <code>DB_SSL_MODE</code>·CA 파일을 요구하지 않고, provider·네트워크 transport 정책을 별도 확인한다.</td>
             </tr>
             <tr>
               <th scope="row">rate limit</th>
@@ -635,16 +690,16 @@ G5 data egress ──→ 별도 privacy/compliance issue
 
       <section id="grilling">
         <h2>8. 설계 의사결정 질문 (grilling)</h2>
-        <p><strong>진행 상태: 완료 · 설계 승인됨</strong></p>
+        <p><strong class="done">진행 상태: 결정됨 · G3.2-D 구현 승인</strong></p>
         <dl>
           <dt>범위</dt>
           <dd>G1~G5의 보안 정책·client 계약·운영 dependency와 그에 따른 구현·검증 경계</dd>
           <dt>현재 frontier</dt>
-          <dd>material decision frontier는 없다. G1·G2·G2.1·G3·G3.1은 확정되었고 G4·G5는 별도 이슈로 보류를 수용했다.</dd>
+          <dd>G1·G2·G2.1·G4·G5는 유지하고, 기존 G3·G3.1 TLS 강제 결정은 G3.2-D로 대체했다.</dd>
           <dt>확인된 결정</dt>
-          <dd>G1-A, G2-A, G2.1-C, G3-A, G3.1-A, G4-C, G5-B. SQLi·SSRF는 전면 교체하지 않고 불변식·회귀 검증으로 유지한다. 구현은 설계 승인 전 시작하지 않는다.</dd>
+          <dd>현재 결정은 G1-A, G2-A, G2.1-C, G3.2-D, G4-C, G5-B이며 SQLi·SSRF는 불변식·회귀 검증으로 유지한다. 사용자는 DB TLS 강제 제거 구현을 승인했다.</dd>
           <dt>보류된 branch</dt>
-          <dd>shared rate limit 도입, 외부 provider data egress의 최종 법무·DPA 정책, public-domain egress allowlist의 필요성</dd>
+          <dd>DB provider·네트워크 transport 보안의 운영 확인, shared rate limit 도입, 외부 provider data egress의 최종 법무·DPA 정책, public-domain egress allowlist의 필요성</dd>
           <dt>주요 가정</dt>
           <dd>refresh cookie를 사용하는 브라우저 client가 존재하며, API는 수평 확장될 수 있고, staging도 실제 외부 접근 환경일 수 있다.</dd>
         </dl>
@@ -659,7 +714,7 @@ G5 data egress ──→ 별도 privacy/compliance issue
           <dt>상태</dt>
           <dd>미실시</dd>
           <dt>이유</dt>
-          <dd>설계는 확정되었지만 사용자가 실제 경계·불변식·실패 복구를 예측하는지는 아직 확인하지 않았다.</dd>
+          <dd>G3.2의 설계 선택이 열려 있어 기존 self-check를 새 정책에 적용할 수 없다. 선택 확정 후 control 문항을 갱신한다.</dd>
           <dt>coverage ledger</dt>
           <dd>
             목표·범위: Q1 · material decisions: Q2/Q3/G2.1 · 불변식: Q4 · 경계/상태 전이: Q5 · 실패·복구: Q6 ·
@@ -705,12 +760,13 @@ G5 data egress ──→ 별도 privacy/compliance issue
             </div>
           </article>
 
-          <article class="control-slide" data-answer="a">
+          <article class="control-slide" data-answer="d">
             <fieldset>
               <legend>Q3 · 운영 DB TLS 설정은 어떻게 동작해야 하는가?</legend>
               <label><input type="radio" name="q3" value="a" /> staging/production은 verify-full과 명시적 CA를 강제하고, 개발/test만 disable을 허용한다.</label>
               <label><input type="radio" name="q3" value="b" /> 운영은 암호화만 되면 되고 인증서 검증은 선택이다.</label>
               <label><input type="radio" name="q3" value="c" /> 운영 TLS는 connection string이 알아서 결정한다.</label>
+              <label><input type="radio" name="q3" value="d" /> 애플리케이션은 별도 TLS mode/CA를 강제하지 않고 provider·네트워크 설정에 위임한다.</label>
             </fieldset>
             <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
             <div class="control-result is-pending" hidden>
@@ -744,12 +800,13 @@ G5 data egress ──→ 별도 privacy/compliance issue
             </div>
           </article>
 
-          <article class="control-slide" data-answer="a">
+          <article class="control-slide" data-answer="d">
             <fieldset>
               <legend>Q6 · DB TLS 설정이 잘못되면 어떤 복구 모델인가?</legend>
               <label><input type="radio" name="q6" value="a" /> 기동/연결을 실패시키고 평문 fallback 없이 인증서·CA 설정을 복구한다.</label>
               <label><input type="radio" name="q6" value="b" /> 일단 평문으로 연결한 뒤 운영자가 나중에 바꾼다.</label>
               <label><input type="radio" name="q6" value="c" /> 연결 오류를 숨기고 요청을 계속 처리한다.</label>
+              <label><input type="radio" name="q6" value="d" /> 애플리케이션은 TLS mode/CA를 검사하지 않고, provider·네트워크 연결 오류를 정상 실패로 드러낸다.</label>
             </fieldset>
             <div class="control-nav"><button type="button" data-action="submit">답변 제출</button></div>
             <div class="control-result is-pending" hidden>
@@ -807,10 +864,10 @@ G5 data egress ──→ 별도 privacy/compliance issue
 
       <section id="approval">
         <h2>10. 승인 상태</h2>
-        <p><strong>설계 승인됨.</strong> 사용자가 2026-09-19 18:30 KST에 현재 설계로 구현을 시작하도록 명시 승인했다.</p>
+        <p><strong class="done">승인됨.</strong> G3.2-D로 애플리케이션의 <code>DB_SSL_MODE</code>·<code>DB_SSL_CA_PATH</code> 강제를 제거하고, DB transport 보안은 provider·네트워크·배포 환경에 위임한다.</p>
         <p>
-          승인된 범위는 G1-A, G2-A/G2.1-C, G3-A/G3.1-A, G4-C, G5-B 및 SQLi·SSRF 기존 불변식 회귀 검증이다.
-          구현 중 설계가 materially 변경되면 이 승인 상태를 되돌리고 재승인을 받는다.
+          사용자는 2026-09-20에 이 범위의 구현을 승인했다. TLS 하드닝 커밋 전체가 아니라 DB TLS 강제 코드·환경변수·프리플라이트·테스트만 제거하고,
+          API 포트 수정과 다른 보안 하드닝은 유지한다.
         </p>
       </section>
       </article>
@@ -828,10 +885,10 @@ G5 data egress ──→ 별도 privacy/compliance issue
         const explanations = [
           '이번 범위는 세션·DB transport·입력 경계를 강화한다. 분산 rate limit과 AI data egress는 별도 이슈다.',
           'cookie 세션은 브라우저 same-origin으로 제한하고, 이번 release에서는 non-browser login/signup을 지원하지 않는다. 향후 별도 Bearer/OAuth 계약으로 분리한다.',
-          '운영과 staging은 verify-full 및 CA를 사용하고, 개발/test만 명시적으로 disable을 허용한다.',
+          '애플리케이션은 DB TLS mode/CA를 강제하지 않고, DB transport 보안은 provider·네트워크 설정으로 관리한다.',
           'Origin 부재도 허용하지 않아 session issuance 전에 요청을 차단한다. SameSite는 보조 방어다.',
           '실패 응답뿐 아니라 Set-Cookie 등 session side effect도 없어야 한다.',
-          'TLS 검증 실패는 평문 fallback 없이 기동/연결 실패로 드러나야 한다.',
+          '애플리케이션은 TLS mode/CA를 강제하지 않으며, DB provider·네트워크 연결 실패는 숨기지 않고 드러낸다.',
           '이번 범위에서 두 위험은 해결된 것으로 가장하지 않고 별도 이슈와 residual risk로 남긴다.',
           'parameter binding, public-IP 검사, redirect 재검증, resolved IP pinning을 회귀 불변식으로 유지한다.',
           '설계 문서만으로 구현 완료가 되지 않는다. 보안 경계별 테스트와 typecheck/lint/integration evidence가 필요하다.',

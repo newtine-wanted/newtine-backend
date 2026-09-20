@@ -1,8 +1,6 @@
 import { REPORT_PERSISTENCE_ENTITIES } from '@newtine/core/report/persistence/report.persistence.entity.js';
 import { Migration20260916000000DiagnosticReport } from '@newtine/core/report/migrations/Migration20260916000000DiagnosticReport.js';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { test } from '@jest/globals';
 
 import { createDatabaseOptions } from '@newtine/core/common/database/database.options.js';
@@ -29,9 +27,6 @@ import { INTEREST_PERSISTENCE_ENTITIES } from '@newtine/core/interest/persistenc
 import { Migration20260915000000InterestPersistence } from '@newtine/core/interest/migrations/Migration20260915000000InterestPersistence.js';
 import { Migration20260916000000IssueCardActions } from '@newtine/core/interest/migrations/Migration20260916000000IssueCardActions.js';
 import { Migration20260917000000AccountWithdrawal } from '@newtine/core/pipeline/migrations/Migration20260917000000AccountWithdrawal.js';
-
-const TEST_CA_PATH = fileURLToPath(new URL('../fixtures/database/test-ca.pem', import.meta.url));
-const TEST_CA = readFileSync(TEST_CA_PATH, 'utf8');
 
 test('database options never enable automatic database creation', () => {
   const options = createDatabaseOptions({ NODE_ENV: 'test' });
@@ -79,8 +74,6 @@ const production: NodeJS.ProcessEnv = {
   DB_NAME: 'application',
   DB_USER: 'applicationUser',
   DB_PASSWORD: 'configuration-secret-sentinel',
-  DB_SSL_MODE: 'verify-full',
-  DB_SSL_CA_PATH: TEST_CA_PATH,
 };
 
 test('production uses explicit database configuration', () => {
@@ -90,38 +83,6 @@ test('production uses explicit database configuration', () => {
   assert.equal(options.dbName, 'application');
   assert.equal(options.user, 'applicationUser');
   assert.equal(options.password, production.DB_PASSWORD);
-  assert.deepEqual(options.driverOptions, {
-    ssl: { ca: TEST_CA, rejectUnauthorized: true },
-  });
-});
-
-test('development and test explicitly disable database TLS only for local defaults', () => {
-  assert.deepEqual(createDatabaseOptions({ NODE_ENV: 'development' }).driverOptions, {
-    ssl: false,
-  });
-  assert.deepEqual(createDatabaseOptions({ NODE_ENV: 'test' }).driverOptions, {
-    ssl: false,
-  });
-});
-
-test('staging and production require verify-full with a readable CA path', () => {
-  assert.throws(
-    () => createDatabaseOptions({ ...production, DB_SSL_MODE: 'disable' }),
-    /DB_SSL_MODE: disable is only allowed in development\/test/,
-  );
-  assert.throws(
-    () => createDatabaseOptions({ ...production, DB_SSL_MODE: 'verify-full', DB_SSL_CA_PATH: '' }),
-    /DB_SSL_CA_PATH: a readable CA certificate path is required/,
-  );
-  assert.throws(
-    () =>
-      createDatabaseOptions({
-        ...production,
-        DB_SSL_MODE: 'verify-full',
-        DB_SSL_CA_PATH: '/tmp/newtine-security-test-ca-does-not-exist.pem',
-      }),
-    /DB_SSL_CA_PATH: the CA certificate could not be read/,
-  );
 });
 
 test('only explicit development and test environments allow database defaults', () => {
