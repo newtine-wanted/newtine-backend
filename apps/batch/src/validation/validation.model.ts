@@ -131,7 +131,7 @@ export class ValidationOpenAiModel implements ValidationModel {
         store: false,
         instructions,
         input: JSON.stringify(input),
-        max_output_tokens: 6000,
+        max_output_tokens: stage === 'repair' ? 12000 : 6000,
         text: {
           format: { type: 'json_schema', name: `news_validation_${stage}`, strict: true, schema },
         },
