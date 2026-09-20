@@ -645,7 +645,7 @@ test('final review rejects an exclusion whose title does not match its index', a
   await assert.rejects(client.groups(['관세 협상']), /INVALID_EXCLUDED_CANDIDATE/);
 });
 
-test('regional queries extract at most one candidate, including merged origins; other queries retain three', async () => {
+test('only topic queries retain three; other and merged origins extract at most one', async () => {
   const store = new Store();
   store.catalogQueries = [
     { ...query('서울'), origins: ['REGION:seoul'] },
@@ -653,6 +653,10 @@ test('regional queries extract at most one candidate, including merged origins; 
     { ...query('부산'), origins: ['REGION:busan'] },
     query('정치'),
     { ...query('국회'), origins: ['INSTITUTION:assembly'] },
+    { ...query('인물'), origins: ['POLITICIAN:person'] },
+    { ...query('정당'), origins: ['PARTY:party'] },
+    { ...query('후속'), origins: ['FOLLOW_UP'] },
+    { ...query('혼합'), origins: ['TOPIC:politics', 'INSTITUTION:assembly'] },
   ];
   const limits: number[] = [];
   const run = await new DiscoveryService(
@@ -669,33 +673,44 @@ test('regional queries extract at most one candidate, including merged origins; 
       },
     }),
   ).execute(config, at);
-  assert.deepEqual(limits, [1, 1, 3, 3]);
+  assert.deepEqual(limits, [1, 1, 3, 1, 1, 1, 1, 1]);
   assert.deepEqual(
     Array.from(run.snapshot.results, (r) => r.candidates.length),
-    [1, 1, 3, 3],
+    [1, 1, 3, 1, 1, 1, 1, 1],
   );
-  assert.equal(run.snapshot.candidates!.length, 8);
+  assert.equal(run.snapshot.candidates!.length, 10);
+  assert.deepEqual(
+    Array.from(run.snapshot.results, (r) => r.candidateLimit),
+    limits,
+  );
 });
 
-test('regional extraction rejects more than one candidate before saving results', async () => {
-  const store = new Store();
-  store.catalogQueries = [{ ...query('서울'), origins: ['REGION:seoul'] }];
-  await assert.rejects(
-    new DiscoveryService(
-      store,
-      { search: async () => [article('서울 정책')] },
-      model({
-        extract: async () =>
-          [0, 1].map((i) => ({
-            title: `서울 후보 ${i}`,
-            titleIndexes: [0],
-            representativeTitleIndex: 0,
-          })),
-      }),
-    ).execute(config, at),
-    /INVALID_CANDIDATE_COUNT/,
-  );
-  assert.equal(store.failed, true);
-  assert.equal(store.saved!.snapshot.results.length, 0);
-  assert.equal(store.saved!.completed, false);
-});
+for (const origin of [
+  'REGION:seoul',
+  'INSTITUTION:assembly',
+  'POLITICIAN:person',
+  'PARTY:party',
+  'FOLLOW_UP',
+])
+  test(`non-topic extraction rejects excess candidates: ${origin}`, async () => {
+    const store = new Store();
+    store.catalogQueries = [{ ...query('서울'), origins: [origin] }];
+    await assert.rejects(
+      new DiscoveryService(
+        store,
+        { search: async () => [article('서울 정책')] },
+        model({
+          extract: async () =>
+            [0, 1].map((i) => ({
+              title: `서울 후보 ${i}`,
+              titleIndexes: [0],
+              representativeTitleIndex: 0,
+            })),
+        }),
+      ).execute(config, at),
+      /INVALID_CANDIDATE_COUNT/,
+    );
+    assert.equal(store.failed, true);
+    assert.equal(store.saved!.snapshot.results.length, 0);
+    assert.equal(store.saved!.completed, false);
+  });

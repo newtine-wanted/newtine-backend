@@ -17,7 +17,10 @@ if (generated.some((r) => r.draft.viewpoints.length !== 2))
   throw new Error('INVALID_VIEWPOINT_COUNT');
 if (
   d.results.some(
-    (r) => r.candidates.length > (r.query.origins.some((o) => o.startsWith('REGION:')) ? 1 : 3),
+    (r) =>
+      r.candidates.length >
+      (r.candidateLimit ??
+        (r.query.origins.some((o) => o.startsWith('REGION:')) ? 1 : d.config.candidatesPerQuery)),
   )
 )
   throw new Error('INVALID_CANDIDATE_COUNT');
@@ -47,7 +50,9 @@ const lines = [
   '# 뉴스 파이프라인 전체 재실행 결과',
   '',
   `- 실행 기준 시각: ${g.at}`,
-  '- 지역 검색어당 후보 최대 1개, 나머지는 최대 3개. 1단계 최근 24시간, 2단계 최근 7일. 3단계 이해관계자 관점은 정확히 2개입니다.',
+  d.results.every((r) => r.candidateLimit !== undefined)
+    ? '- 주제 검색어 후보 최대 3개, 그 외 최대 1개. 1단계 최근 24시간, 2단계 최근 7일. 3단계 이해관계자 관점은 정확히 2개입니다.'
+    : '- 이전 추출 정책: 지역 검색어 후보 최대 1개, 그 외 최대 3개. 1단계 최근 24시간, 2단계 최근 7일. 3단계 이해관계자 관점은 정확히 2개입니다.',
   v
     ? '- 4단계 검증 완료. 5단계 공개 전 결과입니다. 아래 생성 상세는 검증 후 최종값이며 보류 여부와 수정 전후는 검증 상세에 기록합니다.'
     : '- 4단계 검증·5단계 공개 전 초안입니다.',

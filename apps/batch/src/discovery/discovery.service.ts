@@ -86,9 +86,10 @@ export class DiscoveryService {
           limits.articlesPerQuery,
         );
         check();
-        const candidateLimit = query.origins.some((origin) => origin.startsWith('REGION:'))
-          ? 1
-          : limits.candidatesPerQuery;
+        const candidateLimit =
+          query.origins.length > 0 && query.origins.every((origin) => origin.startsWith('TOPIC:'))
+            ? limits.candidatesPerQuery
+            : 1;
         const extracted = articles.length
           ? await this.model.extract(
               articles.map((a) => a.title),
@@ -137,7 +138,7 @@ export class DiscoveryService {
           candidates = indices.map((i) => candidates[i]!);
         }
         check();
-        snapshot.results.push({ query, articles, candidates });
+        snapshot.results.push({ query, articles, candidates, candidateLimit });
         snapshot.usage.push(...(this.model.usage?.splice(0) ?? []));
         await this.store.save(run);
         this.progress?.({

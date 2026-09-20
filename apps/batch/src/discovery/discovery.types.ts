@@ -2,6 +2,7 @@ import type { DiscoveredArticle } from '@newtine/core';
 
 export interface DiscoveryConfig {
   articlesPerQuery: number;
+  /** Maximum for topic-only searches; all other searches use one. */
   candidatesPerQuery: number;
   maxQueries: number;
   maxCandidates: number;
@@ -34,6 +35,8 @@ export interface Candidate {
   mergedCandidateIds: string[];
 }
 export interface QueryResult {
+  /** Applied extraction cap; absent in legacy region-only policy snapshots. */
+  candidateLimit?: number;
   query: SearchQuery;
   articles: DiscoveredArticle[];
   candidates: Candidate[];
