@@ -57,6 +57,24 @@ describe('generated artifact canonicalization', () => {
     );
   });
 
+  test('sorts nested functional index export lines', () => {
+    const input = [
+      '/** generated */',
+      'export * as z from "./z/index";',
+      'export * as a from "./a/index";',
+      '',
+    ].join('\n');
+
+    expect(canonicalizeGenerated('generated/api/functional/me/index.ts', input)).toBe(
+      [
+        '/** generated */',
+        'export * as a from "./a/index";',
+        'export * as z from "./z/index";',
+        '',
+      ].join('\n'),
+    );
+  });
+
   test('preserves the functional index newline style', () => {
     const input = ['export * as z from "./z/index";', 'export * as a from "./a/index";', ''].join(
       '\r\n',

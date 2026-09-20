@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 export const GENERATED_DIRECTORY = 'generated';
 export const OPENAPI_PATH = 'generated/openapi.json';
-export const FUNCTIONAL_INDEX_PATH = 'generated/api/functional/index.ts';
+export const FUNCTIONAL_INDEX_DIRECTORY = 'generated/api/functional/';
 
 const FUNCTIONAL_EXPORT_PATTERN = /^export \* as [\w$]+ from ".*";$/;
 
@@ -16,8 +16,12 @@ export function canonicalizeGenerated(path, content) {
   const text = Buffer.isBuffer(content) ? content.toString('utf8') : content;
 
   if (path === OPENAPI_PATH) return canonicalizeOpenApi(text);
-  if (path === FUNCTIONAL_INDEX_PATH) return canonicalizeFunctionalIndex(text);
+  if (isFunctionalIndexPath(path)) return canonicalizeFunctionalIndex(text);
   return content;
+}
+
+function isFunctionalIndexPath(path) {
+  return path.startsWith(FUNCTIONAL_INDEX_DIRECTORY) && path.endsWith('/index.ts');
 }
 
 export function canonicalizeOpenApi(content) {
