@@ -91,14 +91,15 @@ const lines = [
 for (const [label, s] of phases) {
   const cost = estimateCost(s.usage);
   lines.push(
-    `| ${label} | ${s.usage.length} | ${s.usage.reduce((n, u) => n + (u.inputTokens ?? 0), 0)} | ${s.usage.reduce((n, u) => n + (u.outputTokens ?? 0), 0)} | $${cost.usd.toFixed(4)}${cost.incomplete ? ' (누락 있음)' : ''} |`,
+    `| ${label} | ${s.usage.length} | ${s.usage.reduce((n, u) => n + (u.inputTokens ?? 0), 0)} | ${s.usage.reduce((n, u) => n + (u.outputTokens ?? 0), 0)} | ${cost.incomplete ? '산정 불가/일부 누락' : '$' + cost.usd.toFixed(4)}${cost.incomplete ? ' (누락 있음)' : ''} |`,
   );
 }
 const cost = estimateCost(phases.flatMap(([, s]) => s.usage));
 lines.push(
   '',
-  `- 전체 추정 비용: **$${cost.usd.toFixed(4)} USD**`,
-  '- gpt-5.4-mini-2026-03-17, 2026-09-20 확인 단가: 100만 토큰당 입력 $0.75 / 캐시 입력 $0.075 / 출력 $4.50.',
+  `- 전체 추정 비용: **${cost.incomplete ? '산정 불가/일부 누락' : '$' + cost.usd.toFixed(4)} USD**`,
+  `- 사용 모델: ${[...new Set(phases.flatMap(([, s]) => s.usage.map((u) => u.model)))].join(', ')}.`,
+  '- 기본 모델 gpt-5.4-mini-2026-03-17에만 적용하는 2026-09-20 확인 단가: 100만 토큰당 입력 $0.75 / 캐시 입력 $0.075 / 출력 $4.50.',
   '- [공식 단가](https://developers.openai.com/api/docs/models/gpt-5.4-mini). 1·2단계는 캐시 사용량 미기록으로 일반 입력 단가 적용, 3·4단계는 기록된 캐시 할인 적용. 세금·환율·다른 실행 및 개발 테스트 비용 제외.',
   `- 사용량 누락: ${cost.incomplete ? '있음, 확인된 사용량만 합산' : '없음'}. 실패 후 재개 시 기록된 실패 호출도 포함합니다.`,
   '',

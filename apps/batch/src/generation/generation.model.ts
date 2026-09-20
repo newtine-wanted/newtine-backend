@@ -1,6 +1,6 @@
 import { newsPrompt } from '../ai/news-prompt.js';
 import type { FetchedArticle } from '@newtine/core';
-import { DEFAULT_OPENAI_TEXT_MODEL } from '../ai/ai-model.defaults.js';
+import { configuredNewsTextModel } from '../ai/ai-model.defaults.js';
 import {
   GENERATIONS,
   type Catalog,
@@ -21,6 +21,7 @@ const str = { type: 'string', minLength: 1 };
 const arr = (items: unknown, maxItems = 100) => ({ type: 'array', items, maxItems });
 export class GenerationOpenAiModel implements GenerationModel {
   readonly usage: Usage[] = [];
+  private readonly model = configuredNewsTextModel();
   constructor(
     private readonly apiKey: string,
     private readonly uxWriting: string,
@@ -139,7 +140,7 @@ export class GenerationOpenAiModel implements GenerationModel {
       method: 'POST',
       headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: DEFAULT_OPENAI_TEXT_MODEL,
+        model: this.model,
         store: false,
         instructions,
         input: JSON.stringify(input),
@@ -162,7 +163,7 @@ export class GenerationOpenAiModel implements GenerationModel {
     };
     this.usage.push({
       stage,
-      model: DEFAULT_OPENAI_TEXT_MODEL,
+      model: this.model,
       inputTokens: body.usage?.input_tokens,
       outputTokens: body.usage?.output_tokens,
       cachedInputTokens: body.usage?.input_tokens_details?.cached_tokens,

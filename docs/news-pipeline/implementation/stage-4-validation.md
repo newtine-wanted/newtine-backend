@@ -22,7 +22,7 @@
 
 - 표현 검증을 활성화하되 새 `TONE` 실행 모드로 이전 `AI` 및 `RULES_ONLY` 결과를 재사용하지 않는다. 이전 실행 기록은 유지한다.
 - 수정 프롬프트는 형식 오류 수정과 표현 수정으로 제한하고 전체 UX 가이드는 넣지 않는다.
-- 변경 예정 파일: 아래 목록 및 `validation-tone.migration.ts`, `config/news-validation.json`.
+- 변경 예정 파일: 아래 목록 및 `deploy/db/news-pipeline/001_schema.sql`, `config/news-validation.json`.
 - 완료 조건: 범위 밖 AI 판정 거부, 생성 문장만 검토 입력에 포함, 실패 필드만 수정/재실패 보류, 이전 모드와 DB 실행 분리, 단위 테스트·타입 검사·DB smoke 통과.
 - 5단계는 구현·커밋 대상에서 제외한다. 아래 과거 실행 기록은 당시 정책에 따른 결과이다.
 

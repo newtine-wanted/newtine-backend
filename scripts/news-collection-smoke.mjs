@@ -14,7 +14,6 @@ const config = JSON.parse(await readFile('config/news-collection.json', 'utf8'))
 const discoveryConfig = JSON.parse(await readFile('config/news-discovery.json', 'utf8'));
 const orm = await collectionOrm();
 try {
-  await orm.migrator.up();
   const em = orm.em.fork();
   const store = new CollectionRepository(em);
   const dates = await sql(

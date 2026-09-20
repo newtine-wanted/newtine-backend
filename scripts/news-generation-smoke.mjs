@@ -13,7 +13,6 @@ assert.equal(process.env.DB_NAME, 'news_discovery_local');
 const config = JSON.parse(await readFile('config/news-generation.json', 'utf8'));
 const orm = await generationOrm();
 try {
-  await orm.migrator.up();
   const em = orm.em.fork();
   const store = new GenerationRepository(em);
   const before = await sql(em, 'select count(*)::int as n from issues');

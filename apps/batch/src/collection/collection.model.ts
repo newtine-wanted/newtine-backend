@@ -1,5 +1,5 @@
 import { newsPrompt } from '../ai/news-prompt.js';
-import { DEFAULT_OPENAI_TEXT_MODEL } from '@newtine/batch/ai/ai-model.defaults.js';
+import { configuredNewsTextModel } from '@newtine/batch/ai/ai-model.defaults.js';
 import type { DiscoveredArticle } from '@newtine/core';
 import type { Candidate, DiscoverySnapshot } from '../discovery/discovery.types.js';
 import { checkedIndexes } from '../discovery/discovery.policy.js';
@@ -7,6 +7,7 @@ import type { CollectionModel, SimilarIssue } from './collection.types.js';
 
 export class CollectionOpenAiModel implements CollectionModel {
   readonly usage: DiscoverySnapshot['usage'] = [];
+  private readonly model = configuredNewsTextModel();
   constructor(
     private readonly apiKey: string,
     private readonly request: typeof fetch = fetch,
@@ -54,7 +55,7 @@ export class CollectionOpenAiModel implements CollectionModel {
       method: 'POST',
       headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: DEFAULT_OPENAI_TEXT_MODEL,
+        model: this.model,
         store: false,
         instructions,
         input: JSON.stringify(input),
@@ -89,7 +90,7 @@ export class CollectionOpenAiModel implements CollectionModel {
     };
     this.usage.push({
       stage,
-      model: DEFAULT_OPENAI_TEXT_MODEL,
+      model: this.model,
       inputTokens: body.usage?.input_tokens,
       outputTokens: body.usage?.output_tokens,
     });

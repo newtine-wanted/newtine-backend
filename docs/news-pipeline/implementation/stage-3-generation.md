@@ -62,7 +62,7 @@
 - 세대 테이블 없이 기존 4개 코드 사용, 용어 사전은 공개 이슈의 상충 없는 기존 설명으로 초기화한다. 새 설명은 검증 전 초안에만 저장한다.
 - 본문은 기사당 최대 18,000자로 제한하고 확보한 최대 5개를 한 번에 생성 모델에 입력한다.
 - 분류는 기사 제목의 DB 이름을 규칙 매칭한다. 매칭이 없는 분류 종류만 DB 허용 목록과 기사 본문을 LLM에 전달한다. rules와 최종 classification을 함께 남겨 선택 경로를 확인할 수 있다.
-- `news:generation:local migrate`, `news:generation:local run <2단계 실행 ID>`로 실행한다. 로컬 전용 DB 설정을 강제하고 실행 결과 JSON·Markdown 보고서를 `.local/news-generation/`에 기록한다.
+- DDL을 먼저 적용한 뒤 `node --env-file=.env scripts/news-generation.mjs run <2단계 실행 ID>`로 실행한다. 대상 DB 환경변수를 설정하고 실행 결과 JSON·Markdown 보고서를 `.local/news-generation/`에 기록한다.
 - 보고서에 사용량과 캐시 할인 적용 추정 비용을 표시한다. 표본 2개 생성 비용은 $0.057576 USD다.
 - 단위 테스트 43개(1~3단계 합계), 빌드·타입 검사·ESLint, 영속 로컬 DB smoke 통과. 자세한 결과는 `../tests/stage-3-generation.md` 참조.
 - 실제 결과에서 세대 분류·설명 불일치와 모호한 관점 주체가 확인됐다. 4단계 검증 전 초안으로 표시하고 사용자 검토를 요청한다.

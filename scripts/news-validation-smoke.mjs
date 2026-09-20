@@ -18,7 +18,6 @@ assert.equal(process.env.DB_PORT, '55432');
 assert.equal(process.env.DB_NAME, 'news_discovery_local');
 const orm = await validationOrm();
 try {
-  await orm.migrator.up();
   const em = orm.em.fork(),
     store = new ValidationRepository(em);
   const before = await sql(em, 'select count(*)::int n from issues');

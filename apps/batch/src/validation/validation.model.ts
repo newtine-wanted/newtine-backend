@@ -1,5 +1,5 @@
 import { newsPrompt } from '../ai/news-prompt.js';
-import { DEFAULT_OPENAI_TEXT_MODEL } from '../ai/ai-model.defaults.js';
+import { configuredNewsTextModel } from '../ai/ai-model.defaults.js';
 import type { GenerationResult, Usage } from '../generation/generation.types.js';
 import {
   TONE_FIELDS,
@@ -18,6 +18,7 @@ const obj = (properties: Record<string, unknown>) => ({
 });
 export class ValidationOpenAiModel implements ValidationModel {
   readonly usage: Usage[] = [];
+  private readonly model = configuredNewsTextModel();
   constructor(
     private readonly apiKey: string,
     private readonly request: typeof fetch = fetch,
@@ -119,7 +120,7 @@ export class ValidationOpenAiModel implements ValidationModel {
       method: 'POST',
       headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: DEFAULT_OPENAI_TEXT_MODEL,
+        model: this.model,
         store: false,
         instructions,
         input: JSON.stringify(input),
@@ -142,7 +143,7 @@ export class ValidationOpenAiModel implements ValidationModel {
     };
     this.usage.push({
       stage,
-      model: DEFAULT_OPENAI_TEXT_MODEL,
+      model: this.model,
       inputTokens: body.usage?.input_tokens,
       outputTokens: body.usage?.output_tokens,
       cachedInputTokens: body.usage?.input_tokens_details?.cached_tokens,

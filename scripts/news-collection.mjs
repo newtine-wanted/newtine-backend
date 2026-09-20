@@ -5,8 +5,6 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { MikroORM } from '@mikro-orm/postgresql';
 import { createDatabaseOptions } from '../dist/libs/core/src/common/database/database.options.js';
-import { Migration20260920000000NewsDiscovery } from '../dist/apps/batch/src/discovery/discovery.migration.js';
-import { Migration20260920000100NewsCollection } from '../dist/apps/batch/src/collection/collection.migration.js';
 import { CollectionRepository } from '../dist/apps/batch/src/collection/collection.repository.js';
 import { CollectionService } from '../dist/apps/batch/src/collection/collection.service.js';
 import { CollectionOpenAiModel } from '../dist/apps/batch/src/collection/collection.model.js';
@@ -15,15 +13,11 @@ import { NaverNewsProvider } from '../dist/apps/batch/src/pipeline/naverNews.pro
 
 export async function collectionOrm() {
   const options = createDatabaseOptions();
-  options.migrations.migrationsList.push(
-    Migration20260920000000NewsDiscovery,
-    Migration20260920000100NewsCollection,
-  );
   return MikroORM.init(options);
 }
 async function main() {
   const command = process.argv[2] ?? 'run';
-  if (!['run', 'migrate', 'plan'].includes(command)) throw new Error('UNKNOWN_COLLECTION_COMMAND');
+  if (!['run', 'plan'].includes(command)) throw new Error('UNKNOWN_COLLECTION_COMMAND');
   const config = parseCollectionConfig(
     JSON.parse(
       await readFile(process.env.NEWS_COLLECTION_CONFIG ?? 'config/news-collection.json', 'utf8'),
@@ -38,11 +32,6 @@ async function main() {
     throw new Error('DISCOVERY_RUN_ID_REQUIRED');
   const orm = await collectionOrm();
   try {
-    if (command === 'migrate') {
-      await orm.migrator.up();
-      console.log('Collection migrations applied');
-      return;
-    }
     const controller = new AbortController();
     const stop = () => controller.abort();
     process.once('SIGINT', stop);

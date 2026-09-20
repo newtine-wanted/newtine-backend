@@ -1,5 +1,5 @@
 import { newsPrompt } from '../ai/news-prompt.js';
-import { DEFAULT_OPENAI_TEXT_MODEL } from '@newtine/batch/ai/ai-model.defaults.js';
+import { configuredNewsTextModel } from '@newtine/batch/ai/ai-model.defaults.js';
 import { MAX_CANDIDATES_PER_QUERY, MAX_CANDIDATE_SEARCH_TITLE_LENGTH } from './discovery.policy.js';
 import type { DiscoveryModel, DiscoverySnapshot } from './discovery.types.js';
 
@@ -14,6 +14,7 @@ export const EXTRACTION_INSTRUCTIONS = newsPrompt('discovery-extract');
 export class DiscoveryOpenAiModel implements DiscoveryModel {
   excludedCandidates: { index: number; reason: 'IRRELEVANT' | 'HYPERLOCAL' }[] = [];
   readonly usage: DiscoverySnapshot['usage'] = [];
+  private readonly model = configuredNewsTextModel();
   constructor(
     private readonly apiKey: string,
     private readonly request: typeof fetch = fetch,
@@ -145,7 +146,7 @@ export class DiscoveryOpenAiModel implements DiscoveryModel {
       method: 'POST',
       headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: DEFAULT_OPENAI_TEXT_MODEL,
+        model: this.model,
         store: false,
         instructions,
         input: JSON.stringify(input),
@@ -164,7 +165,7 @@ export class DiscoveryOpenAiModel implements DiscoveryModel {
     };
     this.usage.push({
       stage,
-      model: DEFAULT_OPENAI_TEXT_MODEL,
+      model: this.model,
       inputTokens: body.usage?.input_tokens,
       outputTokens: body.usage?.output_tokens,
     });

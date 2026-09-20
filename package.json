@@ -37,7 +37,9 @@
     "news:discovery": "node scripts/news-discovery.mjs",
     "news:collection": "node scripts/news-collection.mjs",
     "news:generation": "node scripts/news-generation.mjs",
-    "news:validation": "node scripts/news-validation.mjs"
+    "news:validation": "node scripts/news-validation.mjs",
+    "news:pipeline": "node scripts/news-pipeline.mjs",
+    "test:news-runner": "node --test test/scripts/newsPipeline.check.mjs"
   },
   "dependencies": {
     "@mikro-orm/core": "7.2.0",

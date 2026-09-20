@@ -5,8 +5,6 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { MikroORM } from '@mikro-orm/postgresql';
 import { createDatabaseOptions } from '../dist/libs/core/src/common/database/database.options.js';
-import { Migration20260920000000NewsDiscovery } from '../dist/apps/batch/src/discovery/discovery.migration.js';
-import { Migration20260920000100NewsCollection } from '../dist/apps/batch/src/collection/collection.migration.js';
 import { GenerationRepository } from '../dist/apps/batch/src/generation/generation.repository.js';
 import { GenerationService } from '../dist/apps/batch/src/generation/generation.service.js';
 import { GenerationOpenAiModel } from '../dist/apps/batch/src/generation/generation.model.js';
@@ -15,19 +13,13 @@ import { NaverArticleBodyProvider } from '../dist/apps/batch/src/pipeline/naverN
 
 export async function generationOrm() {
   const options = createDatabaseOptions();
-  options.migrations.migrationsList.push(
-    Migration20260920000000NewsDiscovery,
-    Migration20260920000100NewsCollection,
-    Migration20260920000200NewsGeneration,
-  );
   return MikroORM.init(options);
 }
-import { Migration20260920000200NewsGeneration } from '../dist/apps/batch/src/generation/generation.migration.js';
 import { writeGenerationReport } from './news-generation-report.mjs';
 
 async function main() {
   const command = process.argv[2] ?? 'run';
-  if (!['run', 'migrate', 'plan'].includes(command)) throw new Error('UNKNOWN_GENERATION_COMMAND');
+  if (!['run', 'plan'].includes(command)) throw new Error('UNKNOWN_GENERATION_COMMAND');
   const config = parseGenerationConfig(
     JSON.parse(
       await readFile(process.env.NEWS_GENERATION_CONFIG ?? 'config/news-generation.json', 'utf8'),
@@ -42,11 +34,6 @@ async function main() {
     throw new Error('COLLECTION_RUN_ID_REQUIRED');
   const orm = await generationOrm();
   try {
-    if (command === 'migrate') {
-      await orm.migrator.up();
-      console.log('Generation migrations applied');
-      return;
-    }
     const controller = new AbortController();
     const stop = () => controller.abort();
     process.once('SIGINT', stop);
