@@ -3,6 +3,7 @@ import {
   LockMode,
   QueryOrder,
   raw,
+  sql,
   type FilterQuery,
   type Subquery,
 } from '@mikro-orm/core';
@@ -32,6 +33,7 @@ import {
 } from '@newtine/core';
 import { executePostgresSql } from '@newtine/core/common/database/postgresSql.js';
 import type { AgeGroup } from '@newtine/core/issue/repository/type/issueQuery.repository.js';
+import { ISSUE_RECOMMENDATION_ALGORITHM_VERSION } from '../recommendation/issueRecommendation.js';
 import {
   FeedBatchEntity,
   FeedBatchItemEntity,
@@ -82,7 +84,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     const session: FeedSessionRecord = {
       id: generateUuidV7(),
       owner: { ...owner },
-      algorithmVersion: 'issue-card-query-v1',
+      algorithmVersion: algorithm.algorithmVersion ?? ISSUE_RECOMMENDATION_ALGORITHM_VERSION,
       candidateBudget: algorithm.candidateBudget,
       highScoreThreshold: algorithm.highScoreThreshold,
       nextBatchNo: 0,
@@ -261,12 +263,8 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     const publicIssueIds = publicIssueDetailIds(manager);
     const baseWhere = candidateWhere(publicIssueIds, excludedIssueIds);
     if (scope === undefined || candidateLimit === undefined) {
-      const rows = await manager.find(IssueQueryIssueEntity, baseWhere, {
-        orderBy: ISSUE_ORDER_BY,
-        ...(candidateLimit === undefined ? {} : { limit: candidateLimit }),
-      });
-      const orderedIssueIds = rows.map((row) => row.id);
-      const issues = await this.loadIssueRecords(new Set(orderedIssueIds), false, orderedIssueIds);
+      const orderedIssueIds = await this.findCandidateIds(manager, baseWhere, candidateLimit);
+      const issues = await this.loadIssueRecords(new Set(orderedIssueIds), 'feed', orderedIssueIds);
       return issues.filter(isPublicIssue).slice(0, candidateLimit);
     }
 
@@ -279,45 +277,45 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
         remainingRows,
         Math.max(1, Math.floor(candidateLimit * slice.weight)),
       );
-      const rows = await manager.find(
-        IssueQueryIssueEntity,
+      const rows = await this.findCandidateIds(
+        manager,
         combineIssueFilters(candidateWhere(publicIssueIds, seenIds), slice.where),
-        { orderBy: ISSUE_ORDER_BY, limit: sliceLimit },
+        sliceLimit,
       );
-      for (const row of rows) {
-        if (seenIds.has(row.id)) continue;
-        seenIds.add(row.id);
-        issueIds.push(row.id);
+      for (const issueId of rows) {
+        if (seenIds.has(issueId)) continue;
+        seenIds.add(issueId);
+        issueIds.push(issueId);
         remainingRows -= 1;
         if (remainingRows === 0) break;
       }
     }
     if (remainingRows > 0) {
-      const rows = await manager.find(
-        IssueQueryIssueEntity,
+      const rows = await this.findCandidateIds(
+        manager,
         candidateWhere(publicIssueIds, seenIds),
-        { orderBy: ISSUE_ORDER_BY, limit: remainingRows },
+        remainingRows,
       );
-      for (const row of rows) {
-        if (seenIds.has(row.id)) continue;
-        seenIds.add(row.id);
-        issueIds.push(row.id);
+      for (const issueId of rows) {
+        if (seenIds.has(issueId)) continue;
+        seenIds.add(issueId);
+        issueIds.push(issueId);
         remainingRows -= 1;
         if (remainingRows === 0) break;
       }
     }
-    const issues = await this.loadIssueRecords(new Set(issueIds), false, issueIds);
+    const issues = await this.loadIssueRecords(new Set(issueIds), 'feed', issueIds);
     return issues.filter(isPublicIssue).slice(0, candidateLimit);
   }
 
   async findIssue(id: string): Promise<IssueRecord | null> {
-    const issues = await this.loadIssueRecords(new Set([id]), true);
+    const issues = await this.loadIssueRecords(new Set([id]), 'detail');
     return issues[0] ?? null;
   }
 
   async findIssuesByIds(ids: ReadonlySet<string>): Promise<IssueRecord[]> {
     if (ids.size === 0) return [];
-    return this.loadIssueRecords(ids, false);
+    return this.loadIssueRecords(ids, 'feed');
   }
 
   async findUserContext(userId: string): Promise<UserRecommendationContext | null> {
@@ -392,9 +390,47 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       }));
   }
 
+  private async findCandidateIds(
+    manager: PostgreSqlEntityManager,
+    where: IssueFilter,
+    limit?: number,
+  ): Promise<string[]> {
+    const query = manager
+      .createQueryBuilder(IssueQueryIssueEntity, 'issue')
+      .select('issue.id')
+      .where(where as unknown as QBFilterQuery<IssueQueryIssuePersistenceEntity, 'issue'>)
+      .orderBy(ISSUE_ORDER_BY);
+    const maybeLimit = (query as unknown as { limit?: unknown }).limit;
+    if (limit !== undefined && typeof maybeLimit === 'function') {
+      (maybeLimit as (value: number) => unknown).call(query, limit);
+    }
+    const maybeExecute = (query as unknown as { execute?: unknown }).execute;
+    if (
+      typeof maybeExecute !== 'function' ||
+      (limit !== undefined && typeof maybeLimit !== 'function')
+    ) {
+      const rows = await manager.find(IssueQueryIssueEntity, where, {
+        orderBy: ISSUE_ORDER_BY,
+        ...(limit === undefined ? {} : { limit }),
+      });
+      return rows.map((row) => row.id);
+    }
+    const rows = (await query.execute('all', false)) as Array<Record<string, unknown>>;
+    return rows.map((row, index) => {
+      if (!isRecord(row)) {
+        throw new Error(`candidate id projection returned an invalid row at index ${index}`);
+      }
+      const id = row.id ?? row.issue_id ?? row['issue.id'];
+      if (typeof id !== 'string') {
+        throw new Error(`candidate id projection returned an invalid id at index ${index}`);
+      }
+      return id;
+    });
+  }
+
   private async loadIssueRecords(
     issueIds: ReadonlySet<string> | undefined,
-    includeArticles: boolean,
+    mode: IssueRecordLoadMode,
     orderedIssueIds?: readonly string[],
   ): Promise<IssueRecord[]> {
     const manager = this.currentEntityManager();
@@ -409,12 +445,18 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       manager.find(IssueQueryDetailEntity, { issueId: { $in: [...selectedIssueIds] } }),
       manager.find(IssueQueryImpactEntity, { issueId: { $in: [...selectedIssueIds] } }),
       manager.find(IssueQueryEntityLinkEntity, { issueId: { $in: [...selectedIssueIds] } }),
-      manager.find(IssueQueryArticleLinkEntity, { issueId: { $in: [...selectedIssueIds] } }),
+      mode === 'detail'
+        ? manager.find(IssueQueryArticleLinkEntity, { issueId: { $in: [...selectedIssueIds] } })
+        : Promise.resolve([] as IssueQueryArticleLinkPersistenceEntity[]),
     ]);
 
+    const availableArticleCounts =
+      mode === 'feed'
+        ? await this.loadAvailableArticleCounts(manager, selectedIssueIds)
+        : new Map<string, number>();
     const articleIds = [...new Set(articleLinks.map((row) => row.articleId))];
     const articles =
-      articleIds.length === 0
+      mode !== 'detail' || articleIds.length === 0
         ? []
         : await manager.find(IssueQueryArticleEntity, { id: { $in: articleIds } });
     const publisherIds = [
@@ -425,7 +467,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       ),
     ];
     const publishers =
-      publisherIds.length === 0
+      mode !== 'detail' || publisherIds.length === 0
         ? []
         : await manager.find(IssueQueryPublisherEntity, { id: { $in: publisherIds } });
 
@@ -456,9 +498,9 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
         detailsByIssue.get(row.id),
         issueImpacts,
         entityIdsByIssue.get(row.id) ?? [],
-        availableArticles.length,
+        mode === 'feed' ? (availableArticleCounts.get(row.id) ?? 0) : availableArticles.length,
       );
-      if (includeArticles) {
+      if (mode === 'detail') {
         issue.articles = availableArticles.map((article) => ({
           id: article.id,
           title: article.title,
@@ -478,6 +520,69 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       const issue = issueById.get(issueId);
       return issue === undefined ? [] : [issue];
     });
+  }
+
+  private async loadAvailableArticleCounts(
+    manager: EntityManager,
+    issueIds: ReadonlySet<string>,
+  ): Promise<Map<string, number>> {
+    if (issueIds.size === 0) return new Map();
+    const maybeGetConnection = (manager as EntityManager & { getConnection?: unknown })
+      .getConnection;
+    if (typeof maybeGetConnection !== 'function') {
+      // Lightweight repository doubles do not expose a SQL connection. Keep
+      // their behavior deterministic without making the production feed path
+      // hydrate article and publisher rows.
+      const links = await manager.find(IssueQueryArticleLinkEntity, {
+        issueId: { $in: [...issueIds] },
+      });
+      if (links.length === 0) return new Map();
+      const articles = await manager.find(IssueQueryArticleEntity, {
+        id: { $in: [...new Set(links.map((link) => link.articleId))] },
+      });
+      const availableIds = new Set(
+        articles
+          .filter((article) => article.sourceStatus === 'AVAILABLE')
+          .map((article) => article.id),
+      );
+      const counts = new Map<string, number>();
+      for (const link of links) {
+        if (availableIds.has(link.articleId)) {
+          counts.set(link.issueId, (counts.get(link.issueId) ?? 0) + 1);
+        }
+      }
+      return counts;
+    }
+    const query = (manager as PostgreSqlEntityManager)
+      .createQueryBuilder(IssueQueryArticleLinkEntity, 'link')
+      .select([sql`link.issue_id`.as('issueId'), raw('count(*)').as('articleCount')])
+      .join(sql.ref('articles'), 'article', {
+        'link.article_id': sql.ref('article.id'),
+      })
+      .where({
+        [raw('link.issue_id')]: { $in: [...issueIds] },
+        [raw('article.source_status')]: 'AVAILABLE',
+      } as never)
+      .groupBy(sql`link.issue_id` as never);
+    const rows = (await query.execute('all', false)) as Array<Record<string, unknown>>;
+    return new Map(
+      rows.map((row, index) => {
+        if (!isRecord(row)) {
+          throw new Error(`available article count returned an invalid row at index ${index}`);
+        }
+        const issueId = row.issueId ?? row.issue_id;
+        const articleCount = row.articleCount ?? row.article_count;
+        if (
+          typeof issueId !== 'string' ||
+          (typeof articleCount !== 'string' && typeof articleCount !== 'number')
+        ) {
+          throw new Error(
+            `available article count returned an invalid projection at index ${index}`,
+          );
+        }
+        return [issueId, normalizeArticleCount(articleCount)] as const;
+      }),
+    );
   }
 
   private async loadBatches(
@@ -521,6 +626,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
   }
 }
 
+type IssueRecordLoadMode = 'feed' | 'detail';
 type IssueFilter = FilterQuery<IssueQueryIssuePersistenceEntity>;
 
 interface CandidateSlice {
@@ -824,6 +930,14 @@ function activePreferenceValues(rows: readonly unknown[], property: string): str
 
 function normalizeLimit(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function normalizeArticleCount(value: string | number): number {
+  const count = typeof value === 'number' ? value : Number(value);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new Error('available article count is outside the safe integer range');
+  }
+  return count;
 }
 
 function stringValue(value: unknown): string {

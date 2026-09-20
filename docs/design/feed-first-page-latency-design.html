@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="사전 생성 없이 새 피드 세션의 첫 페이지 지연을 줄인다">
+  <meta name="audience" content="피드 사용자와 구현·운영을 맡을 백엔드 개발자">
+  <meta name="problem" content="저장된 배치가 없는 요청에서 추천 조합 탐색과 불필요한 기사 hydration 비용이 발생한다">
+  <meta name="core-flow" content="새 세션 → 기존 범위 후보 조회 → 유한 추천 탐색 → 짧은 canonical 저장 → 카드 응답">
+  <title>첫 피드 조회 지연 개선 설계 · Luna 인계</title>
+  <style>
+    :root{color-scheme:light;--ink:#182a3a;--line:#d9e2e9;--accent:#126653}
+    body{margin:0;background:#f5f7fa;color:var(--ink);font:16px/1.65 system-ui,sans-serif}
+    header,nav,main,footer{max-width:1000px;margin:auto;padding:24px}
+    header{padding-top:44px}h1{line-height:1.25}h2{margin-top:0}h3{margin-bottom:8px}
+    nav{display:flex;flex-wrap:wrap;gap:14px;padding-top:0}a{color:#125d96}
+    section{background:white;border:1px solid var(--line);border-radius:12px;padding:24px;margin-bottom:20px;scroll-margin-top:16px}
+    dt{font-weight:700}dd{margin:0 0 9px}code,pre{font-size:.88em;overflow-wrap:anywhere}
+    pre{padding:16px;background:#edf2f6;white-space:pre-wrap}table{width:100%;border-collapse:collapse;font-size:.92em}
+    th,td{text-align:left;vertical-align:top;padding:10px;border-bottom:1px solid var(--line)}caption{text-align:left;font-weight:700;padding:8px 0}
+    .note{border-left:4px solid var(--accent);padding:10px 16px;background:#edf7f3}.flow{display:flex;flex-wrap:wrap;gap:12px;list-style:none;padding:0}.flow li{flex:1;min-width:140px;background:#edf2f6;padding:12px;border-radius:8px}
+    label{display:block;margin:10px 0}button{font:inherit;padding:8px 15px;margin:6px 6px 6px 0;cursor:pointer}fieldset{border:1px solid var(--line);padding:16px}legend{font-weight:700}.result{margin-top:14px;padding:14px;background:#edf7f3}[hidden]{display:none!important}
+    @media(max-width:650px){header,nav,main,footer{padding:16px}section{padding:16px}table{font-size:.8em}}
+  </style>
+</head>
+<body>
+<header>
+  <p>설계 기준 · 설계 승인됨 · v2 기본 활성화 승인됨 · 구현 제어는 별도 문서 · 강도: Standard</p>
+  <h1>첫 화면을 기다리게 하는 계산을 제한한다</h1>
+  <p>요청 시 추천은 유지하되, 최적 순열을 끝까지 찾지 않는다. 사용자별 사전 생성·캐시는 만들지 않는다.</p>
+  <dl>
+    <dt>purpose · 목적</dt><dd>사전 생성 없이 새 피드 세션의 첫 페이지 지연을 줄인다.</dd>
+    <dt>audience · 사용자</dt><dd>피드 사용자와 구현·운영을 맡을 백엔드 개발자.</dd>
+    <dt>problem · 문제</dt><dd>저장된 배치가 없는 요청의 조합 탐색과 불필요한 기사 데이터 로딩.</dd>
+    <dt>core-flow · 핵심 흐름</dt><dd>새 세션 → 후보 조회 → 유한 추천 탐색 → 짧은 canonical 저장 → 카드 응답.</dd>
+  </dl>
+  <p>작성·갱신: <time datetime="2026-09-20">2026-09-20</time> · 승인·구현 시작: <time datetime="2026-09-20">2026-09-20</time> · 조사 기준: <code>main@092eec8</code><br>
+  추적: 현재 첫 조회 개선 대화. 작업 ID는 산출물 식별 기준이 아니다.</p>
+  <p><a href="feed-first-page-latency-luna-handoff.md">Luna 실행 계약</a> · <a href="feed-concurrency-transaction-boundary-design.html">별도 목적: 기존 동시성·트랜잭션 설계</a><br>
+  <a href="feed-first-page-latency-implementation.html">구현 제어 문서</a>에서 as-built·검증·리뷰를 별도로 관리하며, 이 문서에는 구현 완료 사실을 덧붙이지 않는다.</p>
+</header>
+<nav aria-label="설계 목차"><a href="#goal">목표·근거</a><a href="#change-model">변경 흐름</a><a href="#decisions">알고리즘</a><a href="#repository">조회 경량화</a><a href="#failure-recovery">호환·복구</a><a href="#verification-plan">검증</a><a href="#design-control-state">셀프 체크</a></nav>
+<main><article>
+<section id="goal">
+  <h2>1. 목표와 확인된 사실</h2>
+  <p class="note"><strong>목표: 새 세션 첫 페이지의 서버 응답 p95 ≤ 500ms.</strong> 아직 측정된 개선 수치가 아니다. 클라이언트 렌더링·인터넷 전송까지 500ms를 보장하는 설계는 아니다.</p>
+  <table><caption>근거와 해석의 한계</caption><thead><tr><th>관측</th><th>의미</th><th>입증하지 못하는 것</th></tr></thead><tbody>
+    <tr><td>제공된 HTTP 로그 약 24~28초</td><td>전체 요청이 느림</td><td>그 시간이 모두 SQL·풀 대기·콜드 스타트 중 하나라는 단정</td></tr>
+    <tr><td>제공된 EXPLAIN 실행 3.258ms</td><td>그 시점 그 단일 쿼리는 빠름</td><td>전체 요청의 여러 왕복·인증·저장·추천이 빠르다는 결론</td></tr>
+    <tr><td>코드: 선택 10개 순열 탐색을 대안 후보마다 반복</td><td>후보 편중에 따라 동기 CPU 비용이 커질 수 있음</td><td>운영 28초 원인 전체를 확정</td></tr>
+    <tr><td>앞선 로컬 합성 실험: 후보 100, 다양한 주제 약 45ms / 앞 60개 동일 주제 약 1,746ms</td><td>추천 함수 자체에 입력 분포 의존 병목 재현</td><td>단일 로컬 실행이며 p95·운영 비교·개선 후 결과가 아님</td></tr>
+    <tr><td>코드: includeArticles=false에서도 기사·언론사 전체 읽기</td><td>기사 개수만 필요한 경로에서 제거 가능한 비용</td><td>몇 ms가 줄어드는지는 DB 측정 필요</td></tr>
+  </tbody></table>
+  <p>최초 요청이 주 대상이다. 같은 추천 경로를 쓰는 이후 <em>미생성 배치</em>도 개선 대상이고, 이미 저장된 배치는 추천을 다시 하지 않으므로 조회 경량화만 적용된다.</p>
+</section>
+<section id="non-goals">
+  <h2>2. 범위와 제외</h2>
+  <p>범위: 추천 계산 상한, 피드용 기사 개수 집계, 후보 ID 조회 경량화, 알고리즘 세션 버전, 회귀·성능 검증 설계.</p>
+  <p>제외: 사용자별 사전 계산, 공유 피드 캐시, Redis, worker thread, 응답 후 비내구성 백그라운드 계산, 커넥션 풀 확대, 인스턴스 증설, DB 스키마 변경, 운영 상세 SQL 로그, API 응답 형식·cursor 변경, 프런트엔드 변경.</p>
+  <p>후보 전체를 별도 DTO로 재설계하거나 이력/후속 이슈 조회를 새 API로 분리하는 작업도 이번 최소 변경안에서 제외한다. 목표 미달이면 측정 근거로 별도 설계한다. 따라서 이번 안을 “후보 100개 중 최종 10개만 모든 데이터를 로딩”이라고 설명하지 않는다.</p>
+</section>
+<section id="change-model">
+  <h2>3. 변경 모델</h2>
+  <figure id="system-model">
+    <ol class="flow"><li>① 세션·소유권 확인<br>저장된 배치는 즉시 재사용</li><li>② 후보 조회<br>현재 공개 조건·후보 예산 유지</li><li>③ v2 추천<br>유효한 순서 우선 확보<br>유한 탐색 후 종료</li><li>④ 짧은 저장<br>기존 claim·경쟁 승자 보존</li><li>⑤ 확정 배치 카드 읽기<br>공개 상태 재확인 후 응답</li></ol>
+    <figcaption>읽기·계산은 transaction 밖이다. 기존 짧은 저장 락을 늘리거나 요청 전체 직렬화를 되살리지 않는다. 카드 읽기는 확정된 배치를 기준으로 한다.</figcaption>
+  </figure>
+  <p>기존 코드의 <code>IssueFeedService</code> → <code>IssueQueryRepository</code> → <code>recommendFeed</code> → 저장 경계를 유지한다. 동기 계산량 제한은 같은 Node 프로세스의 다른 요청 지연도 완화할 수 있지만, 동시성 성능은 별도로 검증해야 한다.</p>
+</section>
+<section id="decisions">
+  <h2>4. 추천 v2: 유효한 결과부터 확보하고 탐색을 끝낸다</h2>
+  <ol>
+    <li>기존 scoring, eligibleTypes, 후보 예산 B(기본 100, 최대 500), 희소 유형 우선 quota matching을 유지한다. 추천 목표 비율 4/2/1/2/1은 유지하되 전역 최적 충족은 보장하지 않는다.</li>
+    <li>기존 matching의 최대 10개 seed와 전체 B개 후보에서 각각 결정적인 greedy 순서를 만든다. 각 단계에서 중복·연속 제한을 먼저 확인한다. seed의 선택 유형을 유지하며, 추가 후보는 eligibleTypes 안에서 미충족 quota 우선, 기존 유형 우선순위로 동률을 푼다. seed 포함 여부 → quota 기여 → 점수 → ID 순으로 다음 후보를 고른다.</li>
+    <li>전체 후보 greedy는 처음 10·100개에서 멈추지 않는다. B개 모두가 후보가 되므로 앞 110개가 같은 주제여도 뒤의 대안을 볼 수 있다. 두 greedy의 후보 검사량은 최대 20B로 제한한다.</li>
+    <li>두 greedy를 모두 완료하고 기존 기준(길이 → capped quota 합 → 점수 합 → ID 순서)으로 비교한다. 둘 중 유효한 10개가 있으면 반환한다. quota가 덜 채워졌어도 더 나은 10개를 위한 순열 탐색은 하지 않는 것이 이번 제안의 명시적인 품질·지연 절충이다. 단, 기존 희소 유형 회귀 fixture는 통과해야 하며 실패를 허용하도록 테스트를 바꾸지 않는다.</li>
+    <li>둘 다 10개 미만이면 기존 순서·교체 탐색을 상한 안에서 수행한다. 호출 전체 공유 <strong>transition 최대 10,000회, replacement proposal 최대 24개</strong>. 초기 seed 탐색과 모든 대안이 같은 예산을 쓰며 반복마다 초기화하지 않는다. 반환 기준에 도달하면 즉시 중단한다.</li>
+    <li>시도 횟수는 제약 검사·메모 적중으로 탈락하는 시도도 포함한다. 대안 생성도 B와 proposal 상한으로 제한한다. 부분 탐색 결과를 완전 탐색한 memo로 저장하지 않는다. 예산이 끝나도 이미 확보한 유효 prefix보다 나쁜 결과로 교체하지 않는다.</li>
+  </ol>
+  <p>10,000/24는 <strong>검증할 초기 설계 상한</strong>이지 50ms 보장값이 아니다. 동기 루프를 멈추지 못하는 <code>Promise.race</code> 타임아웃은 쓰지 않는다. wall-clock 기반 중단 대신 같은 입력·버전에서 결정적인 횟수 제한을 사용한다. 후보 사전 정렬은 루프 밖에서 수행한다.</p>
+  <h3>종료 상태</h3>
+  <table><caption>더 보여줄 수 있는지에 대한 정직한 분류</caption><thead><tr><th>상황</th><th>결과</th></tr></thead><tbody>
+    <tr><td>유효한 10개 확보</td><td><code>CONTINUE</code> — 모든 후보 소진 여부를 미리 증명하지 않음</td></tr>
+    <tr><td>10개 미만이고 후보/탐색/대안 예산으로 미탐색 영역이 있음</td><td><code>SEARCH_LIMITED</code> — 검색 한계를 콘텐츠 고갈로 위장하지 않음</td></tr>
+    <tr><td>전체 대상 후보를 확인했고 더 붙일 수 없는 것이 증명됨</td><td>기존 의미의 <code>EXHAUSTED</code> 또는 <code>CONSTRAINT_LIMITED</code>; 단순 greedy 실패는 증명이 아님</td></tr>
+  </tbody></table>
+  <p>기존 API에서 SEARCH_LIMITED는 다음 cursor를 주지 않으며 새 배치 요청은 충돌로 끝난다. v2가 이 상태를 늘리면 사용자 경험 회귀다. 같은 주제·인물만 있는 소규모 풀처럼 증명 가능한 사례는 기존 CONSTRAINT_LIMITED를 유지하고, 나머지는 보수적으로 분류한다. 짧은 응답을 정상적인 10개 성공으로 집계하지 않는다.</p>
+  <p>증명 규칙: candidate sentinel이 없고 모든 eligible 후보를 반환했으며 10개 미만이면 EXHAUSTED. 후보가 남았으면 (a) 전체 eligible pool이 10개 이하이고 공유 예산 안에서 전체 순서 공간의 최대 길이를 확인했거나, (b) 전체 pool이 동일한 non-null 주제 또는 대표 인물이라 이전 run을 반영한 길이 상한을 계산했고 그 상한을 달성한 경우에만 CONSTRAINT_LIMITED. 그 외의 짧은 greedy/pruned 결과는 예산을 다 쓰지 않았어도 SEARCH_LIMITED다. 후보 sentinel이 있으면 전체 풀 증명으로 취급하지 않는다.</p>
+</section>
+<section id="repository">
+  <h2>5. 조회 경량화: 계약은 유지하고 불필요한 로딩 제거</h2>
+  <p><code>loadIssueRecords</code>를 명시적인 <code>feed | detail</code> 모드로 나눈다. <code>findCandidates</code>와 <code>findIssuesByIds</code>는 feed, 상세 <code>findIssue</code>는 detail이다. 반환형 <code>IssueRecord[]</code>와 공개 판정·정규화는 그대로 유지한다.</p>
+  <ul>
+    <li>feed에서는 기사 링크·기사 본문·언론사 entity를 hydrate하지 않는다. 선택된 issue IDs에 대해 링크와 AVAILABLE 기사만 JOIN하여 issue별 개수를 한 번에 집계한다. 누락 그룹은 0, PostgreSQL count 문자열은 안전한 숫자로 변환한다.</li>
+    <li><code>(issue_id, article_id)</code> 유일 키 기준으로 현재 availableArticles 길이와 동일한 링크 수를 센다. REMOVED/UNAVAILABLE 기사는 제외한다. impact/entity JOIN으로 개수를 증폭시키지 않는다.</li>
+    <li>집계는 ORM query builder의 매개변수화된 raw 결과를 우선 사용한다. 승인된 repository ORM 경계를 유지한다. raw SQL helper로의 전환은 자동으로 범위를 넓히지 말고 근거와 함께 상위 판단으로 돌린다.</li>
+    <li>최초 후보 slice는 ID만 읽는 raw projection으로 변경한다. 기존 slice 순서, 정렬, seenIds, budget+1 sentinel 및 slice 후 공개 검사를 보존한다. 서로 의존하는 slice들을 무작정 병렬화하지 않는다.</li>
+    <li>부분 entity가 identity map에 남아 이후 full load를 오염시키지 않아야 한다. generated SQL과 동일 EntityManager 내 연속 조회 회귀로 입증한다.</li>
+    <li>기존 후보의 summary·impact 등은 이번에도 읽는다. 반환형을 빈 값으로 채워서 경량 DTO인 척하지 않는다. 저장 후 카드 재조회도 제거하지 않는다.</li>
+  </ul>
+</section>
+<section id="invariants">
+  <h2>6. 바꾸면 안 되는 조건</h2>
+  <ul>
+    <li>최대 10개, 중복 없음, 이전 배치와 사용자 최신 interaction 대상 제외, 소유권·만료 검증.</li>
+    <li>PUBLISHED, 유효한 summary와 score 등 기존 public/card 조건. 응답 직전 비공개 전환 항목은 기존처럼 제외하며 임의 보충하지 않음.</li>
+    <li>동일 topic / representative entity 3연속 금지, 이전 배치의 run 상태 포함, null의 현재 의미 유지.</li>
+    <li>선택 유형은 eligibleTypes 안에서만 부여, reasonCodes와 선택 유형 일치. 검증된 FOLLOW_UP과 LIKE·eventAt 조건 유지.</li>
+    <li>저장된 배치 재요청은 기존 ID·순서·이유를 재사용. 병렬 생성 경쟁은 기존 DB 승자 결과로 응답. transaction과 락 범위를 확장하지 않음.</li>
+    <li>기사 상세의 내용·순서·언론사 fallback 불변. 회원 데이터가 게스트·다른 회원에게 섞이지 않음.</li>
+  </ul>
+</section>
+<section id="failure-recovery">
+  <h2>7. 세션 버전과 안전한 활성화</h2>
+  <p>기존 <code>feed_sessions.algorithm_version</code> text를 사용한다. v1 구현은 기존 동작 그대로 보존하고 새 <code>issue-card-query-v2</code>로 분기한다. <code>FeedAlgorithmSnapshot</code>에 버전을 전달해 세션 생성 때 저장하고, 매 배치마다 환경값이 아닌 저장된 버전으로 실행한다. 예산 상수도 v2의 일부이며 조용히 변경하지 않는다.</p>
+  <ol>
+    <li>호환 릴리스: v1/v2 모두 실행 가능, 새 설정 <code>RECOMMENDATION_ALGORITHM_VERSION</code> 기본값 v2. 지원하지 않는 설정은 시작 시 검증 실패. 새 세션은 v2로 생성한다.</li>
+    <li>새 세션은 v2를 사용하고 기존 v1 세션은 저장된 snapshot으로 v1을 계속 사용한다. v2를 모르는 오래된 revision에 새 v2 세션이 가지 않도록 호환 가능한 revision을 먼저 배포한다.</li>
+    <li>되돌릴 때는 새 세션을 v1로 돌리되 기존 v2 dispatch는 유지한다. 마지막 v2 세션의 24시간 TTL과 진행 중 요청 종료를 확인하기 전에는 v2를 모르는 바이너리로 rollback하지 않는다.</li>
+  </ol>
+  <p>저장된 배치는 버전과 관계없이 기존 소유권·만료 확인 후 재사용한다. 미지원 버전에서 <em>새 배치</em> 계산은 기존 <code>FeedBatchConflict</code>로 명시적으로 거절하고 재탐색을 안내한다. 다른 버전으로 몰래 계산하지 않는다. 기존 v1 세션의 미생성 배치는 만료까지 이전 계산 비용이 남을 수 있다.</p>
+  <p>DB 오류·저장 실패는 가짜 성공이나 미저장 배치로 응답하지 않는다. 운영 500ms 미달 시 풀 크기나 예산을 임의 변경하지 않고, 테스트 환경의 단계별 시간으로 CPU·DB 왕복·저장·기타를 나누어 다음 설계를 결정한다.</p>
+</section>
+<section id="grilling-state">
+  <h2>8. 의사결정 기록과 남는 불확실성</h2>
+  <p>진행 상태: <strong>설계 결정 완료 — v2 기본 활성화까지 승인</strong>. 사용자가 v2를 opt-in이 아닌 기본값으로 적용하도록 명시했다. 기존 v1 세션 호환·v1 rollback 경계는 유지한다. 아래 세부안과 Luna 실행 계약이 현재 구현 기준선이다.</p>
+  <p>의존 트리: 첫 응답 목표 → 사전 생성 금지·최적성 완화 → 계산 상한/조회 모드 → 세션 호환 → 성능·품질 검증 → 활성화.</p>
+  <dl>
+    <dt>대화에서 정해진 방향</dt><dd>첫 조회를 빠르게, 사용자별 사전 생성 제외, 충분히 좋은 추천 우선, 500ms를 검증 목표로 삼음.</dd>
+    <dt>기술 권고</dt><dd>결정적 bounded search + 최소 feed/detail 분리. cache나 큰 DTO 변경보다 변경 범위가 작고 독립 검증 가능.</dd>
+    <dt>추가 결정</dt><dd>새 세션의 기본 알고리즘은 v2로 한다. `RECOMMENDATION_ALGORITHM_VERSION=issue-card-query-v1`로 신규 세션만 v1 rollback할 수 있으며, 기존 session snapshot은 변경하지 않는다.</dd>
+    <dt>검증 필요</dt><dd>10,000/24 예산으로 기존 품질 fixture 유지 가능 여부, 실제 서버 p95, 회원 이력 규모와 DB 왕복의 영향. 대화만으로 확정 불가.</dd>
+  </dl>
+  <div id="rejected-alternatives"><h3>채택하지 않은 대안</h3><p>사용자별 미리 계산은 사용자 거절. 캐시·worker 이동은 계산 자체의 상한을 해결하지 않으며 별도 상태/실패 경계를 만든다. 후보를 무조건 적게 읽으면 희소 유형·뒤쪽 대안을 잃는다. 완전 최적 순열 유지에는 지연 상한이 부족하다. 전체 DTO 재설계는 이 안 실패 시 근거를 갖고 재검토한다.</p></div>
+</section>
+<section id="verification-plan">
+  <h2>9. Luna가 입증할 것</h2>
+  <table><caption>구현 이후 검증 계약 — 현재는 실행하지 않음</caption><thead><tr><th>축</th><th>합격 기준</th></tr></thead><tbody>
+    <tr><td>계산 상한</td><td>적대 입력에서도 공유 transition ≤10,000 / proposal ≤24 / greedy 검사 ≤20B. memo hit·거절·여러 교체에도 초기화 없음. 단위 테스트는 시간 대신 횟수 검증.</td></tr>
+    <tr><td>품질·상태</td><td>기존 중복/연속/희소 quota/후보 뒤쪽 대안 fixture 유지. 앞110개 편중+뒤10개 다양(B=120)에서도 10개. 기존 복합 제약 8개 사례 회귀 확인. 작은 제약 사례 상태 유지. v1 결과는 그대로. v2 결과 ID 동일성보다 명시된 품질·불변식 확인.</td></tr>
+    <tr><td>추천 CPU</td><td>후보10/100/500, 게스트/회원, 주제·인물 편중과 교차 제약. 1CPU 환경 p95 ≤50ms를 내부 예산 목표로 측정. v1/v2 동일 fixture 비교, 단일 합성 실행으로 결론 금지.</td></tr>
+    <tr><td>DB·상세</td><td>실제 테스트 PostgreSQL에서 집계 정확성, SELECT projection, ORM identity map, 상세 결과 동일성. mock의 호출 횟수만으로 통과 처리 금지.</td></tr>
+    <tr><td>세션·경쟁</td><td>v1/v2 stamp/dispatch, 설정 변경 후 기존 세션 버전 유지, 미지원 버전 거절, 저장 winner·rollback·만료·소유권·재시도 테스트.</td></tr>
+    <tr><td>서버 전체</td><td>매번 cursor 없는 새 세션. 후보100/500, 게스트/회원·이력0/1,000/10,000, 다양한/편중 입력, 동시1/5/10을 분리. 대표 셀별 ≥200요청, p50/p95/p99·오류·카드 수·종료 상태 보고. 배포 유사 CPU/메모리·DB 지연의 테스트 환경 사용.</td></tr>
+  </tbody></table>
+  <p>서버 p95 ≤500ms를 셀별로 판단하며 전체 평균으로 실패를 숨기지 않는다. cold start와 warm 첫 세션 요청을 분리한다. 운영 용량 승인과 구분하고 운영 DB에 부하 테스트하지 않는다. 단계를 나눠 잰 p95를 합산하지 말고 전체 요청을 직접 측정한다.</p>
+  <p>성능 harness는 새로 만들 예정이며 아직 없다. 테스트 전용 메모리 측정으로 단계별 경과만 기록한다. SQL 원문·사용자 ID·토큰·본문을 새 운영 로그로 남기지 않는다. 로컬 환경에서 운영 RTT/cold start를 재현하지 못하면 미검증으로 남긴다.</p>
+  <p id="key-risk"><strong>핵심 위험:</strong> greedy의 조기 종료가 추천 품질/카드 수를 낮출 수 있음, 원인이 DB 왕복·풀·콜드 스타트라면 CPU 개선만으로 전체 목표를 못 맞춤, 과거 v1 세션 비용이 한동안 공존함.</p>
+</section>
+<section id="design-control-state">
+  <h2>10. 설계 이해 셀프 체크 · 미실시</h2>
+  <p>비차단·선택 사항이다. 아래 결과는 이 브라우저에만 표시되며 Codex에 전달되지 않는다. 구현 승인이 아니다. 답변 방식: 각 문항에서 하나를 고르고 “확인”을 누른다.</p>
+  <table><caption>범위 기반 점검 연결</caption><thead><tr><th>축</th><th>문항·이유</th></tr></thead><tbody>
+    <tr><td>목표/검증/잔여 위험</td><td>Q1: 추천 시간과 첫 HTTP 전체 시간의 차이</td></tr><tr><td>선택/불변식/실패</td><td>Q2: 탐색 한계에서 연속 제한과 종료 상태 보존</td></tr><tr><td>상태 경계/운영/복구</td><td>Q3: 혼합 세션 버전과 rollback</td></tr><tr><td>조회 경계</td><td>Q4: 카드 개수 집계와 상세 응답 분리</td></tr><tr><td>권한/외부 효과</td><td>Q5: 설계 전달은 구현·배포 승인과 다름</td></tr>
+  </tbody></table>
+  <output id="progress" aria-live="polite">5문항 · 확인 0개</output>
+  <form class="quiz" data-answer="b" data-explanation="추천 CPU는 HTTP의 일부다. 실제 새 세션 요청 전체를 재야 한다." data-next="검증 계획의 HTTP 측정 조건을 확인한다."><fieldset><legend>Q1. 추천 함수가 30ms면 첫 응답 500ms 목표를 달성했나?</legend><label><input type="radio" name="q1" value="a">달성했다</label><label><input type="radio" name="q1" value="b">DB·인증·저장 등을 포함한 전체 요청 측정이 필요하다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
+  <form class="quiz" data-answer="a" data-explanation="시간 목표 때문에 제약을 깨거나 고갈을 단정하지 않는다. 탐색이 잘렸다면 SEARCH_LIMITED다." data-next="짧은 응답 빈도와 기존 품질 fixture를 확인한다."><fieldset><legend>Q2. 예산이 끝났고 7개만 찾았다. 아직 대안은 미탐색이다.</legend><label><input type="radio" name="q2" value="a">제약을 지킨 7개와 SEARCH_LIMITED를 반환한다</label><label><input type="radio" name="q2" value="b">연속 제한을 풀어 10개를 채우거나 EXHAUSTED로 끝낸다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
+  <form class="quiz" data-answer="b" data-explanation="설정 rollback은 새 세션에만 적용된다. v2 세션이 남아 있으면 v2 실행 코드를 유지해야 한다." data-next="TTL과 진행 요청을 확인하는 배포 절차를 따른다."><fieldset><legend>Q3. v2 사용 중 문제가 생겨 신규 세션 설정을 v1로 돌렸다.</legend><label><input type="radio" name="q3" value="a">즉시 v2를 모르는 과거 바이너리로 내려도 된다</label><label><input type="radio" name="q3" value="b">기존 v2 세션은 v2로 처리하며 호환 코드를 유지한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
+  <form class="quiz" data-answer="a" data-explanation="feed는 AVAILABLE 링크만 집계한다. detail의 기사·언론사 응답은 유지한다." data-next="실제 PostgreSQL 집계 및 상세 회귀를 확인한다."><fieldset><legend>Q4. feed에서 기사 전체 로딩을 없앤다는 의미는?</legend><label><input type="radio" name="q4" value="a">개수는 동일하게 집계하고 상세 API의 기사 정보는 유지한다</label><label><input type="radio" name="q4" value="b">상세에서도 기사 정보를 제거하고 모든 링크를 개수로 센다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
+  <form class="quiz" data-answer="b" data-explanation="설계 문서와 셀프 체크는 구현 승인·운영 활성화 승인과 별개다." data-next="구현 범위와 운영 활성화 승인 범위를 별도로 기록한다."><fieldset><legend>Q5. 이 문서를 받거나 셀프 체크를 완료하면?</legend><label><input type="radio" name="q5" value="a">구현·운영 배포가 자동 승인된다</label><label><input type="radio" name="q5" value="b">설계 전달일 뿐, 구현과 배포 권한은 자동으로 생기지 않는다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
+  <div id="quiz-navigation" hidden><button id="previous" type="button">이전</button><button id="next" type="button">다음</button></div>
+  <noscript><p>JavaScript가 꺼져 있으면 모든 문항을 읽을 수 있지만 자동 결과 표시는 사용할 수 없다.</p></noscript>
+</section>
+<section id="approval-state"><h2>11. 승인·인계 상태</h2><p>현재 승인 범위: <strong>이 설계의 구현과 새 세션 v2 기본 활성화</strong>. 사용자가 v2를 기본값으로 적용하도록 명시했다. 사용자 이해 상태: 미실시(비차단). 코드 구현과 검증의 실제 상태는 별도 구현 제어 문서에 기록하며, 실제 배포 실행과 운영 p95 판정은 별도 운영 절차로 둔다.</p><p>알고리즘 상한을 늘리거나 제약·상태·호환 절차를 바꾸어야 하면 구현을 멈추고 설계를 갱신·재승인받는다. 구현 제어 문서에는 실제 diff, 검증 결과, 미검증을 별도로 기록한다.</p></section>
+</article></main>
+<footer>설계 근거: issueRecommendation.ts · issueFeed.service.ts · issueCardQuery.repository.ts · issueQuery.repository.ts · 기존 unit/fixture tests. 이 문서는 개선 완료 보고서가 아니다.</footer>
+<script>
+  const quizzes = [...document.querySelectorAll('.quiz')];
+  const done = new Set(); let current = 0;
+  const progress = document.querySelector('#progress');
+  function show() {
+    quizzes.forEach((quiz, index) => { quiz.hidden = index !== current; });
+    progress.textContent = `${current + 1} / ${quizzes.length} 문항 · 확인 ${done.size}개`;
+    document.querySelector('#previous').disabled = current === 0;
+    document.querySelector('#next').disabled = current === quizzes.length - 1;
+  }
+  quizzes.forEach((quiz, index) => {
+    quiz.addEventListener('change', () => { done.delete(index); quiz.querySelector('.result').hidden = true; show(); });
+    quiz.addEventListener('submit', event => {
+      event.preventDefault(); const selected = quiz.querySelector('input:checked');
+      const result = quiz.querySelector('.result'); result.hidden = false;
+      result.querySelector('.status').textContent = !selected ? '미실시' : selected.value === quiz.dataset.answer ? '확립' : '보류';
+      result.querySelector('.explanation').textContent = selected ? quiz.dataset.explanation : '답변을 먼저 선택하세요.';
+      result.querySelector('.next-action').textContent = selected ? quiz.dataset.next : '하나를 선택하고 확인을 누르세요.';
+      if (selected) done.add(index); show();
+    });
+  });
+  document.querySelector('#previous').addEventListener('click', () => { current--; show(); });
+  document.querySelector('#next').addEventListener('click', () => { current++; show(); });
+  document.querySelector('#quiz-navigation').hidden = false; show();
+</script>
+</body>
+</html>

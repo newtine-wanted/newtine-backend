@@ -28,6 +28,17 @@ test('in-memory feed batch save keeps the first concurrent write', async () => {
   assert.equal(stored?.items[0]?.reasonCodes[0], 'first');
 });
 
+test('인메모리 세션이 추천 알고리즘 스냅샷 버전을 보존한다', async () => {
+  const repository = new InMemoryIssueQueryRepository();
+  const session = await repository.createFeedSession(
+    { kind: 'GUEST', guestTokenHash: 'a'.repeat(64) },
+    new Date('2026-01-01T00:00:00.000Z'),
+    { algorithmVersion: 'issue-card-query-v2', candidateBudget: 100, highScoreThreshold: 0.7 },
+  );
+
+  assert.equal(session.algorithmVersion, 'issue-card-query-v2');
+});
+
 test('scoped candidates reserve a personalized slice before global ranking', async () => {
   const personalized = issue(1, {
     categoryCode: 'selected',

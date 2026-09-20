@@ -113,6 +113,8 @@ export interface GuestFeedOwner {
 export type FeedOwner = MemberFeedOwner | GuestFeedOwner;
 
 export interface FeedAlgorithmSnapshot {
+  /** Frozen on session creation; omitted by legacy callers defaults to v1. */
+  algorithmVersion?: string;
   candidateBudget: number;
   highScoreThreshold: number;
 }

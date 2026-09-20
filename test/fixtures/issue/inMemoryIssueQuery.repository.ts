@@ -14,6 +14,7 @@ import {
   type UserInteractionRecord,
   type UserRecommendationContext,
 } from '@newtine/core';
+import { ISSUE_RECOMMENDATION_ALGORITHM_VERSION } from '@newtine/api/issue/recommendation/issueRecommendation.js';
 
 export interface InMemoryIssueQuerySeed {
   issues?: readonly IssueRecord[];
@@ -60,7 +61,7 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     const session: FeedSessionRecord = {
       id: generateUuidV7(),
       owner: { ...owner },
-      algorithmVersion: 'issue-card-query-v1',
+      algorithmVersion: algorithm.algorithmVersion ?? ISSUE_RECOMMENDATION_ALGORITHM_VERSION,
       candidateBudget: algorithm.candidateBudget,
       highScoreThreshold: algorithm.highScoreThreshold,
       nextBatchNo: 0,

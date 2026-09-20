@@ -9,10 +9,17 @@ import type {
   UserRecommendationContext,
 } from '@newtine/core';
 
-export const ISSUE_RECOMMENDATION_ALGORITHM_VERSION = 'issue-card-query-v1';
+export const ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1 = 'issue-card-query-v1';
+export const ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2 = 'issue-card-query-v2';
+export const ISSUE_RECOMMENDATION_ALGORITHM_VERSION = ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2;
+export type IssueRecommendationAlgorithmVersion =
+  | typeof ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1
+  | typeof ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2;
 export const DEFAULT_HIGH_SCORE_THRESHOLD = 0.7;
 export const DEFAULT_CANDIDATE_BUDGET = 100;
 export const FEED_BATCH_SIZE = 10;
+export const MAX_V2_TRANSITIONS = 10_000;
+export const MAX_V2_REPLACEMENT_PROPOSALS = 24;
 const MAX_ALTERNATIVE_ROUNDS = 3;
 const MAX_REPLACEMENTS_PER_ALTERNATIVE = 2;
 
@@ -54,7 +61,29 @@ export interface RecommendationOutput {
   entityRun: number;
 }
 
-export function recommendFeed(input: RecommendationInput): RecommendationOutput {
+export function recommendFeed(
+  input: RecommendationInput,
+  algorithmVersion: string = ISSUE_RECOMMENDATION_ALGORITHM_VERSION,
+): RecommendationOutput {
+  if (algorithmVersion === ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2) {
+    return recommendFeedV2(input);
+  }
+  if (algorithmVersion !== ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1) {
+    throw new Error(`unsupported issue recommendation algorithm: ${algorithmVersion}`);
+  }
+  return recommendFeedV1(input);
+}
+
+export function isSupportedRecommendationAlgorithm(
+  value: string,
+): value is IssueRecommendationAlgorithmVersion {
+  return (
+    value === ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1 ||
+    value === ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2
+  );
+}
+
+function recommendFeedV1(input: RecommendationInput): RecommendationOutput {
   const threshold = input.highScoreThreshold ?? DEFAULT_HIGH_SCORE_THRESHOLD;
   const budget = input.candidateBudget ?? DEFAULT_CANDIDATE_BUDGET;
   const pool = input.issues.slice(0, Math.max(0, budget));
@@ -80,6 +109,524 @@ export function recommendFeed(input: RecommendationInput): RecommendationOutput 
     alternativeSearchLimited: orderedResult.searchLimited,
   });
   return { ...orderedResult.state, items: outputItems, continuation };
+}
+
+interface GreedyOrderResult {
+  items: SelectedCandidate[];
+  state: RunState;
+}
+
+interface V2SearchBudget {
+  transitions: number;
+  proposals: number;
+  cut: boolean;
+}
+
+function recommendFeedV2(input: RecommendationInput): RecommendationOutput {
+  const threshold = input.highScoreThreshold ?? DEFAULT_HIGH_SCORE_THRESHOLD;
+  const budget = Math.max(0, input.candidateBudget ?? DEFAULT_CANDIDATE_BUDGET);
+  const pool = input.issues.slice(0, budget);
+  const scored = pool
+    .map((issue) => scoreCandidate(issue, input, threshold))
+    .filter((candidate): candidate is RecommendationCandidate => candidate !== null);
+  const seed = selectByTarget(scored);
+  const searchBudget: V2SearchBudget = { transitions: 0, proposals: 0, cut: false };
+  const maxGreedyInspections = budget * 20;
+  const seedResult = greedyOrder(
+    seed,
+    seed,
+    input.previousSession,
+    searchBudget,
+    maxGreedyInspections,
+  );
+  const fullResult = greedyOrder(
+    scored,
+    seed,
+    input.previousSession,
+    searchBudget,
+    maxGreedyInspections,
+  );
+  let best = isBetterOrder(fullResult, seedResult) ? fullResult : seedResult;
+  const fullPoolProof =
+    !searchBudget.cut &&
+    best.items.length < FEED_BATCH_SIZE &&
+    input.issues.length <= budget &&
+    scored.length <= FEED_BATCH_SIZE
+      ? proveFullPoolMaxLength(scored, input.previousSession, searchBudget)
+      : undefined;
+  if (fullPoolProof !== undefined && best.items.length < fullPoolProof.maxLength) {
+    const provenOrder = materializeProvenOrder(
+      scored,
+      seed,
+      fullPoolProof.signatureOrder,
+      input.previousSession,
+    );
+    if (isBetterOrder(provenOrder, best)) best = provenOrder;
+  }
+
+  if (
+    seedResult.items.length < FEED_BATCH_SIZE &&
+    fullResult.items.length < FEED_BATCH_SIZE &&
+    !searchBudget.cut
+  ) {
+    const alternatives = boundedAlternatives(best, scored, input.previousSession, searchBudget);
+    if (isBetterOrder(alternatives, best)) best = alternatives;
+  }
+
+  const outputItems = best.items.slice(0, FEED_BATCH_SIZE).map((candidate, index) => ({
+    issueId: candidate.issue.id,
+    position: index + 1,
+    selectionType: candidate.selectedType,
+    reasonCodes: candidate.reasonCodes,
+  }));
+  const continuation = resolveV2Continuation({
+    inputCandidateCount: input.issues.length,
+    budget,
+    scoredCandidateCount: scored.length,
+    scored,
+    ordered: best.items,
+    previous: input.previousSession,
+    searchLimited: searchBudget.cut,
+    fullPoolMaxLength: fullPoolProof?.maxLength,
+  });
+  return {
+    items: outputItems,
+    continuation,
+    ...best.state,
+  };
+}
+
+function greedyOrder(
+  candidates: RecommendationCandidate[],
+  seed: SelectedCandidate[],
+  previous: RecommendationInput['previousSession'],
+  budget: V2SearchBudget,
+  maxInspections: number,
+): GreedyOrderResult {
+  const priority = new Map(SELECTION_TARGETS.map(([type], index) => [type, index]));
+  const seedById = new Map(seed.map((candidate) => [candidate.issue.id, candidate]));
+  const sortedCandidates = candidates.slice().sort(compareCandidate);
+  const chosen: SelectedCandidate[] = [];
+  const chosenIds = new Set<string>();
+  const quotaCounts = new Map<IssueSelectionType, number>();
+  let state: RunState = { ...previous };
+
+  while (chosen.length < FEED_BATCH_SIZE) {
+    let next: SelectedCandidate | undefined;
+    let nextPriority: CandidatePriority | undefined;
+    for (const candidate of sortedCandidates) {
+      if (chosenIds.has(candidate.issue.id)) continue;
+      if (budget.transitions + 1 > maxInspections) {
+        budget.cut = true;
+        break;
+      }
+      budget.transitions += 1;
+      if (!canAppend(candidate.issue, state)) continue;
+      const selectedType =
+        seedById.get(candidate.issue.id)?.selectedType ??
+        selectGreedyType(candidate, quotaCounts, priority);
+      if (selectedType === undefined) continue;
+      const candidatePriority = {
+        seed: seedById.has(candidate.issue.id) ? 0 : 1,
+        quota: isQuotaAvailable(selectedType, quotaCounts) ? 0 : 1,
+      };
+      if (
+        next === undefined ||
+        compareCandidatePriority(candidatePriority, nextPriority!) < 0 ||
+        (compareCandidatePriority(candidatePriority, nextPriority!) === 0 &&
+          compareCandidate(candidate, next) < 0)
+      ) {
+        next = { ...candidate, selectedType };
+        nextPriority = candidatePriority;
+      }
+    }
+    if (next === undefined) break;
+    chosen.push(next);
+    chosenIds.add(next.issue.id);
+    incrementQuota(next.selectedType, quotaCounts);
+    state = advanceRunState(next.issue, state);
+  }
+  return { items: chosen, state };
+}
+
+interface CandidatePriority {
+  seed: number;
+  quota: number;
+}
+
+function compareCandidatePriority(left: CandidatePriority, right: CandidatePriority): number {
+  return left.seed - right.seed || left.quota - right.quota;
+}
+
+function selectGreedyType(
+  candidate: RecommendationCandidate,
+  quotaCounts: ReadonlyMap<IssueSelectionType, number>,
+  priority: ReadonlyMap<IssueSelectionType, number>,
+): IssueSelectionType | undefined {
+  return candidate.eligibleTypes
+    .slice()
+    .sort(
+      (left, right) =>
+        Number(!isQuotaAvailable(left, quotaCounts)) -
+          Number(!isQuotaAvailable(right, quotaCounts)) ||
+        (priority.get(left) ?? 99) - (priority.get(right) ?? 99),
+    )[0];
+}
+
+function isQuotaAvailable(
+  type: IssueSelectionType,
+  quotaCounts: ReadonlyMap<IssueSelectionType, number>,
+): boolean {
+  const quota = SELECTION_TARGETS.find(([target]) => target === type)?.[1] ?? 0;
+  return (quotaCounts.get(type) ?? 0) < quota;
+}
+
+function incrementQuota(
+  type: IssueSelectionType,
+  quotaCounts: Map<IssueSelectionType, number>,
+): void {
+  quotaCounts.set(type, (quotaCounts.get(type) ?? 0) + 1);
+}
+
+function boundedAlternatives(
+  initial: GreedyOrderResult,
+  candidates: RecommendationCandidate[],
+  previous: RecommendationInput['previousSession'],
+  budget: V2SearchBudget,
+): GreedyOrderResult {
+  let best = initial;
+  const alternatives = candidates.sort(compareCandidate);
+  for (const alternative of alternatives) {
+    if (best.items.some((candidate) => candidate.issue.id === alternative.issue.id)) continue;
+    if (budget.proposals >= MAX_V2_REPLACEMENT_PROPOSALS) {
+      budget.cut = true;
+      break;
+    }
+    budget.proposals += 1;
+    const quotaCounts = new Map<IssueSelectionType, number>();
+    for (const candidate of best.items) incrementQuota(candidate.selectedType, quotaCounts);
+    const selectedType = selectGreedyType(
+      alternative,
+      quotaCounts,
+      new Map(SELECTION_TARGETS.map(([type], index) => [type, index])),
+    );
+    if (selectedType === undefined) continue;
+    const proposalCandidates = [...best.items, { ...alternative, selectedType }].slice(
+      0,
+      FEED_BATCH_SIZE,
+    );
+    const ordered = boundedOrder(proposalCandidates, previous, budget);
+    if (isBetterOrder(ordered, best)) {
+      best = ordered;
+      if (best.items.length >= FEED_BATCH_SIZE) break;
+    }
+  }
+  return best;
+}
+
+function boundedOrder(
+  candidates: SelectedCandidate[],
+  previous: RecommendationInput['previousSession'],
+  budget: V2SearchBudget,
+): GreedyOrderResult {
+  const state: SearchState = {
+    lastTopic: previous.lastTopic,
+    lastRepresentativeEntityId: previous.lastRepresentativeEntityId,
+    topicRun: previous.topicRun,
+    entityRun: previous.entityRun,
+    quotaCounts: SELECTION_TARGETS.map(() => 0),
+  };
+  const result = boundedSearchOrder(
+    candidates,
+    (1 << candidates.length) - 1,
+    state,
+    new Map(),
+    budget,
+  );
+  return { items: result.items, state: stripSearchState(result.state) };
+}
+
+function proveFullPoolMaxLength(
+  candidates: RecommendationCandidate[],
+  previous: RecommendationInput['previousSession'],
+  budget: V2SearchBudget,
+): FullPoolProof | undefined {
+  const state: RunState = { ...previous };
+  const buckets = [...groupRunSignatures(candidates).values()];
+  const memo = new Map<string, number>();
+  const maxLength = maximumCompressedRunLength(buckets, state, memo, budget);
+  if (budget.cut) return undefined;
+  return {
+    maxLength,
+    signatureOrder: reconstructMaximumRunOrder(buckets, state, memo, maxLength),
+  };
+}
+
+interface FullPoolProof {
+  maxLength: number;
+  signatureOrder: RunSignature[];
+}
+
+interface RunSignature {
+  mainTopic: string | null;
+  representativeEntityId: string | null;
+}
+
+interface RunSignatureBucket {
+  signature: RunSignature;
+  remaining: number;
+}
+
+function groupRunSignatures(
+  candidates: RecommendationCandidate[],
+): Map<string, RunSignatureBucket> {
+  const buckets = new Map<string, RunSignatureBucket>();
+  for (const candidate of candidates) {
+    const signature = {
+      mainTopic: candidate.issue.mainTopic,
+      representativeEntityId: candidate.issue.representativeEntityId,
+    };
+    const key = runSignatureKey(signature);
+    const bucket = buckets.get(key);
+    if (bucket === undefined) buckets.set(key, { signature, remaining: 1 });
+    else bucket.remaining += 1;
+  }
+  return buckets;
+}
+
+function maximumCompressedRunLength(
+  buckets: RunSignatureBucket[],
+  state: RunState,
+  memo: Map<string, number>,
+  budget: V2SearchBudget,
+): number {
+  if (buckets.every((bucket) => bucket.remaining === 0)) {
+    return 0;
+  }
+  if (budget.transitions >= MAX_V2_TRANSITIONS) {
+    budget.cut = true;
+    return 0;
+  }
+  const key = compressedRunStateKey(buckets, state);
+  const cached = memo.get(key);
+  if (cached !== undefined) return cached;
+  let best = 0;
+  for (let index = 0; index < buckets.length; index += 1) {
+    const bucket = buckets[index];
+    if (bucket === undefined || bucket.remaining === 0) continue;
+    budget.transitions += 1;
+    if (budget.transitions > MAX_V2_TRANSITIONS) {
+      budget.cut = true;
+      break;
+    }
+    if (!canAppendSignature(bucket.signature, state)) continue;
+    bucket.remaining -= 1;
+    best = Math.max(
+      best,
+      1 +
+        maximumCompressedRunLength(
+          buckets,
+          advanceRunStateSignature(bucket.signature, state),
+          memo,
+          budget,
+        ),
+    );
+    bucket.remaining += 1;
+    if (
+      best ===
+      Math.min(
+        FEED_BATCH_SIZE,
+        buckets.reduce((sum, item) => sum + item.remaining, 0),
+      )
+    )
+      break;
+    if (budget.cut) break;
+  }
+  if (!budget.cut) memo.set(key, best);
+  return best;
+}
+
+function reconstructMaximumRunOrder(
+  buckets: RunSignatureBucket[],
+  state: RunState,
+  memo: ReadonlyMap<string, number>,
+  maxLength: number,
+): RunSignature[] {
+  const order: RunSignature[] = [];
+  let remainingLength = maxLength;
+  let currentState = state;
+  while (remainingLength > 0) {
+    const currentKey = compressedRunStateKey(buckets, currentState);
+    const expectedLength = memo.get(currentKey);
+    if (expectedLength !== remainingLength) return [];
+    let selected = false;
+    for (const bucket of buckets) {
+      if (bucket.remaining === 0 || !canAppendSignature(bucket.signature, currentState)) {
+        continue;
+      }
+      bucket.remaining -= 1;
+      const nextState = advanceRunStateSignature(bucket.signature, currentState);
+      const suffixLength = buckets.every((candidate) => candidate.remaining === 0)
+        ? 0
+        : memo.get(compressedRunStateKey(buckets, nextState));
+      if (suffixLength === remainingLength - 1) {
+        order.push(bucket.signature);
+        currentState = nextState;
+        remainingLength = suffixLength;
+        selected = true;
+        break;
+      }
+      bucket.remaining += 1;
+    }
+    if (!selected) return [];
+  }
+  return order;
+}
+
+function compressedRunStateKey(buckets: readonly RunSignatureBucket[], state: RunState): string {
+  return `${buckets.map((bucket) => bucket.remaining).join(',')}:${state.lastTopic}:${state.lastRepresentativeEntityId}:${state.topicRun}:${state.entityRun}`;
+}
+
+function runSignatureKey(signature: RunSignature): string {
+  return JSON.stringify([signature.mainTopic, signature.representativeEntityId]);
+}
+
+function materializeProvenOrder(
+  candidates: RecommendationCandidate[],
+  seed: SelectedCandidate[],
+  signatureOrder: readonly RunSignature[],
+  previous: RecommendationInput['previousSession'],
+): GreedyOrderResult {
+  const priority = new Map(SELECTION_TARGETS.map(([type], index) => [type, index]));
+  const seedById = new Map(seed.map((candidate) => [candidate.issue.id, candidate]));
+  const bySignature = new Map<string, RecommendationCandidate[]>();
+  for (const candidate of candidates) {
+    const key = runSignatureKey({
+      mainTopic: candidate.issue.mainTopic,
+      representativeEntityId: candidate.issue.representativeEntityId,
+    });
+    const grouped = bySignature.get(key) ?? [];
+    grouped.push(candidate);
+    bySignature.set(key, grouped);
+  }
+  for (const grouped of bySignature.values()) grouped.sort(compareCandidate);
+
+  const items: SelectedCandidate[] = [];
+  const quotaCounts = new Map<IssueSelectionType, number>();
+  let state: RunState = { ...previous };
+  for (const signature of signatureOrder) {
+    const grouped = bySignature.get(runSignatureKey(signature));
+    const candidate = grouped?.shift();
+    if (candidate === undefined || !canAppend(candidate.issue, state)) {
+      return { items: [], state };
+    }
+    const selectedType =
+      seedById.get(candidate.issue.id)?.selectedType ??
+      selectGreedyType(candidate, quotaCounts, priority);
+    if (selectedType === undefined) return { items: [], state };
+    const selected = { ...candidate, selectedType };
+    items.push(selected);
+    incrementQuota(selectedType, quotaCounts);
+    state = advanceRunState(selected.issue, state);
+  }
+  return { items, state };
+}
+
+function boundedSearchOrder(
+  candidates: SelectedCandidate[],
+  remainingMask: number,
+  state: SearchState,
+  memo: Map<string, SearchResult>,
+  budget: V2SearchBudget,
+): SearchResult {
+  if (remainingMask === 0 || budget.transitions >= MAX_V2_TRANSITIONS) {
+    if (remainingMask !== 0) budget.cut = true;
+    return { items: [], state };
+  }
+  const key = `${remainingMask}:${JSON.stringify(state)}`;
+  const cached = memo.get(key);
+  if (cached !== undefined) return cached;
+  let best: SearchResult = { items: [], state };
+  for (let index = 0; index < candidates.length; index += 1) {
+    const bit = 1 << index;
+    if ((remainingMask & bit) === 0) continue;
+    budget.transitions += 1;
+    if (budget.transitions > MAX_V2_TRANSITIONS) {
+      budget.cut = true;
+      break;
+    }
+    const candidate = candidates[index];
+    if (candidate === undefined || !canAppend(candidate.issue, state)) continue;
+    const suffix = boundedSearchOrder(
+      candidates,
+      remainingMask ^ bit,
+      advanceSearchState(candidate, state),
+      memo,
+      budget,
+    );
+    const proposal = { items: [candidate, ...suffix.items], state: suffix.state };
+    if (isBetterSearchResult(proposal, best)) best = proposal;
+    if (budget.cut) break;
+  }
+  if (!budget.cut) memo.set(key, best);
+  return best;
+}
+
+function resolveV2Continuation(input: {
+  inputCandidateCount: number;
+  budget: number;
+  scoredCandidateCount: number;
+  scored: RecommendationCandidate[];
+  ordered: SelectedCandidate[];
+  previous: RecommendationInput['previousSession'];
+  searchLimited: boolean;
+  fullPoolMaxLength: number | undefined;
+}): FeedContinuation {
+  if (input.ordered.length >= FEED_BATCH_SIZE) return 'CONTINUE';
+  if (input.inputCandidateCount > input.budget) return 'SEARCH_LIMITED';
+  if (input.scoredCandidateCount === 0) return 'EXHAUSTED';
+  if (input.ordered.length === input.scoredCandidateCount) return 'EXHAUSTED';
+  if (input.fullPoolMaxLength !== undefined && input.ordered.length >= input.fullPoolMaxLength) {
+    return 'CONSTRAINT_LIMITED';
+  }
+  if (isProvablyConstraintLimited(input)) return 'CONSTRAINT_LIMITED';
+  if (input.searchLimited) return 'SEARCH_LIMITED';
+  return 'SEARCH_LIMITED';
+}
+
+function isProvablyConstraintLimited(input: {
+  scoredCandidateCount: number;
+  scored: RecommendationCandidate[];
+  ordered: SelectedCandidate[];
+  previous: RecommendationInput['previousSession'];
+}): boolean {
+  if (input.scoredCandidateCount === 0) return false;
+  const topics = input.scored.map((candidate) => candidate.issue.mainTopic);
+  const entities = input.scored.map((candidate) => candidate.issue.representativeEntityId);
+  const sameTopic = topics[0] !== null && topics.every((topic) => topic === topics[0]);
+  const sameEntity = entities[0] !== null && entities.every((entity) => entity === entities[0]);
+  const topicLimit = sameTopic
+    ? Math.max(
+        0,
+        2 - (input.previous.lastTopic === topics[0] ? Math.max(0, input.previous.topicRun) : 0),
+      )
+    : Number.POSITIVE_INFINITY;
+  const entityLimit = sameEntity
+    ? Math.max(
+        0,
+        2 -
+          (input.previous.lastRepresentativeEntityId === entities[0]
+            ? Math.max(0, input.previous.entityRun)
+            : 0),
+      )
+    : Number.POSITIVE_INFINITY;
+  const provenLimit = Math.min(
+    FEED_BATCH_SIZE,
+    input.scoredCandidateCount,
+    topicLimit,
+    entityLimit,
+  );
+  return Number.isFinite(provenLimit) && input.ordered.length >= provenLimit;
 }
 
 interface SelectedCandidate extends RecommendationCandidate {
@@ -522,28 +1069,48 @@ function stripSearchState(state: SearchState): RunState {
 }
 
 function canAppend(issue: IssueRecord, state: RunState): boolean {
-  const sameTopic = issue.mainTopic !== null && issue.mainTopic === state.lastTopic;
+  return canAppendSignature(
+    {
+      mainTopic: issue.mainTopic,
+      representativeEntityId: issue.representativeEntityId,
+    },
+    state,
+  );
+}
+
+function canAppendSignature(signature: RunSignature, state: RunState): boolean {
+  const sameTopic = signature.mainTopic !== null && signature.mainTopic === state.lastTopic;
   const sameEntity =
-    issue.representativeEntityId !== null &&
-    issue.representativeEntityId === state.lastRepresentativeEntityId;
+    signature.representativeEntityId !== null &&
+    signature.representativeEntityId === state.lastRepresentativeEntityId;
   return !(sameTopic && state.topicRun >= 2) && !(sameEntity && state.entityRun >= 2);
 }
 
 function advanceRunState(issue: IssueRecord, previous: RunState): RunState {
+  return advanceRunStateSignature(
+    {
+      mainTopic: issue.mainTopic,
+      representativeEntityId: issue.representativeEntityId,
+    },
+    previous,
+  );
+}
+
+function advanceRunStateSignature(signature: RunSignature, previous: RunState): RunState {
   return {
-    lastTopic: issue.mainTopic,
-    lastRepresentativeEntityId: issue.representativeEntityId,
+    lastTopic: signature.mainTopic,
+    lastRepresentativeEntityId: signature.representativeEntityId,
     topicRun:
-      issue.mainTopic !== null && issue.mainTopic === previous.lastTopic
+      signature.mainTopic !== null && signature.mainTopic === previous.lastTopic
         ? previous.topicRun + 1
-        : issue.mainTopic === null
+        : signature.mainTopic === null
           ? 0
           : 1,
     entityRun:
-      issue.representativeEntityId !== null &&
-      issue.representativeEntityId === previous.lastRepresentativeEntityId
+      signature.representativeEntityId !== null &&
+      signature.representativeEntityId === previous.lastRepresentativeEntityId
         ? previous.entityRun + 1
-        : issue.representativeEntityId === null
+        : signature.representativeEntityId === null
           ? 0
           : 1,
   };

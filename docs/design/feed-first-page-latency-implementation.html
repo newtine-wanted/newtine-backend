@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>첫 피드 조회 지연 개선 구현 제어</title>
+<style>
+  :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #17202a; background: #f5f7fa; }
+  body { margin: 0; }
+  header, nav, main, footer { max-width: 1120px; margin: auto; padding: 1.2rem 1.5rem; }
+  header { padding-top: 2rem; }
+  nav { background: #e8eef5; border-radius: .6rem; }
+  nav a { margin-right: 1rem; color: #164e7a; }
+  article { background: white; border: 1px solid #d8e0e8; border-radius: .8rem; padding: 1.5rem; box-shadow: 0 2px 12px #17202a12; }
+  section { margin: 2rem 0; }
+  h1, h2, h3 { line-height: 1.25; }
+  h1 { margin-bottom: .4rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  th, td { border: 1px solid #d8e0e8; padding: .6rem; text-align: left; vertical-align: top; }
+  th { background: #edf3f8; }
+  code, samp, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { background: #eef2f5; padding: .08rem .25rem; border-radius: .2rem; }
+  pre { overflow: auto; background: #17202a; color: #edf3f8; padding: 1rem; border-radius: .5rem; }
+  aside { border-left: 4px solid #d97706; background: #fff7e6; padding: .8rem 1rem; }
+  .ok { color: #166534; font-weight: 700; }
+  .warn { color: #9a3412; font-weight: 700; }
+  .state { display: inline-block; padding: .2rem .55rem; border-radius: 1rem; background: #dcfce7; color: #166534; font-weight: 700; }
+  .quiz { border: 1px solid #d8e0e8; border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
+  .quiz[hidden] { display: none; }
+  .quiz label { display: block; margin: .35rem 0; }
+  .result { margin-top: .8rem; padding: .7rem; background: #f0fdf4; border-radius: .4rem; }
+  .result[hidden] { display: none; }
+  button { margin: .4rem .3rem .1rem 0; padding: .45rem .8rem; border: 1px solid #9aaabd; border-radius: .35rem; background: white; cursor: pointer; }
+  footer { color: #52606d; font-size: .9rem; }
+</style>
+</head>
+<body>
+<header>
+  <p><span class="state">검토 완료 · 비차단 검증 위험</span></p>
+  <h1>첫 피드 조회 지연 개선 구현 제어</h1>
+  <p>사용자별 사전 생성 없이 <code>/api/feed</code> 첫 조회의 계산·조회 비용을 bounded recommendation과 feed/detail projection 분리로 낮추는 구현 기록.</p>
+  <dl>
+    <dt>목적 지문</dt><dd>목적: 첫 피드 페이지 응답 개선 / 사용자: API·콘텐츠 파이프라인 개발자 / 문제: 첫 조회의 추천 계산과 불필요한 기사 hydrate / 핵심 흐름: 세션 snapshot → 후보 ID 조회 → feed projection → bounded 추천 → batch 저장·재사용</dd>
+    <dt>리뷰 유형</dt><dd>자기 변경 리뷰; 구현자 Codex, 독립 critical reviewer Sol xhigh</dd>
+    <dt>기준점</dt><dd><code>092eec8</code> · 브랜치 <code>codex/feed-first-page-latency</code> · 워크트리 <code>/Users/hyunseok/.codex/worktrees/feed-first-page-latency/newtine-backend</code></dd>
+    <dt>범위</dt><dd>추천 v2 기본값, 세션 버전 snapshot/dispatch, feed/detail 조회 경량화, 관련 회귀 테스트. 실제 배포 실행과 운영 p95 판정은 제외.</dd>
+  </dl>
+</header>
+<nav aria-label="문서 목차">
+  <a href="#baseline">기준과 결과</a>
+  <a href="#flow">실행 흐름</a>
+  <a href="#implementation">구현</a>
+  <a href="#issues">이슈</a>
+  <a href="#verification">검증</a>
+  <a href="#review">리뷰</a>
+  <a href="#control">구현 이해 점검</a>
+</nav>
+<main>
+<article>
+<section id="baseline">
+  <h2>1. 승인된 설계와 실제 결과</h2>
+  <p>설계 기준은 <a href="feed-first-page-latency-design.html">첫 피드 조회 지연 개선 설계</a>와 실행 계약이다. 구현 중 새 API·DB schema·lock·pool·운영 로그 정책을 추가하지 않았다.</p>
+  <table><caption>설계 기준 대비 as-built</caption><thead><tr><th>항목</th><th>승인 기준</th><th>구현 결과</th></tr></thead><tbody>
+    <tr><td>기존 동작</td><td>v1 결과와 세션 snapshot 보존</td><td><span class="ok">충족</span> 기본 env는 v2, 저장된 session.algorithmVersion으로 dispatch; 기존 v1 세션은 v1 유지</td></tr>
+    <tr><td>계산 상한</td><td>공유 transition 10,000 / proposal 24 / greedy 검사 20B</td><td><span class="ok">코드·경계 테스트 충족</span> cut은 정직한 상태로 전달; 증명된 full/same-topic 결과는 cut보다 우선</td></tr>
+    <tr><td>조회 경량화</td><td>feed에서 기사·언론사 hydrate 제거, AVAILABLE count 집계</td><td><span class="ok">구현</span> ORM query-builder JOIN/GROUP BY, detail 기사 응답은 유지</td></tr>
+    <tr><td>HTTP p95</td><td>≤500ms는 검증 목표</td><td><span class="warn">미측정</span> 기능·CPU 상한 통과가 p95 달성을 의미하지 않음</td></tr>
+  </tbody></table>
+  <aside><strong>운영 판정:</strong> 새 세션 v2 기본값은 승인된 구현 범위다. 실제 배포와 첫 HTTP p95·full smoke 달성 판정은 아직 남아 있으며, rollback은 신규 세션 설정을 v1로 되돌리는 방식이다.</aside>
+</section>
+
+<section id="flow">
+  <h2>2. 실제 실행 흐름과 상태 경계</h2>
+  <figure>
+    <figcaption>새 batch와 이미 저장된 batch의 분기. 텍스트 등가를 함께 둔다.</figcaption>
+    <pre><code>createSession
+  └─ env version → feed_sessions.algorithm_version snapshot
+getBatch
+  ├─ session/owner/expiry 확인
+  ├─ stored batch 존재 → 즉시 재사용 (algorithm dispatch보다 앞섬)
+  └─ 미생성 batch
+       ├─ stored version 검증
+       ├─ interaction/context/connection 조회
+       ├─ candidate ID projection (B + 1 sentinel)
+       ├─ feed projection: issue/detail/impact/entity + grouped AVAILABLE count
+       ├─ v1 또는 v2 추천
+       ├─ 짧은 transaction에서 winner 저장
+       └─ committed batch 재조회 후 응답</code></pre>
+  </figure>
+  <p>candidate query는 ID만 읽어 identity map에 부분 issue entity를 남기지 않는다. feed mode는 카드에 필요한 summary·impact·entity를 유지하지만 기사 링크·article·publisher entity는 hydrate하지 않고 개수를 별도 집계한다. detail mode의 기사 순서와 publisher fallback은 기존 경로를 유지한다.</p>
+</section>
+
+<section id="implementation">
+  <h2>3. As-built 변경</h2>
+  <table><caption>변경 경계와 보존 조건</caption><thead><tr><th>경로</th><th>변경</th><th>보존·불변식</th></tr></thead><tbody>
+    <tr><th><code>issueRecommendation.ts</code></th><td>v1 분리, v2 seed/full greedy, shared bounded search, signature proof와 witness materialization, continuation 분류</td><td>최대 10, 중복 없음, 이전 run·null semantics·eligible type·determinism</td></tr>
+    <tr><th><code>issueFeed.service.ts</code></th><td>환경값은 새 session 생성 시 snapshot, 이후 stored version으로 dispatch</td><td>저장 batch fast path, transaction/save 경쟁 winner, API 응답 형태</td></tr>
+    <tr><th><code>issueCardQuery.repository.ts</code></th><td>feed/detail load mode, ID projection, grouped AVAILABLE article count와 malformed projection 오류 처리</td><td>public filter, sentinel, detail article ordering, publisher fallback, 회원/게스트 경계</td></tr>
+    <tr><th>fixtures/tests</th><td>v2 snapshot·상한·sentinel·proof·same-topic 경계와 in-memory snapshot 회귀 추가</td><td>기존 v1 테스트 및 기존 API 계약</td></tr>
+  </tbody></table>
+  <h3>설계 delta</h3>
+  <p>사용자 결정으로 초기 승인 기준의 “v2 opt-in·기본 v1”을 “새 세션 기본 v2”로 변경했다. 기존 v1 session snapshot과 신규 v1 rollback은 유지한다. 리뷰에서 발견된 witness materialization과 continuation 판정 순서 수정은 승인된 “전체 pool 증명·정직한 종료 상태”를 완성하기 위한 구현 보정이다. schema migration, API contract, lock 범위, pool/infra 설정은 변경하지 않았다.</p>
+</section>
+
+<section id="issues">
+  <h2>4. 이슈 register</h2>
+  <table><caption>구현·독립 리뷰 finding의 상태</caption><thead><tr><th>ID / 상태</th><th>증상·원인</th><th>조치·증거</th><th>잔여 위험</th></tr></thead><tbody>
+    <tr><th>CR-01 · 해결됨</th><td>혼합 10개가 가능한데 v2 bounded cut 뒤 9개/SEARCH_LIMITED</td><td>signature memo에서 proven order를 materialize; 10장/CONTINUE 회귀 테스트. 독립 리뷰 재현 통과.</td><td>새로운 제약 축 추가 시 proof 모델을 다시 검토해야 함</td></tr>
+    <tr><th>CR-02 · 해결됨</th><td>예산 밖 11번째만 적격인데 scored=0 분기 때문에 EXHAUSTED</td><td>candidate sentinel을 scored-empty보다 먼저 판정; 10+1 테스트가 SEARCH_LIMITED 확인.</td><td>repository가 B+1 sentinel을 계속 제공해야 함</td></tr>
+    <tr><th>CR-03 · 해결됨</th><td>27개 same-topic에서 proposal cut이 증명된 2개 CONSTRAINT_LIMITED를 SEARCH_LIMITED로 덮음</td><td>same-topic/entity proof를 search cut보다 먼저 판정; 27-card 경계 테스트와 독립 재현 통과.</td><td>다른 제약에 대한 완전 증명은 별도 규칙이 필요</td></tr>
+    <tr><th>N-01 · 열림 · 비차단</th><td>단위 fake manager가 production <code>execute/limit/getConnection</code> 경로를 타지 않음</td><td>실제 ORM SQL을 disposable loopback DB에서 SELECT로 생성·실행하고 invalid row guard를 확인했지만, 자동 PG 회귀는 아직 없음.</td><td>projection key·feed/detail count·identity map 재발 방지를 자동화할 필요</td></tr>
+    <tr><th>OBS-01 · 미검증</th><td>첫 HTTP p95 ≤500ms와 Cloud Run cold/warm·DB RTT 영향</td><td>추천 CPU 단위 테스트와 전체 HTTP 측정은 별도. 검증용 API가 startup에서 포트를 열지 않아 smoke 중단.</td><td>기능 통과만으로 사용자 체감 개선을 주장할 수 없음</td></tr>
+  </tbody></table>
+</section>
+
+<section id="verification">
+  <h2>5. 검증 증거와 공백</h2>
+  <table><caption>실행 명령과 결과</caption><thead><tr><th>명령/방법</th><th>결과</th><th>의미·한계</th></tr></thead><tbody>
+    <tr><td><code>npm test</code></td><td class="ok">unit 55 suites / 343 tests, integration 2 passed·3 skipped</td><td>기능 회귀 통과; 실제 HTTP/PG 전체 경로의 대체는 아님</td></tr>
+    <tr><td>focused recommendation/repository suites</td><td class="ok">독립 리뷰에서 4 suites / 39 tests 통과</td><td>v2 경계·세션·fixture 확인; production query-builder는 fake fallback 공백이 있음</td></tr>
+    <tr><td><code>tsc --noEmit --incremental false</code>, <code>npm run lint</code>, <code>npm run format:check</code></td><td class="ok">통과</td><td>정적·스타일 게이트</td></tr>
+    <tr><td><code>npm run build</code></td><td class="ok">API·batch ttsc 통과</td><td>최종 blocker 수정 후 재실행</td></tr>
+    <tr><td><code>npm run contracts:check</code></td><td class="ok">SDK/E2E/Swagger, contract 6 tests, generated typecheck 통과</td><td>내부 추천 코드 최종 continuation 보정 전 실행; API 계약 변경 파일은 없음. generator 순서 diff는 기준 상태로 복원.</td></tr>
+    <tr><td>loopback disposable DB ORM query-builder</td><td class="ok">JOIN/GROUP BY SQL 생성·SELECT 실행, alias <code>issueId/articleCount</code>, empty result 확인</td><td>실제 SQL shape 증거; 전체 feed/detail seed·identity-map 회귀는 미실행</td></tr>
+    <tr><td>HTTP smoke</td><td class="warn">미실행</td><td>API startup이 40초 이상 포트를 열지 않아 중단; 운영 p95 미측정</td></tr>
+  </tbody></table>
+  <p><code>git diff --check</code>도 통과했다. 검증 과정에서 생성된 기능 무관한 generated 순서 변경은 기준 커밋 상태로 복원했으며, 현재 worktree에는 구현·설계·테스트 문서 변경만 남아 있다.</p>
+</section>
+
+<section id="review">
+  <h2>6. 독립 리뷰 결과</h2>
+  <p>Sol xhigh critical reviewer를 구현 전후 세 차례 사용했다. 첫 두 차례의 blocker(CR-01~03)는 각각 재현 테스트와 구현 보정 후 해결됐다. 최종 리뷰는 “차단할 코드 결함 없음, 비차단 검증 위험만 있음”으로 판단했다.</p>
+  <dl>
+    <dt>최종 판단</dt><dd><strong>concrete blocker 없음 · non-blocking verification risk만 있음</strong></dd>
+    <dt>확인한 경계</dt><dd>mixed 10→10/CONTINUE, budget sentinel→SEARCH_LIMITED, same-topic 27→2/CONSTRAINT_LIMITED, null·previous run·B=10/100/500, transition 최대 관측 5,010, proposal 최대 24.</dd>
+    <dt>리뷰 한계</dt><dd>첫 HTTP p95와 full HTTP smoke, 자동 PG feed/detail/identity-map 회귀는 미검증.</dd>
+  </dl>
+</section>
+
+<section id="residual">
+  <h2>7. 잔여 운영 위험과 다음 행동</h2>
+  <ol>
+    <li>배포 전 disposable PostgreSQL에서 candidate projection → feed/detail count equivalence → same EntityManager detail reload를 자동 smoke로 추가한다.</li>
+    <li>v2 기본값으로 배포하기 전과 직후에 새 세션 기준 cold/warm, 회원/게스트, 이력 규모, 동시성별 첫 HTTP p50/p95/p99를 직접 측정한다. 500ms 목표 미달이면 이 구현을 성공으로 포장하지 않는다.</li>
+    <li>v2 세션 TTL 동안 v2 코드를 유지하고, 운영 rollback은 신규 생성 버전만 v1로 바꾼다. 실제 설정·배포는 별도 승인이다.</li>
+  </ol>
+  <aside><strong>현재 작업 상태:</strong> 구현은 기능별 커밋으로 PR #19에 push되어 있고 deploy하지 않았다. 기본 환경값은 v2이며, 명시적으로 v1을 설정하면 신규 세션만 v1으로 rollback할 수 있다.</aside>
+</section>
+
+<section id="control">
+  <h2>8. 구현 이해 점검 · 미실시(비차단)</h2>
+  <p>아래는 as-built 동작을 예측하는 로컬 셀프 체크다. 결과는 브라우저 안에만 남고 Codex로 전달되지 않는다. 이 문서가 구현 승인·운영 승인·개발자 이해 확립을 대신하지 않는다.</p>
+  <output id="progress" aria-live="polite">1 / 5 문항 · 확인 0개</output>
+  <form class="quiz" data-answer="b" data-explanation="저장된 batch는 version dispatch보다 먼저 재사용된다. 미생성 batch만 session snapshot version으로 계산한다." data-next="stored batch와 new batch를 분리해 확인한다.">
+    <fieldset><legend>Q1. v2 설정 중 이미 저장된 batch를 다시 요청하면?</legend><label><input type="radio" name="q1" value="a">현재 env의 v2로 다시 계산한다</label><label><input type="radio" name="q1" value="b">저장된 batch를 소유권·만료 확인 후 그대로 재사용한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div>
+  </form>
+  <form class="quiz" data-answer="a" data-explanation="candidateBudget을 넘는 입력은 보지 못한 후보가 있으므로 짧은 결과를 고갈로 단정하지 않는다." data-next="sentinel과 continuation 저장을 함께 확인한다.">
+    <fieldset><legend>Q2. 10개 예산에 11번째 후보가 있으면 scored가 0이어도?</legend><label><input type="radio" name="q2" value="a">SEARCH_LIMITED 가능성을 보존한다</label><label><input type="radio" name="q2" value="b">항상 EXHAUSTED로 저장한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div>
+  </form>
+  <form class="quiz" data-answer="b" data-explanation="전체 풀 증명 또는 동일 topic/entity 상한 증명이 있으면 bounded proposal cut이 그 사실을 덮지 않는다." data-next="증명 조건과 탐색 cut의 우선순위를 확인한다.">
+    <fieldset><legend>Q3. same-topic 27개에서 최대 2개가 증명됐고 proposal이 cut되면?</legend><label><input type="radio" name="q3" value="a">SEARCH_LIMITED로만 저장한다</label><label><input type="radio" name="q3" value="b">2개와 CONSTRAINT_LIMITED를 유지한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div>
+  </form>
+  <form class="quiz" data-answer="a" data-explanation="feed는 AVAILABLE article count만 집계하고, detail은 기사 내용·순서·publisher fallback을 유지한다." data-next="feed/detail 실제 DB 회귀를 추가한다.">
+    <fieldset><legend>Q4. feed/detail 조회 분리의 계약은?</legend><label><input type="radio" name="q4" value="a">feed 개수는 유지하고 detail 기사 정보는 유지한다</label><label><input type="radio" name="q4" value="b">두 경로 모두 기사 정보를 제거한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div>
+  </form>
+  <form class="quiz" data-answer="b" data-explanation="코드와 단위 게이트는 통과했지만 HTTP p95와 full smoke는 아직 측정되지 않았다." data-next="운영 유사 환경에서 첫 요청 p95를 직접 측정한다.">
+    <fieldset><legend>Q5. 현재 구현만으로 첫 HTTP p95 500ms 달성을 주장할 수 있나?</legend><label><input type="radio" name="q5" value="a">가능하다</label><label><input type="radio" name="q5" value="b">아니다. 전체 HTTP 측정이 필요하다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div>
+  </form>
+  <div id="quiz-navigation" hidden><button id="previous" type="button">이전</button><button id="next" type="button">다음</button></div>
+  <noscript><p>JavaScript가 꺼져 있으면 문항을 읽을 수 있지만 결과 표시는 사용할 수 없다.</p></noscript>
+</section>
+
+<section id="implementation-control-state">
+  <h2>9. Implementation-control state</h2>
+  <dl>
+    <dt>기술 상태</dt><dd><strong>구현 완료</strong> — 승인 범위의 코드·테스트·빌드가 완료됐다.</dd>
+    <dt>리뷰 상태</dt><dd><strong>검토 완료</strong> — blocker 없음, N-01과 HTTP/PG 자동화 공백은 비차단으로 기록됐다.</dd>
+    <dt>개발자 운영 이해</dt><dd><strong>미실시</strong> — HTML 결과를 Codex가 관찰하지 않았으므로 확립을 주장하지 않는다.</dd>
+    <dt>다음 소유자</dt><dd>운영 검증 담당자: 실제 disposable PG 회귀와 Cloud Run 유사 첫 HTTP 측정</dd>
+  </dl>
+</section>
+</article>
+</main>
+<footer>이 문서는 승인된 설계의 구현 제어 기록이다. 성능 달성·운영 배포·PR 생성의 증거로 해석하지 않는다.</footer>
+<script>
+  const quizzes = [...document.querySelectorAll('.quiz')];
+  const completed = new Set();
+  let current = 0;
+  const progress = document.querySelector('#progress');
+  function render() {
+    quizzes.forEach((quiz, index) => { quiz.hidden = index !== current; });
+    progress.textContent = `${current + 1} / ${quizzes.length} 문항 · 확인 ${completed.size}개`;
+    document.querySelector('#previous').disabled = current === 0;
+    document.querySelector('#next').disabled = current === quizzes.length - 1;
+  }
+  quizzes.forEach((quiz, index) => {
+    quiz.addEventListener('change', () => { completed.delete(index); quiz.querySelector('.result').hidden = true; render(); });
+    quiz.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const selected = quiz.querySelector('input:checked');
+      const result = quiz.querySelector('.result');
+      result.hidden = false;
+      result.querySelector('.status').textContent = !selected ? '미실시' : selected.value === quiz.dataset.answer ? '확립' : '보류';
+      result.querySelector('.explanation').textContent = selected ? quiz.dataset.explanation : '답변을 먼저 선택하세요.';
+      result.querySelector('.next-action').textContent = selected ? quiz.dataset.next : '하나를 선택하고 확인을 누르세요.';
+      if (selected) completed.add(index);
+      render();
+    });
+  });
+  document.querySelector('#previous').addEventListener('click', () => { current -= 1; render(); });
+  document.querySelector('#next').addEventListener('click', () => { current += 1; render(); });
+  document.querySelector('#quiz-navigation').hidden = false;
+  render();
+</script>
+</body>
+</html>
