@@ -36,7 +36,8 @@
     "contracts:check": "npm run contracts:all && npm run test:contracts && npm run typecheck:generated",
     "news:discovery": "node scripts/news-discovery.mjs",
     "news:collection": "node scripts/news-collection.mjs",
-    "news:generation": "node scripts/news-generation.mjs"
+    "news:generation": "node scripts/news-generation.mjs",
+    "news:validation": "node scripts/news-validation.mjs"
   },
   "dependencies": {
     "@mikro-orm/core": "7.2.0",

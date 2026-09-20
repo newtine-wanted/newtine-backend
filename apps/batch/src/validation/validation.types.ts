@@ -1,0 +1,76 @@
+import type {
+  Catalog,
+  GenerationConfig,
+  GenerationResult,
+  Usage,
+} from '../generation/generation.types.js';
+export const FIELDS = [
+  'title',
+  'eventAt',
+  'eventEvidence',
+  'integratedSummary',
+  'summaryLines',
+  'viewpoints',
+  'sharedConditionalImpact',
+  'impacts',
+  'llmEstimatedImportance',
+  'importanceReason',
+  'generations',
+  'terms',
+  'followUp',
+  'classification',
+  'glossary',
+] as const;
+export type Field = (typeof FIELDS)[number];
+export interface Finding {
+  field: Field | 'source' | 'scores';
+  category: 'RULE' | 'FACT' | 'CONSISTENCY' | 'UX';
+  reason: string;
+  articleIds: string[];
+}
+export interface Review {
+  findings: Finding[];
+}
+export interface Patch {
+  field: Field;
+  value: unknown;
+}
+export interface ValidationResult {
+  original: GenerationResult;
+  current: GenerationResult;
+  reviews: { phase: 'INITIAL' | 'FINAL'; rules: Finding[]; semantic?: Review }[];
+  repair?: { fields: Field[]; patches: Patch[]; error?: string };
+  status?: 'PASSED' | 'HELD';
+}
+export interface ValidationSnapshot {
+  at: string;
+  generationAt: string;
+  config: GenerationConfig;
+  catalog: Catalog;
+  results: ValidationResult[];
+  usage: Usage[];
+}
+export interface ValidationRun {
+  id: string;
+  generationRunId: string;
+  owner: string;
+  completed: boolean;
+  snapshot: ValidationSnapshot;
+}
+export interface ValidationStore {
+  claim(source: string, at: Date): Promise<ValidationRun>;
+  save(run: ValidationRun): Promise<void>;
+  heartbeat(run: ValidationRun): Promise<void>;
+  complete(run: ValidationRun): Promise<void>;
+  fail(run: ValidationRun, reason: string): Promise<void>;
+}
+export interface ValidationModel {
+  usage: Usage[];
+  review(result: GenerationResult, context: ValidationSnapshot): Promise<Review>;
+  repair(
+    result: GenerationResult,
+    findings: Finding[],
+    fields: Field[],
+    context: ValidationSnapshot,
+  ): Promise<Patch[]>;
+}

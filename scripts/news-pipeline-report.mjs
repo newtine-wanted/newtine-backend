@@ -2,6 +2,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { estimateCost } from '../dist/apps/batch/src/generation/generation.policy.js';
+import { writeValidationReport } from './news-validation-report.mjs';
 import { writeGenerationReport } from './news-generation-report.mjs';
 const [discoveryFile, collectionFile, generationFile, reportFile] = process.argv.slice(2);
 if (!discoveryFile || !collectionFile || !generationFile || !reportFile)
@@ -14,7 +15,12 @@ const [d, c, g] = await Promise.all(
 const generated = g.results.filter((r) => r.status === 'GENERATED');
 if (generated.some((r) => r.draft.viewpoints.length !== 2))
   throw new Error('INVALID_VIEWPOINT_COUNT');
-if (d.results.some((r) => r.candidates.length > 3)) throw new Error('INVALID_CANDIDATE_COUNT');
+if (
+  d.results.some(
+    (r) => r.candidates.length > (r.query.origins.some((o) => o.startsWith('REGION:')) ? 1 : 3),
+  )
+)
+  throw new Error('INVALID_CANDIDATE_COUNT');
 if (
   c.results.length !== d.candidates.length ||
   g.results.length !== c.results.filter((r) => r.status === 'SELECTED').length
@@ -28,12 +34,20 @@ const phases = [
 const priorUsageFile = process.argv[6];
 if (priorUsageFile)
   phases.push(['중단된 2단계 시도', JSON.parse(await readFile(priorUsageFile, 'utf8'))]);
+const validationFile = process.argv[7];
+const v = validationFile ? JSON.parse(await readFile(validationFile, 'utf8')) : null;
+if (v) {
+  if (v.results.length !== generated.length) throw new Error('VALIDATION_COUNT_MISMATCH');
+  phases.push(['4단계', v]);
+}
 const lines = [
   '# 뉴스 파이프라인 전체 재실행 결과',
   '',
   `- 실행 기준 시각: ${g.at}`,
-  '- 검색어당 후보 최대 3개. 1단계 최근 24시간, 2단계 최근 7일. 3단계 이해관계자 관점은 정확히 2개입니다.',
-  '- 4단계 검증·5단계 공개 전 초안입니다. 본문 수집 실패와 의미·UX 라이팅 검증은 구분합니다.',
+  '- 지역 검색어당 후보 최대 1개, 나머지는 최대 3개. 1단계 최근 24시간, 2단계 최근 7일. 3단계 이해관계자 관점은 정확히 2개입니다.',
+  v
+    ? '- 4단계 검증 완료. 5단계 공개 전 결과입니다. 아래 생성 상세는 수정 전이며 검증 상세에 수정 전후를 기록합니다.'
+    : '- 4단계 검증·5단계 공개 전 초안입니다.',
   '',
   '| 처리 | 결과 |',
   '| --- | ---: |',
@@ -43,11 +57,18 @@ const lines = [
   `| 중복·관련성 정리 후 후보 | ${d.candidates.length} |`,
   `| 2단계 선정 | ${g.results.length} |`,
   `| 2단계 기사 부족 | ${c.results.filter((r) => r.status === 'INSUFFICIENT_ARTICLES').length} |`,
+  `| 2단계 언론사 부족 | ${c.results.filter((r) => r.status === 'INSUFFICIENT_PUBLISHERS').length} |`,
   `| 기존 공개 이슈 중복 | ${c.results.filter((r) => r.status === 'DUPLICATE').length} |`,
   `| 3단계 생성 완료 | ${generated.length} |`,
   `| 3단계 본문 부족 | ${g.results.filter((r) => r.status === 'INSUFFICIENT_BODIES').length} |`,
   `| 수집한 본문 (이슈별 합계) | ${g.results.reduce((n, r) => n + r.articles.length, 0)} |`,
   '',
+  ...(v
+    ? [
+        `- 4단계 통과 ${v.results.filter((r) => r.status === 'PASSED').length} / 보류 ${v.results.filter((r) => r.status === 'HELD').length}`,
+        '',
+      ]
+    : []),
   '## 토큰과 추정 비용',
   '',
   '| 단계 | 호출 | 입력 토큰 | 출력 토큰 | 추정 비용 (USD) |',
@@ -64,7 +85,7 @@ lines.push(
   '',
   `- 전체 추정 비용: **$${cost.usd.toFixed(4)} USD**`,
   '- gpt-5.4-mini-2026-03-17, 2026-09-20 확인 단가: 100만 토큰당 입력 $0.75 / 캐시 입력 $0.075 / 출력 $4.50.',
-  '- [공식 단가](https://developers.openai.com/api/docs/models/gpt-5.4-mini). 1·2단계는 캐시 사용량 미기록으로 일반 입력 단가 적용, 3단계는 기록된 캐시 할인 적용. 세금·환율·다른 실행 및 개발 테스트 비용 제외.',
+  '- [공식 단가](https://developers.openai.com/api/docs/models/gpt-5.4-mini). 1·2단계는 캐시 사용량 미기록으로 일반 입력 단가 적용, 3·4단계는 기록된 캐시 할인 적용. 세금·환율·다른 실행 및 개발 테스트 비용 제외.',
   `- 사용량 누락: ${cost.incomplete ? '있음, 확인된 사용량만 합산' : '없음'}. 실패 후 재개 시 기록된 실패 호출도 포함합니다.`,
   '',
   '## 이슈별 처리 결과',
@@ -88,5 +109,13 @@ const details = resolve(dirname(reportFile), 'news-generation-details.md');
 await writeGenerationReport({ id: '전체 실행 결과', snapshot: g }, details);
 const detailText = await readFile(details, 'utf8');
 lines.push('', detailText.slice(detailText.indexOf('## 생성 결과')));
+if (v) {
+  const validationDetails = resolve(dirname(reportFile), 'news-validation-details.md');
+  await writeValidationReport(
+    { id: '전체 실행 결과', generationRunId: '원본 JSON 참조', snapshot: v },
+    validationDetails,
+  );
+  lines.push('', await readFile(validationDetails, 'utf8'));
+}
 await writeFile(reportFile, lines.join('\n') + '\n');
 console.log(JSON.stringify({ report: resolve(reportFile), generated: generated.length, cost }));

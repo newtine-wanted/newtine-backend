@@ -17,3 +17,6 @@
 `{{limit}}`, `{{maxIndex}}`, `{{maxTrackingDays}}`, `{{uxWriting}}`은 실행 시 코드가 채운다.
 UX 가이드 원본은 `docs/news-pipeline/direction/ux-writing.md`이며 생성·용어 프롬프트에 삽입한다.
 기존 공통 worker의 설정(`config/pipeline-ai.yml`)은 이번 독립 파이프라인과 별개다.
+
+- `validation-review.md`: 기사 사실·모순·UX 검증. 독립 취재 근거 개수 조건 없음.
+- `validation-repair.md`: 실패 필드 및 연결 필드만 1회 수정.
