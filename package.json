@@ -39,7 +39,8 @@
     "news:generation": "node scripts/news-generation.mjs",
     "news:validation": "node scripts/news-validation.mjs",
     "news:pipeline": "node scripts/news-pipeline.mjs",
-    "test:news-runner": "node --test test/scripts/newsPipeline.check.mjs"
+    "test:news-runner": "node --test test/scripts/newsPipeline.check.mjs",
+    "test:batch-image": "node --test test/scripts/batchImage.check.mjs"
   },
   "dependencies": {
     "@mikro-orm/core": "7.2.0",
