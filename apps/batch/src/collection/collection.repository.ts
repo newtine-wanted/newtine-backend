@@ -13,6 +13,25 @@ import type {
 type RunRow = { id: string; owner: string; status: string; snapshot: CollectionSnapshot };
 export class CollectionRepository implements CollectionStore {
   constructor(private readonly em: EntityManager) {}
+  private async synchronizeSearch(em: EntityManager, at: string): Promise<void> {
+    // A single INSERT SELECT captures a consistent published-issue search snapshot.
+    await executePostgresSql(em, 'delete from news_issue_search');
+    await executePostgresSql(
+      em,
+      `insert into news_issue_search (issue_id, title, published_at)
+      select id, title, published_at from issues
+      where publication_status = 'PUBLISHED'
+        and published_at >= $1::timestamptz - interval '7 days'
+        and published_at <= $1::timestamptz`,
+      [at],
+    );
+  }
+  async refreshSearchIndex(at: string): Promise<void> {
+    await this.em.transactional(async (em) => {
+      await executePostgresSql(em, 'select pg_advisory_xact_lock(92020002)');
+      await this.synchronizeSearch(em, at);
+    });
+  }
   async claim(discoveryRunId: string, at: Date, config: CollectionConfig): Promise<CollectionRun> {
     return this.em.transactional(async (em) => {
       await executePostgresSql(em, 'select pg_advisory_xact_lock(92020002)');
@@ -53,16 +72,17 @@ export class CollectionRepository implements CollectionStore {
         heartbeat_at = now(), finished_at = null returning *`,
         [generateUuidV7(), discoveryRunId, generateUuidV7(), JSON.stringify(snapshot)],
       );
+      await this.synchronizeSearch(em, rows[0]!.snapshot.at);
       return { ...rows[0]!, discoveryRunId, completed: false };
     });
   }
   async similar(title: string, at: string): Promise<SimilarIssue[]> {
     return executePostgresSql<SimilarIssue[]>(
       this.em,
-      `select id, title, similarity(title, $1) as similarity from issues
-      where publication_status = 'PUBLISHED' and published_at >= $2::timestamptz - interval '7 days'
+      `select issue_id as id, title, similarity(title, $1) as similarity from news_issue_search
+      where published_at >= $2::timestamptz - interval '7 days'
         and published_at <= $2::timestamptz
-      order by title <-> $1, published_at desc, id limit 10`,
+      order by title <-> $1, published_at desc, issue_id limit 10`,
       [title, at],
     );
   }

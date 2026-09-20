@@ -54,6 +54,7 @@ try {
       [id, issueTitle, status, publishedAt],
     );
   }
+  await store.refreshSearchIndex(iso);
   const similar = await store.similar(issueTitle, iso);
   assert.equal(similar.length, 10);
   assert.equal(similar[0].id, issueIds[0]);
@@ -74,7 +75,30 @@ try {
     "insert into issues (id, category_code, title, publication_status, published_at) values ($1, 'politics', $3, 'PUBLISHED', $2)",
     [boundaryId, boundaryAt, boundaryTitle],
   );
+  await store.refreshSearchIndex(iso);
   assert.equal((await store.similar(boundaryTitle, iso))[0].id, boundaryId);
+  await sql(em, 'update issues set title=$2 where id=$1', [boundaryId, '동기화 수정 제목']);
+  await store.refreshSearchIndex(iso);
+  assert.equal(
+    (await sql(em, 'select title from news_issue_search where issue_id=$1', [boundaryId]))[0].title,
+    '동기화 수정 제목',
+  );
+  await sql(em, "update issues set publication_status='UNPUBLISHED' where id=$1", [boundaryId]);
+  await store.refreshSearchIndex(iso);
+  assert.equal(
+    (await sql(em, 'select issue_id from news_issue_search where issue_id=$1', [boundaryId]))
+      .length,
+    0,
+  );
+  await sql(em, "update issues set publication_status='PUBLISHED' where id=$1", [boundaryId]);
+  await store.refreshSearchIndex(iso);
+  await sql(em, 'delete from issues where id=$1', [boundaryId]);
+  await store.refreshSearchIndex(iso);
+  assert.equal(
+    (await sql(em, 'select issue_id from news_issue_search where issue_id=$1', [boundaryId]))
+      .length,
+    0,
+  );
   const article = (i, title) => ({
     title: `${title} 관련 보도 ${i}`,
     description: '검증 요약',
@@ -217,5 +241,6 @@ try {
     }),
   );
 } finally {
+  await new CollectionRepository(orm.em.fork()).refreshSearchIndex(new Date().toISOString());
   await orm.close(true);
 }

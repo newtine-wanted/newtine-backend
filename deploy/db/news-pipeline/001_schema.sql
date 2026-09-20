@@ -26,6 +26,14 @@ create table if not exists news_follow_up_tracks (
 create index if not exists news_follow_up_tracks_expiry on news_follow_up_tracks (expires_at) where enabled;
 
 create extension if not exists pg_trgm;
+-- Pipeline-owned search copy; the application issues table stays unchanged.
+create table if not exists news_issue_search (
+  issue_id uuid primary key,
+  title text not null,
+  published_at timestamptz not null
+);
+create index if not exists news_issue_search_title_trgm
+  on news_issue_search using gist (title gist_trgm_ops);
 create table if not exists news_collection_runs (
   id uuid primary key,
   discovery_run_id uuid not null unique references news_discovery_runs(id),
