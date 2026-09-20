@@ -74,24 +74,30 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
     command: CompleteOnboardingCommand,
   ): OnboardingStateWithPreferences {
     const user = this.requireUser(userId);
-    if (user.status !== OnboardingStatus.Pending) {
-      return this.toSnapshot(user);
-    }
-
     this.validateSelection(command);
+
+    const previousStatus = user.status;
+    const previousCompletedAt = user.completedAt;
+    user.topicWeights.clear();
+    user.entityWeights.clear();
+    user.regionWeights.clear();
+    user.regionCodes.clear();
     for (const code of command.topicCodes) {
-      user.topicWeights.set(code, (user.topicWeights.get(code) ?? 0) + 2);
+      user.topicWeights.set(code, 2);
     }
     for (const entityId of command.entityIds) {
-      user.entityWeights.set(entityId, (user.entityWeights.get(entityId) ?? 0) + 2);
+      user.entityWeights.set(entityId, 2);
     }
     for (const regionCode of command.regionCodes) {
       user.regionCodes.add(regionCode);
-      user.regionWeights.set(regionCode, (user.regionWeights.get(regionCode) ?? 0) + 1);
+      user.regionWeights.set(regionCode, 1);
     }
     user.ageGroup = command.ageGroup;
     user.status = OnboardingStatus.Completed;
-    user.completedAt = new Date();
+    user.completedAt =
+      previousStatus === OnboardingStatus.Completed && previousCompletedAt !== null
+        ? previousCompletedAt
+        : new Date();
 
     return this.toSnapshot(user);
   }
@@ -200,11 +206,30 @@ export class InMemoryOnboardingRepository implements OnboardingRepository {
       userId: user.userId,
       status: user.status,
       completedAt: user.completedAt === null ? null : new Date(user.completedAt),
+      topicCodes: [...user.topicWeights.entries()]
+        .filter(([, weight]) => weight > 0)
+        .map(([code]) => code as OnboardingStateWithPreferences['topicCodes'][number])
+        .sort(compareTopicCodes),
+      entityIds: [...user.entityWeights.entries()]
+        .filter(([, weight]) => weight > 0)
+        .map(([entityId]) => entityId)
+        .sort(),
       ageGroup: user.ageGroup,
-      regionCodes: [...user.regionCodes],
+      regionCodes: [...user.regionCodes].sort(),
       preferences,
     };
   }
+}
+
+function compareTopicCodes(
+  left: OnboardingStateWithPreferences['topicCodes'][number],
+  right: OnboardingStateWithPreferences['topicCodes'][number],
+): number {
+  const leftOrder = ONBOARDING_OPTIONS.topics.find((option) => option.code === left)?.displayOrder;
+  const rightOrder = ONBOARDING_OPTIONS.topics.find(
+    (option) => option.code === right,
+  )?.displayOrder;
+  return (leftOrder ?? Number.MAX_SAFE_INTEGER) - (rightOrder ?? Number.MAX_SAFE_INTEGER);
 }
 
 export const DEFAULT_ONBOARDING_ENTITY_FIXTURES: readonly OnboardingEntity[] = [

@@ -95,10 +95,12 @@ test('complete atomically applies initial topic/entity +2 and region +1', async 
   assert.equal(result.preferences.topicWeights.housing, 2);
   assert.equal(result.preferences.entityWeights[entityId], 2);
   assert.equal(result.preferences.regionWeights.SEOUL, 1);
+  assert.deepEqual(result.topicCodes, ['housing']);
+  assert.deepEqual(result.entityIds, [entityId]);
   assert.deepEqual(result.regionCodes, ['SEOUL']);
 });
 
-test('terminal retries return the stored result without applying weights again', async () => {
+test('completed onboarding overwrites the selected preferences without accumulating weights', async () => {
   const repository = new InMemoryOnboardingRepository();
   const userId = repository.seedUser();
   const service = new OnboardingService(repository, transactionManager);
@@ -110,14 +112,42 @@ test('terminal retries return the stored result without applying weights again',
   } as const;
 
   const first = await service.complete(userId, command);
-  const second = await service.complete(userId, command);
+  const second = await service.complete(userId, {
+    topicCodes: ['politics'],
+    entityIds: [],
+    ageGroup: AgeGroup.Age65Plus,
+    regionCodes: ['BUSAN'],
+  });
 
   assert.equal(second.status, OnboardingStatus.Completed);
-  assert.deepEqual(second.preferences, first.preferences);
+  assert.notDeepEqual(second.preferences, first.preferences);
+  assert.deepEqual(second.topicCodes, ['politics']);
+  assert.deepEqual(second.entityIds, []);
+  assert.deepEqual(second.regionCodes, ['BUSAN']);
+  assert.equal(second.preferences.topicWeights.politics, 2);
+  assert.equal(second.preferences.topicWeights.housing, undefined);
+  assert.equal(second.preferences.regionWeights.BUSAN, 1);
+  assert.equal(second.preferences.regionWeights.SEOUL, undefined);
   assert.equal(second.completedAt?.getTime(), first.completedAt?.getTime());
 });
 
-test('skip discards the pending onboarding draft and remains terminal', async () => {
+test('derived topic order follows the catalog and region order follows the region code', async () => {
+  const repository = new InMemoryOnboardingRepository();
+  const userId = repository.seedUser();
+  const service = new OnboardingService(repository, transactionManager);
+
+  const result = await service.complete(userId, {
+    topicCodes: ['politics', 'housing'],
+    entityIds: [],
+    ageGroup: null,
+    regionCodes: ['SEOUL', 'BUSAN'],
+  });
+
+  assert.deepEqual(result.topicCodes, ['housing', 'politics']);
+  assert.deepEqual(result.regionCodes, ['BUSAN', 'SEOUL']);
+});
+
+test('skipped onboarding can be completed later with the submitted selections', async () => {
   const repository = new InMemoryOnboardingRepository();
   const userId = repository.seedUser();
   const service = new OnboardingService(repository, transactionManager);
@@ -133,8 +163,12 @@ test('skip discards the pending onboarding draft and remains terminal', async ()
   assert.equal(result.status, OnboardingStatus.Skipped);
   assert.equal(result.completedAt, null);
   assert.deepEqual(result.preferences, { topicWeights: {}, entityWeights: {}, regionWeights: {} });
-  assert.deepEqual(retry.preferences, result.preferences);
-  assert.equal(retry.status, OnboardingStatus.Skipped);
+  assert.equal(retry.status, OnboardingStatus.Completed);
+  assert.notEqual(retry.completedAt, null);
+  assert.deepEqual(retry.topicCodes, ['housing']);
+  assert.deepEqual(retry.regionCodes, ['BUSAN']);
+  assert.equal(retry.preferences.topicWeights.housing, 2);
+  assert.equal(retry.preferences.regionWeights.BUSAN, 1);
 });
 
 test('complete rejects invalid selections and unknown users without changing state', async () => {

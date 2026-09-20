@@ -41,6 +41,7 @@ const DOMAIN_EXCEPTION_API_MAPPINGS: Record<string, Record<string, ApiExceptionS
   onboarding: {
     [OnboardingExceptionCode.UserNotFound]: ApiException.Unauthorized,
     [OnboardingExceptionCode.InvalidSelection]: ApiException.InvalidArgument,
+    [OnboardingExceptionCode.SelectionDerivationAnomaly]: ApiException.InternalError,
   },
   auth: {
     [AuthExceptionCode.DuplicateEmail]: ApiException.Conflict,

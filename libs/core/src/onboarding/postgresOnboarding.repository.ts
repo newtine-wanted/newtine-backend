@@ -3,7 +3,11 @@ import { Injectable } from '@nestjs/common';
 
 import { generateUuidV7 } from '@newtine/core/common/id/uuidV7.generator.js';
 import type { CategoryCode } from '@newtine/core/common/category/category.catalog.js';
-import { OnboardingException, OnboardingExceptionCode } from './onboarding.exception.js';
+import {
+  OnboardingException,
+  OnboardingExceptionCode,
+  type OnboardingSelectionDerivationAnomaly,
+} from './onboarding.exception.js';
 import { ONBOARDING_OPTIONS } from './onboarding.options.js';
 import {
   EntityType,
@@ -30,6 +34,10 @@ interface SnapshotRow extends UserRow {
   readonly entity_weights: unknown;
   readonly region_weights: unknown;
   readonly region_codes: unknown;
+  readonly topic_codes: unknown;
+  readonly entity_ids: unknown;
+  readonly selection_anomaly: unknown;
+  readonly selection_anomaly_details: unknown;
 }
 
 interface EntityRow {
@@ -50,6 +58,12 @@ interface CategoryRow {
 
 interface RegionRow {
   readonly region_code: string;
+}
+
+interface CategoryResidualRow {
+  readonly category_code: CategoryCode;
+  readonly aggregate_weight: unknown;
+  readonly action_weight: unknown;
 }
 
 interface RunResult {
@@ -128,57 +142,22 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     if (user === undefined) {
       throw this.userNotFound();
     }
-    if (user.onboarding_status !== OnboardingStatus.Pending) {
-      return this.requireSnapshot(user.id);
-    }
 
     const selection = await this.validateSelection(command);
+    const categoryResiduals = await this.loadCategoryResiduals(userId);
+    this.assertCategoryResiduals(userId, categoryResiduals);
 
-    for (const categoryCode of selection.categoryCodes) {
-      await this.execute(
-        `
-          INSERT INTO user_category_preferences
-            (user_category_preferences_id, user_id, category_code, weight)
-          VALUES (?::uuid, ?::uuid, ?::text, 2)
-          ON CONFLICT (user_id, category_code)
-          DO UPDATE SET weight = user_category_preferences.weight + 2
-        `,
-        [generateUuidV7(), userId, categoryCode],
-      );
-    }
-    for (const entityId of command.entityIds) {
-      await this.execute(
-        `
-          INSERT INTO user_entity_preferences
-            (user_entity_preferences_id, user_id, entity_id, weight)
-          VALUES (?::uuid, ?::uuid, ?::uuid, 2)
-          ON CONFLICT (user_id, entity_id)
-          DO UPDATE SET weight = user_entity_preferences.weight + 2
-        `,
-        [generateUuidV7(), userId, entityId],
-      );
-    }
-    for (const regionCode of command.regionCodes) {
-      await this.execute(
-        `
-          INSERT INTO user_region_preferences
-            (id, user_id, region_code, weight)
-          VALUES (?::uuid, ?::uuid, ?::text, 1)
-          ON CONFLICT (user_id, region_code)
-          DO UPDATE SET weight = user_region_preferences.weight + 1
-        `,
-        [generateUuidV7(), userId, regionCode],
-      );
-    }
+    await this.replaceCategoryPreferences(userId, selection.categoryCodes, categoryResiduals);
+    await this.replaceEntityPreferences(userId, command.entityIds);
+    await this.replaceRegionPreferences(userId, command.regionCodes);
 
     const updated = await this.execute(
       `
         UPDATE users
            SET age_group = ?::text,
                onboarding_status = 'COMPLETED',
-               onboarding_completed_at = now()
+               onboarding_completed_at = COALESCE(onboarding_completed_at, clock_timestamp())
          WHERE id = ?::uuid
-           AND onboarding_status = 'PENDING'
       `,
       [command.ageGroup, userId],
     );
@@ -304,6 +283,102 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     return { categoryCodes: categoryRows.map((row) => row.code) };
   }
 
+  private async loadCategoryResiduals(userId: string): Promise<readonly CategoryResidualRow[]> {
+    return this.queryRows<CategoryResidualRow>(
+      `
+        WITH category_totals AS (
+          SELECT p.category_code,
+                 p.weight::numeric AS aggregate_weight,
+                 0::numeric AS action_weight
+            FROM user_category_preferences p
+           WHERE p.user_id = ?::uuid
+          UNION ALL
+          SELECT c.category_code,
+                 0::numeric AS aggregate_weight,
+                 SUM(c.action_score + c.dwell_score)::numeric AS action_weight
+            FROM user_issue_contributions c
+           WHERE c.user_id = ?::uuid
+           GROUP BY c.category_code
+        )
+        SELECT category_code,
+               SUM(aggregate_weight)::numeric AS aggregate_weight,
+               SUM(action_weight)::numeric AS action_weight
+          FROM category_totals
+         GROUP BY category_code
+         ORDER BY category_code
+      `,
+      [userId, userId],
+    );
+  }
+
+  private assertCategoryResiduals(userId: string, rows: readonly CategoryResidualRow[]): void {
+    const anomalies = rows
+      .filter((row) => !isAllowedCategoryResidual(categoryResidual(row)))
+      .map(toSelectionDerivationAnomaly);
+    if (anomalies.length > 0) {
+      throw this.selectionDerivationAnomaly(userId, anomalies);
+    }
+  }
+
+  private async replaceCategoryPreferences(
+    userId: string,
+    selectedCategoryCodes: readonly CategoryCode[],
+    residuals: readonly CategoryResidualRow[],
+  ): Promise<void> {
+    const actionWeights = new Map(
+      residuals.map((row) => [row.category_code, numeric(row.action_weight)]),
+    );
+    const selected = new Set(selectedCategoryCodes);
+    const categoryCodes = new Set([...actionWeights.keys(), ...selected]);
+
+    await this.execute('DELETE FROM user_category_preferences WHERE user_id = ?::uuid', [userId]);
+    for (const categoryCode of [...categoryCodes].sort()) {
+      const weight = (actionWeights.get(categoryCode) ?? 0) + (selected.has(categoryCode) ? 2 : 0);
+      await this.execute(
+        `
+          INSERT INTO user_category_preferences
+            (user_category_preferences_id, user_id, category_code, weight)
+          VALUES (?::uuid, ?::uuid, ?::text, ?::numeric)
+        `,
+        [generateUuidV7(), userId, categoryCode, weight],
+      );
+    }
+  }
+
+  private async replaceEntityPreferences(
+    userId: string,
+    entityIds: readonly string[],
+  ): Promise<void> {
+    await this.execute('DELETE FROM user_entity_preferences WHERE user_id = ?::uuid', [userId]);
+    for (const entityId of entityIds) {
+      await this.execute(
+        `
+          INSERT INTO user_entity_preferences
+            (user_entity_preferences_id, user_id, entity_id, weight)
+          VALUES (?::uuid, ?::uuid, ?::uuid, 2)
+        `,
+        [generateUuidV7(), userId, entityId],
+      );
+    }
+  }
+
+  private async replaceRegionPreferences(
+    userId: string,
+    regionCodes: readonly string[],
+  ): Promise<void> {
+    await this.execute('DELETE FROM user_region_preferences WHERE user_id = ?::uuid', [userId]);
+    for (const regionCode of regionCodes) {
+      await this.execute(
+        `
+          INSERT INTO user_region_preferences
+            (id, user_id, region_code, weight)
+          VALUES (?::uuid, ?::uuid, ?::text, 1)
+        `,
+        [generateUuidV7(), userId, regionCode],
+      );
+    }
+  }
+
   private async findUser(userId: string, lock: boolean): Promise<UserRow | undefined> {
     return this.queryOne<UserRow>(
       `
@@ -322,6 +397,27 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
   private async findSnapshot(userId: string): Promise<SnapshotRow | undefined> {
     return this.queryOne<SnapshotRow>(
       `
+        WITH category_totals AS (
+          SELECT p.category_code,
+                 p.weight::numeric AS aggregate_weight,
+                 0::numeric AS action_weight
+            FROM user_category_preferences p
+           WHERE p.user_id = ?::uuid
+          UNION ALL
+          SELECT c.category_code,
+                 0::numeric AS aggregate_weight,
+                 SUM(c.action_score + c.dwell_score)::numeric AS action_weight
+            FROM user_issue_contributions c
+           WHERE c.user_id = ?::uuid
+           GROUP BY c.category_code
+        ),
+        category_residuals AS (
+          SELECT category_code,
+                 SUM(aggregate_weight)::numeric AS aggregate_weight,
+                 SUM(action_weight)::numeric AS action_weight
+            FROM category_totals
+           GROUP BY category_code
+        )
         SELECT u.id::text AS id,
                u.onboarding_status,
                u.onboarding_completed_at,
@@ -345,11 +441,41 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
                  SELECT jsonb_agg(p.region_code ORDER BY p.region_code)
                    FROM user_region_preferences p
                   WHERE p.user_id = u.id
-               ), '[]'::jsonb) AS region_codes
+               ), '[]'::jsonb) AS region_codes,
+               COALESCE((
+                 SELECT jsonb_agg(r.category_code ORDER BY c.display_order, r.category_code)
+                   FROM category_residuals r
+                   JOIN issue_categories c ON c.code = r.category_code
+                  WHERE r.aggregate_weight - r.action_weight = 2
+               ), '[]'::jsonb) AS topic_codes,
+               COALESCE((
+                 SELECT jsonb_agg(
+                          jsonb_build_object(
+                            'category_code', r.category_code,
+                            'aggregate_weight', r.aggregate_weight,
+                            'action_weight', r.action_weight,
+                            'residual', r.aggregate_weight - r.action_weight
+                          )
+                          ORDER BY r.category_code
+                        )
+                   FROM category_residuals r
+                  WHERE r.aggregate_weight - r.action_weight NOT IN (0, 2)
+               ), '[]'::jsonb) AS selection_anomaly_details,
+               COALESCE((
+                 SELECT jsonb_agg(p.entity_id::text ORDER BY p.entity_id::text)
+                   FROM user_entity_preferences p
+                  WHERE p.user_id = u.id
+                    AND p.weight > 0
+               ), '[]'::jsonb) AS entity_ids,
+               EXISTS (
+                 SELECT 1
+                   FROM category_residuals r
+                  WHERE r.aggregate_weight - r.action_weight NOT IN (0, 2)
+               ) AS selection_anomaly
           FROM users u
          WHERE u.id = ?::uuid
       `,
-      [userId],
+      [userId, userId, userId],
     );
   }
 
@@ -362,6 +488,13 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
   }
 
   private toSnapshot(snapshot: SnapshotRow): OnboardingStateWithPreferences {
+    if (parseBoolean(snapshot.selection_anomaly)) {
+      throw this.selectionDerivationAnomaly(
+        snapshot.id,
+        parseSelectionDerivationAnomalies(snapshot.selection_anomaly_details),
+      );
+    }
+
     const preferences: OnboardingPreferenceSnapshot = {
       topicWeights: parseWeightObject(snapshot.topic_weights),
       entityWeights: parseWeightObject(snapshot.entity_weights),
@@ -375,6 +508,8 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
         snapshot.onboarding_completed_at === null
           ? null
           : new Date(snapshot.onboarding_completed_at),
+      topicCodes: parseCategoryCodes(snapshot.topic_codes),
+      entityIds: parseStringArray(snapshot.entity_ids),
       ageGroup: snapshot.age_group as OnboardingStateWithPreferences['ageGroup'],
       regionCodes: parseStringArray(snapshot.region_codes),
       preferences,
@@ -396,6 +531,22 @@ export class PostgresOnboardingRepository implements OnboardingRepository {
     return new OnboardingException(
       OnboardingExceptionCode.UserNotFound,
       '인증된 사용자를 찾을 수 없습니다.',
+    );
+  }
+
+  private selectionDerivationAnomaly(
+    userId: string,
+    anomalies: readonly OnboardingSelectionDerivationAnomaly[],
+  ): OnboardingException {
+    return new OnboardingException(
+      OnboardingExceptionCode.SelectionDerivationAnomaly,
+      '관심 설정 aggregate의 derived selection을 계산할 수 없습니다.',
+      undefined,
+      {
+        kind: 'selection_derivation_anomaly',
+        userId,
+        anomalies,
+      },
     );
   }
 
@@ -449,6 +600,64 @@ function parseStringArray(value: unknown): string[] {
   return Array.isArray(array)
     ? array.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+function parseCategoryCodes(value: unknown): CategoryCode[] {
+  return parseStringArray(value) as CategoryCode[];
+}
+
+function parseBoolean(value: unknown): boolean {
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function numeric(value: unknown): number {
+  return typeof value === 'number' ? value : Number(value);
+}
+
+function categoryResidual(row: CategoryResidualRow): number {
+  return numeric(row.aggregate_weight) - numeric(row.action_weight);
+}
+
+function toSelectionDerivationAnomaly(
+  row: CategoryResidualRow,
+): OnboardingSelectionDerivationAnomaly {
+  const aggregateWeight = numeric(row.aggregate_weight);
+  const actionWeight = numeric(row.action_weight);
+  return {
+    categoryCode: row.category_code,
+    aggregateWeight,
+    actionWeight,
+    residual: aggregateWeight - actionWeight,
+  };
+}
+
+function isAllowedCategoryResidual(value: number): boolean {
+  return Number.isFinite(value) && (value === 0 || value === 2);
+}
+
+function parseSelectionDerivationAnomalies(
+  value: unknown,
+): readonly OnboardingSelectionDerivationAnomaly[] {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed.flatMap((item) => {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    const categoryCode = record.category_code;
+    const aggregateWeight = numeric(record.aggregate_weight);
+    const actionWeight = numeric(record.action_weight);
+    const residual = numeric(record.residual);
+    if (
+      typeof categoryCode !== 'string' ||
+      !Number.isFinite(aggregateWeight) ||
+      !Number.isFinite(actionWeight) ||
+      !Number.isFinite(residual)
+    ) {
+      return [];
+    }
+    return [{ categoryCode, aggregateWeight, actionWeight, residual }];
+  });
 }
 
 function parseJsonValue(value: unknown): unknown {
