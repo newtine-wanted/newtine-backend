@@ -38,6 +38,9 @@
 | [이슈·카드 조회 구현 제어](issue-card-query-implementation.html)     | 구현 상태·게이트·운영 보류 항목          |
 | [/api/feed 동시성·트랜잭션 경계 설계](feed-concurrency-transaction-boundary-design.html) | process lock·transaction 경계 개선 |
 | [/api/feed 동시성·트랜잭션 경계 구현 제어](feed-concurrency-transaction-boundary-implementation.html) | 구현·검증·잔여 위험 |
+| [첫 피드 조회 지연 개선 설계](feed-first-page-latency-design.html) | 계산 상한·조회 경량화·세션 버전·검증 목표; 구현 승인 기준 |
+| [첫 피드 조회 개선 실행 계약](feed-first-page-latency-luna-handoff.md) | 구현 범위·불변식·검증·중단 조건 |
+| [첫 피드 조회 지연 개선 구현 제어](feed-first-page-latency-implementation.html) | as-built 변경·finding·검증 증거·잔여 위험 |
 | [온보딩 API 설계](onboarding-api-design.html)                       | 승인된 온보딩 HTTP·상태·선호 계약      |
 | [온보딩 persistence 설계](onboarding-persistence-design.html)       | PostgreSQL schema delta·migration 경계  |
 | [온보딩 API 구현 제어](onboarding-api-implementation.html)          | 구현 범위·검증 증거·운영 보류           |
