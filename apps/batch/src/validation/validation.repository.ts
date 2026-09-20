@@ -2,6 +2,7 @@ import type { EntityManager } from '@mikro-orm/core';
 import { generateUuidV7 } from '@newtine/core';
 import { executePostgresSql } from '@newtine/core/common/database/postgresSql.js';
 import type { GenerationSnapshot } from '../generation/generation.types.js';
+import { termKey } from '../generation/generation.policy.js';
 import { GenerationRepository } from '../generation/generation.repository.js';
 import type { ValidationRun, ValidationSnapshot, ValidationStore } from './validation.types.js';
 
@@ -82,13 +83,26 @@ export class ValidationRepository implements ValidationStore {
     if (!rows.length) throw new Error('VALIDATION_LEASE_LOST');
   }
   async complete(run: ValidationRun): Promise<void> {
-    const rows = await executePostgresSql<{ id: string }[]>(
-      this.em,
-      `update news_validation_runs set status = 'COMPLETED', snapshot = $3::jsonb, finished_at = now()
-      where id = $1 and owner = $2 and status = 'RUNNING' returning id`,
-      [run.id, run.owner, JSON.stringify(run.snapshot)],
-    );
-    if (!rows.length) throw new Error('VALIDATION_LEASE_LOST');
+    await this.em.transactional(async (em) => {
+      const rows = await executePostgresSql<{ id: string }[]>(
+        em,
+        `update news_validation_runs set status = 'COMPLETED', snapshot = $3::jsonb, finished_at = now()
+        where id = $1 and owner = $2 and status = 'RUNNING' returning id`,
+        [run.id, run.owner, JSON.stringify(run.snapshot)],
+      );
+      if (!rows.length) throw new Error('VALIDATION_LEASE_LOST');
+      for (const result of run.snapshot.results) {
+        if (result.status !== 'PASSED') continue;
+        for (const term of result.current.glossary ?? []) {
+          await executePostgresSql(
+            em,
+            `insert into news_terms (normalized_term, term, definition) values ($1, $2, $3)
+            on conflict (normalized_term) do nothing`,
+            [termKey(term.term), term.term.trim(), term.definition.trim()],
+          );
+        }
+      }
+    });
     run.completed = true;
   }
   async fail(run: ValidationRun, reason: string): Promise<void> {

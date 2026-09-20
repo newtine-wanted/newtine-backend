@@ -26,8 +26,6 @@ create table if not exists news_follow_up_tracks (
 create index if not exists news_follow_up_tracks_expiry on news_follow_up_tracks (expires_at) where enabled;
 
 create extension if not exists pg_trgm;
-create index if not exists news_collection_published_title_trgm on issues using gist (title gist_trgm_ops)
-  where publication_status = 'PUBLISHED';
 create table if not exists news_collection_runs (
   id uuid primary key,
   discovery_run_id uuid not null unique references news_discovery_runs(id),

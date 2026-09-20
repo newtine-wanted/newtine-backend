@@ -5,7 +5,11 @@ import { executePostgresSql as sql } from '../dist/libs/core/src/common/database
 import { generateUuidV7 as uuid } from '../dist/libs/core/src/common/id/uuidV7.generator.js';
 import { GenerationRepository } from '../dist/apps/batch/src/generation/generation.repository.js';
 import { GENERATIONS } from '../dist/apps/batch/src/generation/generation.types.js';
-import { calculateScores, eventTime } from '../dist/apps/batch/src/generation/generation.policy.js';
+import {
+  calculateScores,
+  eventTime,
+  termKey,
+} from '../dist/apps/batch/src/generation/generation.policy.js';
 import { ValidationRepository } from '../dist/apps/batch/src/validation/validation.repository.js';
 import { ValidationService } from '../dist/apps/batch/src/validation/validation.service.js';
 class ToneValidationService extends ValidationService {
@@ -118,6 +122,22 @@ try {
     return g;
   }
   await assert.rejects(store.claim(await source('FAILED'), at), /COMPLETED_GENERATION_REQUIRED/);
+  const newTerm = `검증용어 ${uuid()}`;
+  const existingTerm = `기존용어 ${uuid()}`;
+  const heldTerm = `보류용어 ${uuid()}`;
+  const staleTerm = `소유권용어 ${uuid()}`;
+  const rollbackTerm = `롤백용어 ${uuid()}`;
+  await sql(em, 'insert into news_terms(normalized_term,term,definition) values($1,$2,$3)', [
+    termKey(existingTerm),
+    existingTerm,
+    '기존 설명',
+  ]);
+  current.draft.terms = [newTerm, existingTerm];
+  current.draft.summaryLines[2] = `${newTerm}, ${existingTerm} 확인`;
+  current.glossary = [
+    { term: newTerm, definition: '새 설명', source: 'GENERATED' },
+    { term: existingTerm, definition: '덮어쓰면 안 되는 설명', source: 'GENERATED' },
+  ];
   const sourceId = await source();
   let calls = 0,
     repairs = 0;
@@ -141,6 +161,13 @@ try {
   await assert.rejects(service.execute(sourceId, at), /API_FAILED/);
   const run = await service.execute(sourceId, at);
   assert.equal(run.snapshot.results[0].status, 'PASSED');
+  assert.deepEqual(
+    await new GenerationRepository(em).terms([newTerm.toUpperCase(), existingTerm]),
+    [
+      { term: newTerm, definition: '새 설명', source: 'DATABASE' },
+      { term: existingTerm, definition: '기존 설명', source: 'DATABASE' },
+    ].sort((a, b) => (termKey(a.term) < termKey(b.term) ? -1 : 1)),
+  );
   assert.equal(repairs, 1);
   assert.equal(calls, 3);
   await service.execute(sourceId, at);
@@ -178,10 +205,18 @@ try {
   );
   const resumed = await store.claim(activeSource, at);
   await assert.rejects(store.save(active), /VALIDATION_LEASE_LOST/);
+  active.snapshot.results[0].status = 'PASSED';
+  active.snapshot.results[0].current.glossary = [
+    { term: staleTerm, definition: '저장 금지', source: 'GENERATED' },
+  ];
   await assert.rejects(store.complete(active), /VALIDATION_LEASE_LOST/);
   await store.fail(active, 'STALE');
   await store.heartbeat(resumed);
   await store.fail(resumed, 'SMOKE_COMPLETE');
+  assert.deepEqual(await new GenerationRepository(em).terms([staleTerm]), []);
+  current.draft.terms = [heldTerm];
+  current.draft.summaryLines[2] = `${heldTerm} 확인`;
+  current.glossary = [{ term: heldTerm, definition: '보류 설명', source: 'GENERATED' }];
   const heldSource = await source();
   const held = await new ToneValidationService(store, {
     usage: [],
@@ -191,6 +226,24 @@ try {
     repair: async () => [{ field: 'title', value: '지원 발표' }],
   }).execute(heldSource, at);
   assert.equal(held.snapshot.results[0].status, 'HELD');
+  assert.deepEqual(await new GenerationRepository(em).terms([heldTerm]), []);
+  const rollback = await store.claim(await source(), at);
+  rollback.snapshot.results[0].status = 'PASSED';
+  rollback.snapshot.results[0].current.glossary = [
+    { term: rollbackTerm, definition: '롤백되어야 함', source: 'GENERATED' },
+    { term: `${rollbackTerm} invalid`, definition: '', source: 'GENERATED' },
+  ];
+  await assert.rejects(store.complete(rollback));
+  assert.equal(rollback.completed, false);
+  assert.equal(
+    (await sql(em, 'select status from news_validation_runs where id=$1', [rollback.id]))[0].status,
+    'RUNNING',
+  );
+  assert.deepEqual(await new GenerationRepository(em).terms([rollbackTerm]), []);
+  await store.fail(rollback, 'SMOKE_ROLLBACK');
+  await sql(em, 'delete from news_terms where normalized_term = any($1::text[])', [
+    [newTerm, existingTerm, heldTerm, staleTerm, rollbackTerm].map(termKey),
+  ]);
   assert.deepEqual(await sql(em, 'select count(*)::int n from issues'), before);
   console.log(
     JSON.stringify({ smoke: 'validation', passed: true, runId: run.id, heldRunId: held.id }),
