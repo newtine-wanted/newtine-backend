@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="승인된 Cloud Run 컨테이너 시작 바인딩 설계를 구현·검증하고 운영 잔여 위험을 기록" />
+    <meta name="audience" content="NEWTINE 백엔드 구현자와 배포 담당자" />
+    <meta name="problem" content="API bootstrap의 loopback 기본 바인딩과 플랫폼 PORT 미사용으로 Cloud Run revision이 startup 단계에서 실패함" />
+    <meta name="core-flow" content="승인 기준 확인 → API bootstrap 호스트·포트 구현 → 정적 게이트 실행 → 배포 전 잔여 위험 기록" />
+    <meta name="artifact-phase" content="implementation-control" />
+    <meta name="intensity" content="compact" />
+    <meta name="lifecycle" content="구현 완료" />
+    <meta name="traceability" content="Cloud Run revision newtine-00014-wfr startup failure" />
+    <title>Cloud Run 컨테이너 시작 바인딩 구현 제어</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; color: #203047; background: #f3f6fa; }
+      body { max-width: 980px; margin: 0 auto; padding: 24px 18px 56px; line-height: 1.65; }
+      header, section, aside { background: #fff; border: 1px solid #d7e0eb; border-radius: 10px; padding: 20px; margin: 18px 0; }
+      h1, h2 { line-height: 1.35; }
+      h1 { margin-top: 0; }
+      a { color: #1b5dbb; }
+      dt { font-weight: 700; }
+      dd { margin: 0 0 8px; }
+      code, pre { background: #eef3f8; }
+      code { padding: 1px 4px; border-radius: 4px; }
+      pre { padding: 14px; overflow: auto; border-radius: 7px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 9px; border-bottom: 1px solid #d7e0eb; text-align: left; vertical-align: top; }
+      th { background: #f6f8fb; }
+      aside { border-left: 5px solid #bf8425; background: #fff9ed; }
+      .status { color: #875a10; font-weight: 700; }
+      .muted { color: #52627a; }
+      .question { border: 1px solid #d7e0eb; border-radius: 8px; padding: 14px; margin-top: 14px; }
+      .question label { display: block; margin: 8px 0; padding: 8px 10px; border: 1px solid #d7e0eb; border-radius: 6px; }
+      .result { margin-top: 12px; padding: 10px; background: #eef7ef; border-radius: 6px; }
+      .result[hidden] { display: none; }
+      button { padding: 7px 12px; border: 1px solid #7187a5; border-radius: 6px; background: #edf3ff; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Cloud Run 컨테이너 시작 바인딩 구현 제어</h1>
+      <p class="status">상태: 구현 완료 · 강도: Compact · 기준 승인일: 2026-09-20</p>
+      <dl>
+        <dt>기준 설계</dt>
+        <dd><a href="cloud-run-container-startup-design.html">Cloud Run 컨테이너 시작 바인딩 설계</a></dd>
+        <dt>승인 범위</dt>
+        <dd><code>apps/api/src/main.ts</code>에서 <code>PORT</code>를 우선하고 <code>API_HOST</code> 미설정 기본값을 <code>0.0.0.0</code>으로 바꾼다.</dd>
+        <dt>구현 상태</dt>
+        <dd><code>apps/api/src/main.ts:64-65</code>에 승인된 호스트·포트 해석을 적용했고 정적 게이트를 통과했다.</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#baseline">기준선</a>
+      <a href="#issues">이슈 기록</a>
+      <a href="#verification">검증 증거</a>
+      <a href="#understanding">구현 이해 점검</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="baseline">
+          <h2>구현 기준선</h2>
+          <table>
+            <caption>영향 범위와 불변식</caption>
+            <thead><tr><th scope="col">항목</th><th scope="col">기준</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">변경 파일</th><td><code>apps/api/src/main.ts</code>만 변경한다.</td></tr>
+              <tr><th scope="row">포트 불변식</th><td><code>PORT</code> → <code>API_PORT</code> → <code>3000</code> 순서를 유지한다.</td></tr>
+              <tr><th scope="row">호스트 불변식</th><td>명시적 <code>API_HOST</code>는 유지하고 미설정 기본값만 <code>0.0.0.0</code>으로 한다.</td></tr>
+              <tr><th scope="row">금지 범위</th><td>Cloud Run 배포 실행, DB·인증·라우트 변경, 환경변수 삭제는 하지 않는다.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="issues">
+          <h2>이슈 기록</h2>
+          <table>
+            <caption>구현 이슈 레지스터</caption>
+            <thead><tr><th scope="col">상태</th><th scope="col">증상·원인</th><th scope="col">조치·잔여 위험</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">완화됨</th><td>Cloud Run이 <code>PORT=3000</code>을 보고했지만 애플리케이션은 <code>127.0.0.1</code>에만 바인딩할 수 있었다.</td><td><code>PORT</code> 우선·<code>0.0.0.0</code> 기본 바인딩을 적용했다. 실제 revision 재배포·로그 확인은 이 작업에서 실행하지 않는다.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="verification">
+          <h2>검증 계획</h2>
+          <ol>
+            <li><code>npm run format:check</code></li>
+            <li><code>npm run lint</code></li>
+            <li><code>npm run typecheck</code></li>
+            <li><code>npm run build:api</code></li>
+          </ol>
+          <p class="muted">기술 검증과 Cloud Run 실제 배포 결과는 분리해 기록한다.</p>
+          <table>
+            <caption>실행한 검증 증거</caption>
+            <thead><tr><th scope="col">명령</th><th scope="col">결과</th></tr></thead>
+            <tbody>
+              <tr><th scope="row"><code>git diff --check</code></th><td>통과</td></tr>
+              <tr><th scope="row"><code>npm run format:check</code></th><td>통과 · all matched files use Prettier code style</td></tr>
+              <tr><th scope="row"><code>npm run lint</code></th><td>통과</td></tr>
+              <tr><th scope="row"><code>npm run typecheck</code></th><td>통과</td></tr>
+              <tr><th scope="row"><code>npm run build:api</code></th><td>통과</td></tr>
+            </tbody>
+          </table>
+          <dl>
+            <dt>기술 상태</dt>
+            <dd>승인된 단일 파일 변경이 컴파일·정적 게이트를 통과했다.</dd>
+            <dt>검증 공백</dt>
+            <dd>Cloud Run 재배포와 revision 로그 확인은 실행하지 않았다. Docker daemon 접근도 현재 세션에서 허용되지 않아 실제 image 실행은 검증하지 않았다.</dd>
+            <dt>잔여 위험</dt>
+            <dd>Cloud Run에 <code>DB_*</code>와 production <code>JWT_SECRET</code>이 누락되면 포트 바인딩 전에 프로세스가 종료할 수 있다.</dd>
+          </dl>
+        </section>
+
+        <section id="understanding">
+          <h2>구현 이해 점검</h2>
+          <p class="muted">상태: 미실시. 이 점검은 기술 검증이나 구현 승인과 별개다.</p>
+          <div class="question" data-answer="b">
+            <fieldset>
+              <legend>Q1. Cloud Run이 <code>PORT=3000</code>을 주입하고 <code>API_HOST</code>가 없을 때 최종 수신 주소는?</legend>
+              <label><input type="radio" name="implementation-q1" value="a" /> <code>127.0.0.1:3000</code></label>
+              <label><input type="radio" name="implementation-q1" value="b" /> <code>0.0.0.0:3000</code></label>
+              <button type="button" data-submit>제출</button>
+              <div class="result" hidden aria-live="polite"><strong data-status></strong><div data-explanation></div><div data-next></div></div>
+            </fieldset>
+          </div>
+        </section>
+
+        <section id="control-state">
+          <h2>구현 제어 상태</h2>
+          <dl>
+            <dt>implementation-control-state</dt>
+            <dd>구현 완료</dd>
+            <dt>design-delta</dt>
+            <dd>없음. 승인된 <code>PORT</code> 우선·<code>0.0.0.0</code> 기본 바인딩을 그대로 구현했다.</dd>
+            <dt>개발자 운영 이해</dt>
+            <dd>미실시. HTML 점검 결과가 Codex에 자동 전달되지 않았으며, 기술 검증 완료와 별개로 남긴다.</dd>
+            <dt>다음 운영 조치</dt>
+            <dd>새 이미지를 배포한 뒤 revision 로그와 Cloud Run startup 상태를 확인한다.</dd>
+          </dl>
+        </section>
+      </article>
+    </main>
+
+    <script>
+      document.querySelector('[data-submit]').addEventListener('click', () => {
+        const question = document.querySelector('.question');
+        const selected = question.querySelector('input:checked');
+        const correct = selected && selected.value === question.dataset.answer;
+        const result = question.querySelector('.result');
+        result.hidden = false;
+        question.querySelector('[data-status]').textContent = correct ? '확립' : '보류';
+        question.querySelector('[data-explanation]').textContent = correct
+          ? '플랫폼 포트와 외부 인터페이스 바인딩 계약을 예측했다.'
+          : '구현된 호스트·포트 해석 순서를 다시 확인한다.';
+        question.querySelector('[data-next]').textContent = correct
+          ? '다음: 검증 증거와 실제 배포 결과를 분리해 확인한다.'
+          : '다음: 구현 diff를 기준 설계와 대조한다.';
+      });
+    </script>
+  </body>
+</html>

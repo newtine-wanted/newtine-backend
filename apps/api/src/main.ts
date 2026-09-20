@@ -61,8 +61,8 @@ async function bootstrap(): Promise<void> {
     );
     app.enableShutdownHooks();
 
-    const port = Number(process.env.API_PORT ?? 3000);
-    await app.listen(port, process.env.API_HOST ?? '127.0.0.1');
+    const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3000);
+    await app.listen(port, process.env.API_HOST ?? '0.0.0.0');
 
     if (process.env.API_SMOKE_READY === '1' && typeof process.send === 'function') {
       const address = app.getHttpServer().address();

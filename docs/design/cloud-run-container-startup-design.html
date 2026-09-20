@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="purpose" content="Cloud Run API 컨테이너가 플랫폼 포트와 외부 네트워크 인터페이스에서 안정적으로 시작하도록 런타임 바인딩 계약 확립" />
+    <meta name="audience" content="NEWTINE 백엔드 개발자와 배포 담당자" />
+    <meta name="problem" content="API가 API_HOST 미설정 시 127.0.0.1에만 바인딩하고 Cloud Run이 주입하는 PORT를 직접 읽지 않아 revision startup probe가 실패함" />
+    <meta name="core-flow" content="Cloud Run PORT 주입 → API_HOST·PORT 해석 → 0.0.0.0 바인딩 → TCP startup 확인 → 애플리케이션 로그로 조기 종료 구분" />
+    <meta name="artifact-phase" content="design" />
+    <meta name="intensity" content="compact" />
+    <meta name="lifecycle" content="설계 승인됨" />
+    <meta name="traceability" content="Cloud Run revision newtine-00014-wfr startup failure" />
+    <title>Cloud Run 컨테이너 시작 바인딩 설계</title>
+    <style>
+      :root { font-family: system-ui, sans-serif; color: #203047; background: #f3f6fa; }
+      body { max-width: 980px; margin: 0 auto; padding: 24px 18px 56px; line-height: 1.65; }
+      header, section, aside { background: #fff; border: 1px solid #d7e0eb; border-radius: 10px; padding: 20px; margin: 18px 0; }
+      h1, h2 { line-height: 1.35; }
+      h1 { margin-top: 0; }
+      a { color: #1b5dbb; }
+      dt { font-weight: 700; }
+      dd { margin: 0 0 8px; }
+      code, pre { background: #eef3f8; }
+      code { padding: 1px 4px; border-radius: 4px; }
+      pre { padding: 14px; overflow: auto; border-radius: 7px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 9px; border-bottom: 1px solid #d7e0eb; text-align: left; vertical-align: top; }
+      th { background: #f6f8fb; }
+      aside { border-left: 5px solid #bf8425; background: #fff9ed; }
+      .status { color: #245d3c; font-weight: 700; }
+      .muted { color: #52627a; }
+      .question { border: 1px solid #d7e0eb; border-radius: 8px; padding: 14px; margin-top: 14px; }
+      .question label { display: block; margin: 8px 0; padding: 8px 10px; border: 1px solid #d7e0eb; border-radius: 6px; }
+      .result { margin-top: 12px; padding: 10px; background: #eef7ef; border-radius: 6px; }
+      .result[hidden] { display: none; }
+      button { padding: 7px 12px; border: 1px solid #7187a5; border-radius: 6px; background: #edf3ff; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Cloud Run 컨테이너 시작 바인딩 설계</h1>
+      <p class="status">상태: 설계 승인됨 · 강도: Compact · 승인 기준일: 2026-09-20</p>
+      <dl>
+        <dt>목적</dt>
+        <dd>Cloud Run revision이 플랫폼이 지정한 HTTP 포트에서 정상적으로 수신하도록 API bootstrap 계약을 고정한다.</dd>
+        <dt>승인 범위</dt>
+        <dd><code>apps/api/src/main.ts</code>의 호스트·포트 해석 순서와 기본값만 변경한다.</dd>
+        <dt>연결 구현 기록</dt>
+        <dd><a href="cloud-run-container-startup-implementation.html">Cloud Run 컨테이너 시작 바인딩 구현 제어</a></dd>
+      </dl>
+    </header>
+
+    <nav aria-label="문서 탐색">
+      <a href="#contract">런타임 계약</a>
+      <a href="#risk">핵심 위험</a>
+      <a href="#verification">검증 계획</a>
+      <a href="#design-control">설계 이해·통제 점검</a>
+    </nav>
+
+    <main>
+      <article>
+        <section id="contract">
+          <h2>런타임 계약</h2>
+          <table>
+            <caption>현재 문제와 승인된 변경</caption>
+            <thead><tr><th scope="col">항목</th><th scope="col">승인된 계약</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">포트</th><td><code>PORT</code> → <code>API_PORT</code> → <code>3000</code> 순서로 해석한다.</td></tr>
+              <tr><th scope="row">호스트</th><td><code>API_HOST</code>가 있으면 유지하고, 없으면 <code>0.0.0.0</code>에 바인딩한다.</td></tr>
+              <tr><th scope="row">로컬 개발</th><td><code>.env</code>의 명시적 <code>API_HOST=127.0.0.1</code>은 그대로 존중한다.</td></tr>
+              <tr><th scope="row">비목표</th><td>Cloud Run 배포 실행, 환경변수 삭제, 라우트·DB·인증 계약 변경은 수행하지 않는다.</td></tr>
+            </tbody>
+          </table>
+          <pre><code>const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3000);
+await app.listen(port, process.env.API_HOST ?? '0.0.0.0');</code></pre>
+        </section>
+
+        <aside id="risk">
+          <h2>핵심 위험과 불변식</h2>
+          <p><strong>위험:</strong> Cloud Run은 컨테이너 외부의 ingress 경로로 접속하므로 <code>127.0.0.1</code>만 수신하면 startup 확인이 실패한다.</p>
+          <p><strong>불변식:</strong> 플랫폼의 <code>PORT</code>를 우선하고, Cloud Run 기본 바인딩은 <code>0.0.0.0</code>이어야 한다. 명시적인 로컬 <code>API_HOST</code>는 덮어쓰지 않는다.</p>
+        </aside>
+
+        <section id="verification">
+          <h2>검증 계획</h2>
+          <ol>
+            <li>변경 diff가 <code>apps/api/src/main.ts</code>의 승인 범위 안에 있는지 확인한다.</li>
+            <li><code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm run build:api</code>를 실행한다.</li>
+            <li>Cloud Run 재배포는 사용자가 별도로 실행하며, 실패 시 revision 로그에서 startup 전 애플리케이션 종료와 포트 미수신을 구분한다.</li>
+          </ol>
+        </section>
+
+        <section id="design-control">
+          <h2>설계 이해·통제 점검</h2>
+          <p class="muted">상태: 미실시. 이 점검은 구현 승인과 별개이며, 브라우저의 결과는 Codex에 자동 전달되지 않는다.</p>
+          <p>적용 범위 축: 목표·범위, 호스트/포트 불변식, 로컬/Cloud Run 경계, 실패 진단, 검증. 외부 배포 변경은 이번 작업에서 실행하지 않으므로 해당 없음으로 기록한다.</p>
+          <form id="control-check">
+            <div class="question" data-answer="b">
+              <fieldset>
+                <legend>Q1. Cloud Run에서 <code>PORT=3000</code>이고 <code>API_HOST</code>가 없을 때 서버는 어디에 바인딩되어야 하는가?</legend>
+                <label><input type="radio" name="q1" value="a" /> <code>127.0.0.1:3000</code></label>
+                <label><input type="radio" name="q1" value="b" /> <code>0.0.0.0:3000</code></label>
+                <label><input type="radio" name="q1" value="c" /> 임의의 기본 포트</label>
+                <button type="button" data-submit>제출</button>
+                <div class="result" hidden aria-live="polite"><strong data-status></strong><div data-explanation></div><div data-next></div></div>
+              </fieldset>
+            </div>
+            <div class="question" data-answer="a">
+              <fieldset>
+                <legend>Q2. 로컬 <code>.env</code>에 <code>API_HOST=127.0.0.1</code>이 명시되어 있으면 어떻게 되는가?</legend>
+                <label><input type="radio" name="q2" value="a" /> 로컬에서는 loopback 바인딩이 유지된다.</label>
+                <label><input type="radio" name="q2" value="b" /> 항상 <code>0.0.0.0</code>으로 강제된다.</label>
+                <button type="button" data-submit>제출</button>
+                <div class="result" hidden aria-live="polite"><strong data-status></strong><div data-explanation></div><div data-next></div></div>
+              </fieldset>
+            </div>
+          </form>
+        </section>
+
+        <section id="approval">
+          <h2>승인 기록</h2>
+          <p>사용자가 “ㅇㅇ ㅇㅋ 그렇게 하자”로 위 설계에 따른 구현을 승인했다. 승인 범위는 호스트 기본값을 <code>0.0.0.0</code>으로 변경하고 플랫폼 <code>PORT</code>를 우선하는 것까지다.</p>
+        </section>
+      </article>
+    </main>
+
+    <script>
+      document.querySelectorAll('[data-submit]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const question = button.closest('.question');
+          const selected = question.querySelector('input:checked');
+          const result = question.querySelector('.result');
+          const correct = selected && selected.value === question.dataset.answer;
+          result.hidden = false;
+          question.querySelector('[data-status]').textContent = correct ? '확립' : '보류';
+          question.querySelector('[data-explanation]').textContent = correct
+            ? '선택한 답이 승인된 런타임 계약과 일치한다.'
+            : 'Cloud Run ingress와 명시적 로컬 설정의 경계를 다시 확인한다.';
+          question.querySelector('[data-next]').textContent = correct
+            ? '다음: 구현 diff와 검증 명령 결과를 확인한다.'
+            : '다음: 설계 기록의 호스트·포트 불변식을 재검토한다.';
+        });
+      });
+    </script>
+  </body>
+</html>
