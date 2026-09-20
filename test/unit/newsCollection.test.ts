@@ -33,7 +33,7 @@ const article = (
   title: `법안 통과 보도 ${index}`,
   description: '검색 요약',
   sourceUrl: `https://${domain}/${index}`,
-  publisherName: 'untrusted label',
+  publisherName: domain,
   publishedAt,
 });
 const candidate = (title = '법안 통과'): Candidate => ({
@@ -220,7 +220,7 @@ test('relevance failure resumes from saved search and original configuration/tim
     {
       search: async () => {
         searches++;
-        return [article(1), article(2)];
+        return [article(1, 'kbs.co.kr'), article(2, 'yna.co.kr')];
       },
     },
     m,
@@ -351,7 +351,7 @@ test('collection accepts last seven days including boundary, excludes older and 
   ];
   const run = await new CollectionService(
     store,
-    { search: async () => times.map((t, i) => article(i, 'example.com', t)) },
+    { search: async () => times.map((t, i) => article(i, i === 0 ? 'kbs.co.kr' : 'yna.co.kr', t)) },
     model(),
   ).execute('source', config, at);
   const result = run.snapshot.results[0]!;
@@ -387,3 +387,24 @@ test('relevance receives only the explicit representative title, with first evid
     /REPRESENTATIVE_ARTICLE_REQUIRED/,
   );
 });
+
+for (const unrelated of [false, true])
+  test(`single publisher is excluded even with multiple articles (unrelated=${unrelated})`, async () => {
+    const store = new Store();
+    const m = model();
+    m.relevant = async () => [0, 1];
+    const run = await new CollectionService(
+      store,
+      {
+        search: async () => [
+          article(1, 'kbs.co.kr'),
+          article(2, 'news.kbs.co.kr'),
+          ...(unrelated ? [article(3, 'yna.co.kr')] : []),
+        ],
+      },
+      m,
+    ).execute('source', config, at);
+    assert.equal(run.snapshot.results[0]!.status, 'INSUFFICIENT_PUBLISHERS');
+    assert.equal(run.snapshot.results[0]!.publisherCount, 1);
+    assert.equal(run.snapshot.results[0]!.selectedArticles!.length, 0);
+  });

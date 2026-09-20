@@ -57,3 +57,7 @@ fixture는 실제 뉴스 실행과 분리된 과거 일자를 사용했다. 이�
 - 표본 파일: `.local/news-feedback/check.json`, `.local/news-feedback/extract-final.json`. 이번 변경 후 전체 1·2단계 실제 재실행은 하지 않았으며 기존 실행 결과는 보존했다.
 
 
+## 단일 언론사 제외 검증 (2026-09-20)
+- 같은 언론사의 본사/서브도메인에서 나온 여러 기사 제외, 무관한 다른 언론사 기사는 집계 제외, 서로 다른 언론사는 기존 선정·재개 테스트로 확인.
+- 1·2단계 단위 테스트 39개 통과. 새 상태 INSUFFICIENT_PUBLISHERS 및 publisherCount를 스냅샷에 기록한다.
+- 전체 실제 재실행 진행 중.

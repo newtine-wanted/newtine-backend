@@ -60,7 +60,7 @@ async function main() {
       const file = resolve(directory, `${run.discoveryRunId}-articles.json`);
       await writeFile(file, JSON.stringify(run.snapshot, null, 2));
       const counts = Object.fromEntries(
-        ['SELECTED', 'DUPLICATE', 'INSUFFICIENT_ARTICLES'].map((s) => [
+        ['SELECTED', 'DUPLICATE', 'INSUFFICIENT_ARTICLES', 'INSUFFICIENT_PUBLISHERS'].map((s) => [
           s,
           run.snapshot.results.filter((r) => r.status === s).length,
         ]),

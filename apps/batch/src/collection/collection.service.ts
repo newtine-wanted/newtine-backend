@@ -1,6 +1,6 @@
 import type { DiscoveredArticle } from '@newtine/core';
 import { checkedIndexes, filterArticles } from '../discovery/discovery.policy.js';
-import { parseCollectionConfig, selectArticles } from './collection.policy.js';
+import { countPublishers, parseCollectionConfig, selectArticles } from './collection.policy.js';
 import type {
   CollectionConfig,
   CollectionModel,
@@ -97,11 +97,15 @@ export class CollectionService {
               : [];
             await save();
           }
-          const selected = selectArticles(
-            result.relevantIndexes.map((i) => result.articles![i]!),
-            limits,
-          );
-          result.status = selected.length < 2 ? 'INSUFFICIENT_ARTICLES' : 'SELECTED';
+          const relevant = result.relevantIndexes.map((i) => result.articles![i]!);
+          const selected = selectArticles(relevant, limits);
+          result.publisherCount = countPublishers(relevant, limits);
+          result.status =
+            selected.length < 2
+              ? 'INSUFFICIENT_ARTICLES'
+              : result.publisherCount < 2
+                ? 'INSUFFICIENT_PUBLISHERS'
+                : 'SELECTED';
           result.selectedArticles = result.status === 'SELECTED' ? selected : [];
         }
         await save();

@@ -23,7 +23,8 @@ export interface CollectionResult {
   articles?: DiscoveredArticle[];
   relevantIndexes?: number[];
   selectedArticles?: DiscoveredArticle[];
-  status?: 'DUPLICATE' | 'INSUFFICIENT_ARTICLES' | 'SELECTED';
+  publisherCount?: number;
+  status?: 'DUPLICATE' | 'INSUFFICIENT_ARTICLES' | 'INSUFFICIENT_PUBLISHERS' | 'SELECTED';
 }
 export interface CollectionSnapshot {
   at: string;

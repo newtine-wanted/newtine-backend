@@ -65,3 +65,24 @@ export function selectArticles(
     })
     .slice(0, 5);
 }
+
+export function countPublishers(articles: DiscoveredArticle[], config: CollectionConfig): number {
+  return new Set(
+    articles.map((article) => {
+      const host = new URL(article.sourceUrl).hostname.toLowerCase().replace(/^www\./, '');
+      const matches = config.publishers
+        .flatMap((publisher) =>
+          publisher.domains
+            .filter((d) => host === d || host.endsWith(`.${d}`))
+            .map((domain) => ({ domain, name: publisher.name })),
+        )
+        .sort((a, b) => b.domain.length - a.domain.length);
+      return (matches[0]?.name ?? (article.publisherName.trim() || host))
+        .normalize('NFKC')
+        .trim()
+        .toLowerCase()
+        .replace(/^www\./, '')
+        .replace(/\s+/g, ' ');
+    }),
+  ).size;
+}
