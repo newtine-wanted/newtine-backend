@@ -86,13 +86,16 @@ export class DiscoveryService {
           limits.articlesPerQuery,
         );
         check();
+        const candidateLimit = query.origins.some((origin) => origin.startsWith('REGION:'))
+          ? 1
+          : limits.candidatesPerQuery;
         const extracted = articles.length
           ? await this.model.extract(
               articles.map((a) => a.title),
-              limits.candidatesPerQuery,
+              candidateLimit,
             )
           : [];
-        if (!Array.isArray(extracted) || extracted.length > limits.candidatesPerQuery)
+        if (!Array.isArray(extracted) || extracted.length > candidateLimit)
           throw new Error('INVALID_CANDIDATE_COUNT');
         let candidates: Candidate[] = extracted.map((c) => {
           const searchTitle =
