@@ -322,3 +322,20 @@ test('fallback uses earliest selected report even when its body is unavailable',
   ]);
   assert.equal(result.eventAt, '2026-09-18T00:00:00.000Z');
 });
+
+test('shared conditional impact gives all generations identical conditions and evidence', () => {
+  const d = draft();
+  d.sharedConditionalImpact = {
+    description: '주택 침수 피해로 임시 거처가 필요한 사람이라면 월세 지원을 받을 수 있어요.',
+    articleIds: [articles[0]!.articleId],
+  };
+  const result = checkDraft(d, articles, config);
+  assert.ok(result.impacts.every((i) => i.description === d.sharedConditionalImpact!.description));
+  assert.ok(
+    result.impacts.every(
+      (i) => JSON.stringify(i.articleIds) === JSON.stringify(d.sharedConditionalImpact!.articleIds),
+    ),
+  );
+  d.sharedConditionalImpact.articleIds = ['unknown'];
+  assert.throws(() => checkDraft(d, articles, config), /INVALID_SHARED_IMPACT/);
+});

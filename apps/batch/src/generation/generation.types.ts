@@ -27,6 +27,7 @@ export interface Draft {
   integratedSummary: string;
   summaryLines: string[];
   viewpoints: { stakeholder: string; statement: string; articleIds: string[] }[];
+  sharedConditionalImpact?: { description: string; articleIds: string[] } | null;
   impacts: { generation: Generation; description: string; articleIds: string[] }[];
   llmEstimatedImportance: number;
   importanceReason: string;

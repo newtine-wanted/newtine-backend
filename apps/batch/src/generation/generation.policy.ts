@@ -95,6 +95,16 @@ export function checkDraft(
     draft.impacts.some((i) => !text(i.description) || !refs(i.articleIds))
   )
     throw new Error('INVALID_GENERATION_IMPACTS');
+  if (draft.sharedConditionalImpact != null) {
+    const shared = draft.sharedConditionalImpact;
+    if (!text(shared.description) || !refs(shared.articleIds) || !shared.articleIds.length)
+      throw new Error('INVALID_SHARED_IMPACT');
+    draft.impacts = GENERATIONS.map((generation) => ({
+      generation,
+      description: shared.description,
+      articleIds: [...shared.articleIds],
+    }));
+  }
   if (
     !Array.isArray(draft.viewpoints) ||
     draft.viewpoints.length !== 2 ||
