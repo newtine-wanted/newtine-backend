@@ -141,8 +141,10 @@ test('v2가 희소 선택 할당량을 보존하고 같은 입력에서 결정�
 
   const first = recommendFeed(input, ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2);
   const second = recommendFeed(input, ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2);
+  const defaultResult = recommendFeed(input);
 
   assert.deepEqual(first.items, second.items);
+  assert.deepEqual(defaultResult, first);
   assert.equal(first.items.filter((item) => item.selectionType === 'PERSONALIZED').length, 4);
   assert.equal(first.items.filter((item) => item.selectionType === 'MAJOR').length, 2);
 });

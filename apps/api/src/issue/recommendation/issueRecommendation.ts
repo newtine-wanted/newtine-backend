@@ -9,10 +9,11 @@ import type {
   UserRecommendationContext,
 } from '@newtine/core';
 
-export const ISSUE_RECOMMENDATION_ALGORITHM_VERSION = 'issue-card-query-v1';
+export const ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1 = 'issue-card-query-v1';
 export const ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2 = 'issue-card-query-v2';
+export const ISSUE_RECOMMENDATION_ALGORITHM_VERSION = ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2;
 export type IssueRecommendationAlgorithmVersion =
-  | typeof ISSUE_RECOMMENDATION_ALGORITHM_VERSION
+  | typeof ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1
   | typeof ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2;
 export const DEFAULT_HIGH_SCORE_THRESHOLD = 0.7;
 export const DEFAULT_CANDIDATE_BUDGET = 100;
@@ -67,7 +68,7 @@ export function recommendFeed(
   if (algorithmVersion === ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2) {
     return recommendFeedV2(input);
   }
-  if (algorithmVersion !== ISSUE_RECOMMENDATION_ALGORITHM_VERSION) {
+  if (algorithmVersion !== ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1) {
     throw new Error(`unsupported issue recommendation algorithm: ${algorithmVersion}`);
   }
   return recommendFeedV1(input);
@@ -77,7 +78,7 @@ export function isSupportedRecommendationAlgorithm(
   value: string,
 ): value is IssueRecommendationAlgorithmVersion {
   return (
-    value === ISSUE_RECOMMENDATION_ALGORITHM_VERSION ||
+    value === ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1 ||
     value === ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2
   );
 }

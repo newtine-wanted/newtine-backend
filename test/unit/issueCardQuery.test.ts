@@ -4,6 +4,7 @@ import { test } from '@jest/globals';
 import { IssueDetailService } from '@newtine/api/issue/issueDetail.service.js';
 import { IssueFeedService } from '@newtine/api/issue/issueFeed.service.js';
 import {
+  ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
   ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2,
   recommendFeed,
 } from '@newtine/api/issue/recommendation/issueRecommendation.js';
@@ -208,6 +209,24 @@ test('새 피드 세션이 설정된 추천 알고리즘 버전을 스냅샷한�
   }
 });
 
+test('새 피드 세션이 설정되지 않으면 추천 알고리즘 v2를 기본 스냅샷한다', async () => {
+  const previousVersion = process.env.RECOMMENDATION_ALGORITHM_VERSION;
+  delete process.env.RECOMMENDATION_ALGORITHM_VERSION;
+  try {
+    const repository = new InMemoryIssueQueryRepository({ issues: [issue(1)] });
+    const service = new IssueFeedService(repository, testTransactionManager);
+    const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
+
+    assert.equal(
+      repository.getStoredSession(session.sessionId)?.algorithmVersion,
+      ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2,
+    );
+  } finally {
+    if (previousVersion === undefined) delete process.env.RECOMMENDATION_ALGORITHM_VERSION;
+    else process.env.RECOMMENDATION_ALGORITHM_VERSION = previousVersion;
+  }
+});
+
 test('connected cards require a verified later FOLLOW_UP event', async () => {
   const source = issue(1, {
     eventAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -289,19 +308,22 @@ test('detail exposes only public content and matching age impacts', async () => 
 test('run counters include every card selected in the current batch', () => {
   const first = issue(1, { mainTopic: 'same-topic' });
   const second = issue(2, { mainTopic: 'same-topic' });
-  const result = recommendFeed({
-    issues: [first, second],
-    context: null,
-    latestInteractions: [],
-    actedCategoryCodes: new Set(),
-    connectedIssueIds: new Set(),
-    previousSession: {
-      lastTopic: null,
-      lastRepresentativeEntityId: null,
-      topicRun: 0,
-      entityRun: 0,
+  const result = recommendFeed(
+    {
+      issues: [first, second],
+      context: null,
+      latestInteractions: [],
+      actedCategoryCodes: new Set(),
+      connectedIssueIds: new Set(),
+      previousSession: {
+        lastTopic: null,
+        lastRepresentativeEntityId: null,
+        topicRun: 0,
+        entityRun: 0,
+      },
     },
-  });
+    ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
+  );
 
   assert.equal(result.items.length, 2);
   assert.equal(result.lastTopic, 'same-topic');
@@ -309,56 +331,62 @@ test('run counters include every card selected in the current batch', () => {
 });
 
 test('run constraints are reported as limited instead of exhausted', () => {
-  const result = recommendFeed({
-    issues: [
-      issue(1, { mainTopic: 'same-topic' }),
-      issue(2, { mainTopic: 'same-topic' }),
-      issue(3, { mainTopic: 'same-topic' }),
-    ],
-    context: null,
-    latestInteractions: [],
-    actedCategoryCodes: new Set(),
-    connectedIssueIds: new Set(),
-    previousSession: {
-      lastTopic: null,
-      lastRepresentativeEntityId: null,
-      topicRun: 0,
-      entityRun: 0,
+  const result = recommendFeed(
+    {
+      issues: [
+        issue(1, { mainTopic: 'same-topic' }),
+        issue(2, { mainTopic: 'same-topic' }),
+        issue(3, { mainTopic: 'same-topic' }),
+      ],
+      context: null,
+      latestInteractions: [],
+      actedCategoryCodes: new Set(),
+      connectedIssueIds: new Set(),
+      previousSession: {
+        lastTopic: null,
+        lastRepresentativeEntityId: null,
+        topicRun: 0,
+        entityRun: 0,
+      },
     },
-  });
+    ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
+  );
 
   assert.equal(result.items.length, 2);
   assert.equal(result.continuation, 'CONSTRAINT_LIMITED');
 });
 
 test('bounded replacement uncertainty is reported as search limited', () => {
-  const result = recommendFeed({
-    issues: [
-      ...Array.from({ length: 10 }, (_, index) =>
-        issue(index + 1, {
-          mainTopic: 'same-topic',
-          representativeEntityId: 'same-entity',
-        }),
-      ),
-      ...Array.from({ length: 3 }, (_, index) =>
-        issue(index + 11, {
-          mainTopic: `alternative-topic-${index}`,
-          representativeEntityId: 'same-entity',
-        }),
-      ),
-    ],
-    context: null,
-    latestInteractions: [],
-    actedCategoryCodes: new Set(),
-    connectedIssueIds: new Set(),
-    candidateBudget: 20,
-    previousSession: {
-      lastTopic: null,
-      lastRepresentativeEntityId: null,
-      topicRun: 0,
-      entityRun: 0,
+  const result = recommendFeed(
+    {
+      issues: [
+        ...Array.from({ length: 10 }, (_, index) =>
+          issue(index + 1, {
+            mainTopic: 'same-topic',
+            representativeEntityId: 'same-entity',
+          }),
+        ),
+        ...Array.from({ length: 3 }, (_, index) =>
+          issue(index + 11, {
+            mainTopic: `alternative-topic-${index}`,
+            representativeEntityId: 'same-entity',
+          }),
+        ),
+      ],
+      context: null,
+      latestInteractions: [],
+      actedCategoryCodes: new Set(),
+      connectedIssueIds: new Set(),
+      candidateBudget: 20,
+      previousSession: {
+        lastTopic: null,
+        lastRepresentativeEntityId: null,
+        topicRun: 0,
+        entityRun: 0,
+      },
     },
-  });
+    ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
+  );
 
   assert.equal(result.items.length, 2);
   assert.equal(result.continuation, 'SEARCH_LIMITED');
@@ -388,20 +416,25 @@ test('limited batch can be retried but cannot create a new batch', async () => {
 });
 
 test('candidate budget takes precedence when run constraints also limit output', () => {
-  const result = recommendFeed({
-    issues: Array.from({ length: 11 }, (_, index) => issue(index + 1, { mainTopic: 'same-topic' })),
-    context: null,
-    latestInteractions: [],
-    actedCategoryCodes: new Set(),
-    connectedIssueIds: new Set(),
-    candidateBudget: 10,
-    previousSession: {
-      lastTopic: null,
-      lastRepresentativeEntityId: null,
-      topicRun: 0,
-      entityRun: 0,
+  const result = recommendFeed(
+    {
+      issues: Array.from({ length: 11 }, (_, index) =>
+        issue(index + 1, { mainTopic: 'same-topic' }),
+      ),
+      context: null,
+      latestInteractions: [],
+      actedCategoryCodes: new Set(),
+      connectedIssueIds: new Set(),
+      candidateBudget: 10,
+      previousSession: {
+        lastTopic: null,
+        lastRepresentativeEntityId: null,
+        topicRun: 0,
+        entityRun: 0,
+      },
     },
-  });
+    ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
+  );
 
   assert.equal(result.items.length, 2);
   assert.equal(result.continuation, 'SEARCH_LIMITED');
@@ -422,19 +455,22 @@ test('quota matching keeps rare personalized slots when major candidates rank hi
       freshnessScore: 0.95,
     }),
   );
-  const result = recommendFeed({
-    issues: [...major, ...personal],
-    context: { ...context(), selectedCategoryCodes: ['selected'] },
-    latestInteractions: [],
-    actedCategoryCodes: new Set(['acted']),
-    connectedIssueIds: new Set(),
-    previousSession: {
-      lastTopic: null,
-      lastRepresentativeEntityId: null,
-      topicRun: 0,
-      entityRun: 0,
+  const result = recommendFeed(
+    {
+      issues: [...major, ...personal],
+      context: { ...context(), selectedCategoryCodes: ['selected'] },
+      latestInteractions: [],
+      actedCategoryCodes: new Set(['acted']),
+      connectedIssueIds: new Set(),
+      previousSession: {
+        lastTopic: null,
+        lastRepresentativeEntityId: null,
+        topicRun: 0,
+        entityRun: 0,
+      },
     },
-  });
+    ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
+  );
 
   assert.equal(result.items.filter((item) => item.selectionType === 'PERSONALIZED').length, 4);
   assert.equal(result.items.filter((item) => item.selectionType === 'MAJOR').length, 2);
@@ -445,19 +481,22 @@ test('run-aware replacement considers candidates after the initial ten', () => {
     issue(index + 1, { mainTopic: 'same-topic' }),
   );
   const alternatives = Array.from({ length: 10 }, (_, index) => issue(index + 11));
-  const result = recommendFeed({
-    issues: [...sameTopic, ...alternatives],
-    context: null,
-    latestInteractions: [],
-    actedCategoryCodes: new Set(),
-    connectedIssueIds: new Set(),
-    previousSession: {
-      lastTopic: null,
-      lastRepresentativeEntityId: null,
-      topicRun: 0,
-      entityRun: 0,
+  const result = recommendFeed(
+    {
+      issues: [...sameTopic, ...alternatives],
+      context: null,
+      latestInteractions: [],
+      actedCategoryCodes: new Set(),
+      connectedIssueIds: new Set(),
+      previousSession: {
+        lastTopic: null,
+        lastRepresentativeEntityId: null,
+        topicRun: 0,
+        entityRun: 0,
+      },
     },
-  });
+    ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
+  );
 
   assert.equal(result.items.length, 10);
   assert.equal(new Set(result.items.map((item) => item.issueId)).size, 10);
@@ -471,20 +510,23 @@ test('run-aware replacement scans the configured candidate budget', () => {
   const alternatives = Array.from({ length: 10 }, (_, index) =>
     issue(index + 111, { mainTopic: `alternative-topic-${index}` }),
   );
-  const result = recommendFeed({
-    issues: [...crowded, ...alternatives],
-    context: null,
-    latestInteractions: [],
-    actedCategoryCodes: new Set(),
-    connectedIssueIds: new Set(),
-    candidateBudget: 120,
-    previousSession: {
-      lastTopic: null,
-      lastRepresentativeEntityId: null,
-      topicRun: 0,
-      entityRun: 0,
+  const result = recommendFeed(
+    {
+      issues: [...crowded, ...alternatives],
+      context: null,
+      latestInteractions: [],
+      actedCategoryCodes: new Set(),
+      connectedIssueIds: new Set(),
+      candidateBudget: 120,
+      previousSession: {
+        lastTopic: null,
+        lastRepresentativeEntityId: null,
+        topicRun: 0,
+        entityRun: 0,
+      },
     },
-  });
+    ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
+  );
 
   assert.equal(result.items.length, 10);
   assert.equal(result.continuation, 'CONTINUE');
@@ -586,7 +628,7 @@ test('run-order ties prefer the quota-complete path after prefix saturation', ()
       entityRun: 2,
     },
   };
-  const result = recommendFeed(recommendationInput);
+  const result = recommendFeed(recommendationInput, ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1);
   const v2Result = recommendFeed(recommendationInput, ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2);
 
   assert.equal(result.items.length, 8);
@@ -601,19 +643,22 @@ test('run-order ties prefer the quota-complete path after prefix saturation', ()
 
 test('missing candidate tags are not treated as known mismatches', () => {
   const candidate = issue(1, { ageGroups: [], regionCodes: [], entityIds: [] });
-  const result = recommendFeed({
-    issues: [candidate],
-    context: context(),
-    latestInteractions: [],
-    actedCategoryCodes: new Set(),
-    connectedIssueIds: new Set(),
-    previousSession: {
-      lastTopic: null,
-      lastRepresentativeEntityId: null,
-      topicRun: 0,
-      entityRun: 0,
+  const result = recommendFeed(
+    {
+      issues: [candidate],
+      context: context(),
+      latestInteractions: [],
+      actedCategoryCodes: new Set(),
+      connectedIssueIds: new Set(),
+      previousSession: {
+        lastTopic: null,
+        lastRepresentativeEntityId: null,
+        topicRun: 0,
+        entityRun: 0,
+      },
     },
-  });
+    ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V1,
+  );
 
   assert.equal(
     result.items.some((item) => item.selectionType === 'OPPOSITE'),
