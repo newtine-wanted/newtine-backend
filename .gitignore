@@ -12,6 +12,3 @@ coverage/
 .npmrc
 
 .local/
-
-# Local reference note; never commit.
-/docs/news-pipeline/local-notes/team-reference-review-2026-09-19.md
