@@ -120,7 +120,7 @@ export function checkDraft(
     throw new Error('INVALID_VIEWPOINTS');
   if (
     !Array.isArray(draft.terms) ||
-    draft.terms.length > 5 ||
+    draft.terms.length > 3 ||
     draft.terms.some((t) => !text(t) || t.length > 80)
   )
     throw new Error('INVALID_TERMS');

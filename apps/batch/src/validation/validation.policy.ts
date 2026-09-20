@@ -105,11 +105,11 @@ export function rules(r: GenerationResult, s: ValidationSnapshot): Finding[] {
     .join('\n');
   if (
     !Array.isArray(d.terms) ||
-    d.terms.length > 5 ||
+    d.terms.length > 3 ||
     d.terms.some((t) => !text(t) || t.length > 80 || !generated.includes(termKey(t))) ||
     new Set(d.terms.map(termKey)).size !== d.terms.length
   )
-    fail('terms', '용어는 생성 내용에 등장하는 중복 없는 최대 5개여야 합니다.');
+    fail('terms', '용어는 생성 내용에 등장하는 중복 없는 최대 3개여야 합니다.');
   const f = d.followUp;
   if (
     !f ||

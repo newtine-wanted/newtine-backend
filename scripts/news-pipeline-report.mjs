@@ -49,7 +49,7 @@ const lines = [
   `- 실행 기준 시각: ${g.at}`,
   '- 지역 검색어당 후보 최대 1개, 나머지는 최대 3개. 1단계 최근 24시간, 2단계 최근 7일. 3단계 이해관계자 관점은 정확히 2개입니다.',
   v
-    ? '- 4단계 검증 완료. 5단계 공개 전 결과입니다. 아래 생성 상세는 수정 전이며 검증 상세에 수정 전후를 기록합니다.'
+    ? '- 4단계 검증 완료. 5단계 공개 전 결과입니다. 아래 생성 상세는 검증 후 최종값이며 보류 여부와 수정 전후는 검증 상세에 기록합니다.'
     : '- 4단계 검증·5단계 공개 전 초안입니다.',
   '',
   '| 처리 | 결과 |',
@@ -109,7 +109,17 @@ lines.push(
   ),
 );
 const details = resolve(dirname(reportFile), 'news-generation-details.md');
-await writeGenerationReport({ id: '전체 실행 결과', snapshot: g }, details);
+const finalGeneration = v
+  ? {
+      ...g,
+      results: g.results.map(
+        (r) =>
+          v.results.find((item) => item.original.source.candidate.id === r.source.candidate.id)
+            ?.current ?? r,
+      ),
+    }
+  : g;
+await writeGenerationReport({ id: '전체 실행 결과', snapshot: finalGeneration }, details);
 const detailText = await readFile(details, 'utf8');
 lines.push('', detailText.slice(detailText.indexOf('## 생성 결과')));
 if (v) {

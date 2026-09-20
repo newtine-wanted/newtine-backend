@@ -401,6 +401,76 @@ test('FIRST_REPORT discards an unverified event proposal without failing or expo
   const input = JSON.parse(payload.input!);
   assert.equal(input.draft.eventAt, null);
   assert.equal(input.draft.eventEvidence, null);
-  assert.equal(input.computed.eventAtSource, 'FIRST_REPORT');
+  assert.equal(input.eventTimeMode, 'FIRST_REPORT');
+  assert.equal(input.computed, undefined);
+  assert.equal(input.scores, undefined);
   assert.equal(r.draft!.eventAt, '2030-01-01T00:00:00Z');
+});
+
+test('review projects shared impact once and excludes computed-only fields from response schema', async () => {
+  const s = snapshot(),
+    r = s.results[0]!.current;
+  r.draft!.sharedConditionalImpact = {
+    description: '대상자라면 지원받아요.',
+    articleIds: [articles[0]!.articleId],
+  };
+  r.draft!.impacts = GENERATIONS.map((generation) => ({
+    generation,
+    ...r.draft!.sharedConditionalImpact!,
+  }));
+  let payload: {
+    input?: string;
+    text?: {
+      format: {
+        schema: {
+          properties: { findings: { items: { properties: { field: { enum: string[] } } } } };
+        };
+      };
+    };
+  } = {};
+  const m = new ValidationOpenAiModel('test', 'UX', (async (_url, init) => {
+    payload = JSON.parse(String(init?.body));
+    return new Response(
+      JSON.stringify({
+        status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: '{"findings":[]}' }] }],
+      }),
+    );
+  }) as typeof fetch);
+  await m.review(r, s);
+  const input = JSON.parse(payload.input!);
+  assert.equal(input.impactMode, 'SHARED_CONDITIONAL');
+  assert.equal(input.draft.impacts, undefined);
+  assert.equal(input.draft.sharedConditionalImpact.description, '대상자라면 지원받아요.');
+  const allowed = payload.text!.format.schema.properties.findings.items.properties.field.enum;
+  for (const field of ['eventAt', 'eventEvidence', 'impacts', 'scores'])
+    assert.ok(!allowed.includes(field));
+  assert.equal(r.draft!.impacts.length, 4);
+});
+
+test('three-term cap updates existing results without another LLM call and preserves audit source', async () => {
+  const store = new Store(),
+    r = store.run.snapshot.results[0]!;
+  r.current.draft!.terms = ['정부', '보증금', '지원', '발표'];
+  r.current.glossary = r.current.draft!.terms.map((term) => ({
+    term,
+    definition: `${term} 설명`,
+    source: 'GENERATED',
+  }));
+  r.original = structuredClone(r.current);
+  r.status = 'PASSED';
+  const run = await new ValidationService(
+    store,
+    model({
+      review: async () => {
+        throw new Error('MUST_NOT_CALL');
+      },
+    }),
+  ).execute('source');
+  const result = run.snapshot.results[0]!;
+  assert.equal(result.current.draft!.terms.length, 3);
+  assert.equal(result.current.glossary!.length, 3);
+  assert.equal(result.original.draft!.terms.length, 4);
+  assert.equal(result.termLimit!.removedTerms.join(','), '발표');
+  assert.equal(rules(result.current, run.snapshot).length, 0);
 });

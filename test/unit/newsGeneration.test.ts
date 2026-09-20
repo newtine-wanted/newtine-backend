@@ -339,3 +339,9 @@ test('shared conditional impact gives all generations identical conditions and e
   d.sharedConditionalImpact.articleIds = ['unknown'];
   assert.throws(() => checkDraft(d, articles, config), /INVALID_SHARED_IMPACT/);
 });
+
+test('generation rejects more than three terms', () => {
+  const d = draft();
+  d.terms = ['보증금', '주거', '지원', '정부'];
+  assert.throws(() => checkDraft(d, articles, config), /INVALID_TERMS/);
+});

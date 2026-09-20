@@ -23,21 +23,23 @@ export class ValidationOpenAiModel implements ValidationModel {
     private readonly uxWriting: string,
     private readonly request: typeof fetch = fetch,
   ) {}
-  private input(result: GenerationResult, context: ValidationSnapshot) {
+  private input(result: GenerationResult, context: ValidationSnapshot, repair = false) {
     return {
       draft: {
         ...result.draft,
+        // The four identical rows are already verified by rules; review their text once.
+        impacts:
+          !repair && result.draft?.sharedConditionalImpact ? undefined : result.draft?.impacts,
         eventAt: result.eventAtSource === 'ARTICLE_EVENT' ? result.draft?.eventAt : null,
         eventEvidence:
           result.eventAtSource === 'ARTICLE_EVENT' ? result.draft?.eventEvidence : null,
       },
       classification: result.classification,
       glossary: result.glossary,
-      computed: {
-        eventAt: result.eventAt,
-        eventAtSource: result.eventAtSource,
-        scores: result.scores,
-      },
+      eventTimeMode: result.eventAtSource,
+      impactMode: result.draft?.sharedConditionalImpact
+        ? 'SHARED_CONDITIONAL'
+        : 'INDIVIDUAL_OR_NO_IMPACT',
       generationAt: context.generationAt,
       catalog: context.catalog,
       articles: result.articles.map((a) => ({
@@ -58,7 +60,19 @@ export class ValidationOpenAiModel implements ValidationModel {
           type: 'array',
           maxItems: 30,
           items: obj({
-            field: { type: 'string', enum: [...FIELDS, 'source', 'scores'] },
+            field: {
+              type: 'string',
+              enum: [
+                ...FIELDS.filter(
+                  (f) =>
+                    !(
+                      result.eventAtSource === 'FIRST_REPORT' &&
+                      ['eventAt', 'eventEvidence'].includes(f)
+                    ) && !(result.draft?.sharedConditionalImpact && f === 'impacts'),
+                ),
+                'source',
+              ],
+            },
             category: { type: 'string', enum: ['FACT', 'CONSISTENCY', 'UX'] },
             reason: { type: 'string', minLength: 1 },
             articleIds: {
@@ -82,7 +96,7 @@ export class ValidationOpenAiModel implements ValidationModel {
         uxWriting: this.uxWriting,
         maxTrackingDays: context.config.maxTrackingDays,
       }),
-      { ...this.input(result, context), findings, allowedFields: fields },
+      { ...this.input(result, context, true), findings, allowedFields: fields },
       obj({
         patches: {
           type: 'array',

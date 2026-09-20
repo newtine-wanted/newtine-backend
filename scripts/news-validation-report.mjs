@@ -23,6 +23,8 @@ export async function writeValidationReport(run, path) {
       `- 최종: ${r.status}`,
       `- 수정 필드: ${r.repair?.fields.join(', ') || '없음'}`,
     );
+    if (r.termLimit)
+      lines.push(`- 용어 3개 상한 적용으로 제외: ${r.termLimit.removedTerms.join(', ')}`);
     if (r.repair?.error) lines.push(`- 수정 오류: ${r.repair.error}`);
     for (const v of r.reviews) {
       const findings = [...v.rules, ...(v.semantic?.findings ?? [])];

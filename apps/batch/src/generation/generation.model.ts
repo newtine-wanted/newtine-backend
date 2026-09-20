@@ -68,7 +68,7 @@ export class GenerationOpenAiModel implements GenerationModel {
         generations: arr({ type: 'string', enum: GENERATIONS }, 4),
         llmEstimatedImportance: { type: 'number', minimum: 0, maximum: 1 },
         importanceReason: str,
-        terms: arr({ type: 'string', minLength: 1, maxLength: 80 }, 5),
+        terms: arr({ type: 'string', minLength: 1, maxLength: 80 }, 3),
         followUp: obj({
           enabled: { type: 'boolean' },
           days: { type: 'integer', minimum: 0, maximum: config.maxTrackingDays },

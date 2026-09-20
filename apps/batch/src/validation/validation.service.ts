@@ -1,3 +1,4 @@
+import { termKey } from '../generation/generation.policy.js';
 import { applyPatches, checkedReview, repairFields, rules } from './validation.policy.js';
 import type { ValidationModel, ValidationRun, ValidationStore } from './validation.types.js';
 export class ValidationService {
@@ -34,6 +35,15 @@ export class ValidationService {
     try {
       for (const r of run.snapshot.results) {
         check();
+        if (Array.isArray(r.current.draft?.terms) && r.current.draft.terms.length > 3) {
+          const terms = r.current.draft.terms;
+          r.termLimit = { removedTerms: [...(r.termLimit?.removedTerms ?? []), ...terms.slice(3)] };
+          r.current.draft.terms = terms.slice(0, 3);
+          r.current.glossary = r.current.glossary?.filter((g) =>
+            r.current.draft!.terms.some((t) => termKey(t) === termKey(g.term)),
+          );
+          await save();
+        }
         if (r.status) continue;
         for (const phase of ['INITIAL', 'FINAL'] as const) {
           let review = r.reviews.find((v) => v.phase === phase);

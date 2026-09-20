@@ -36,6 +36,7 @@ export interface Patch {
   value: unknown;
 }
 export interface ValidationResult {
+  termLimit?: { removedTerms: string[] };
   original: GenerationResult;
   current: GenerationResult;
   reviews: { phase: 'INITIAL' | 'FINAL'; rules: Finding[]; semantic?: Review }[];
