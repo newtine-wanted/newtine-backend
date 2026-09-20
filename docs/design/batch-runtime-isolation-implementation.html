@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="purpose" content="공통 batch 이미지를 역할별로 안전하게 실행하고 report worker를 독립 배포할 기반 확립">
+  <meta name="audience" content="NEWTINE 백엔드 개발자와 GCP 배포 운영자">
+  <meta name="problem" content="API 중심 이미지의 pipeline 리소스 누락과 batch 초기화 결합을 해소하면서 작업별 이미지 난립 없이 report를 우선 운영">
+  <meta name="core-flow" content="API·batch 이미지 빌드 → 역할 선택과 선택 모듈 초기화 → report 전용 배포 → DB 큐 처리 → 역할별 관측·롤백">
+  <title>Batch 실행 경계·report 우선 배포 구현 제어</title>
+  <style>
+    :root { color-scheme: light; --ink:#172b3a; --muted:#526578; --line:#dbe4eb; --accent:#086f72; }
+    * { box-sizing:border-box; } body { margin:0; background:#f4f7fa; color:var(--ink); font:16px/1.7 system-ui,sans-serif; }
+    header,nav,main,footer { max-width:1080px; margin:auto; padding:24px; } header { padding-top:48px; }
+    h1 { font-size:clamp(27px,4vw,40px); line-height:1.3; margin:12px 0; } h2 { font-size:24px; margin-top:0; }
+    section { background:white; border:1px solid var(--line); border-radius:12px; padding:26px; margin:0 0 20px; scroll-margin-top:20px; }
+    nav { display:flex; gap:16px; flex-wrap:wrap; padding-top:0; } a { color:var(--accent); overflow-wrap:anywhere; }
+    dt { font-weight:650; } dd { margin:0 0 12px; } .badge { display:inline-block; border-radius:20px; padding:4px 12px; background:#e2f2ed; color:#17614e; }
+    table { width:100%; border-collapse:collapse; font-size:14px; } caption { text-align:left; font-weight:650; margin-bottom:8px; }
+    th,td { text-align:left; vertical-align:top; padding:11px; border-bottom:1px solid var(--line); } th { background:#edf4f7; }
+    .table-wrap { overflow-x:auto; } code { font-family:ui-monospace,monospace; font-size:.9em; overflow-wrap:anywhere; }
+    pre { white-space:pre-wrap; overflow-wrap:anywhere; background:#112d3e; color:#e7f4f6; padding:18px; border-radius:8px; line-height:1.6; }
+    aside { border-left:4px solid #c68926; padding:10px 16px; background:#fff7e7; margin:16px 0; }
+    fieldset { border:1px solid var(--line); border-radius:8px; margin:18px 0; padding:18px; }
+    legend { font-weight:650; padding:0 6px; } label { display:block; padding:8px 0; cursor:pointer; }
+    input { margin-right:8px; } button { padding:10px 16px; border:1px solid var(--accent); background:white; color:var(--accent); border-radius:6px; cursor:pointer; margin:4px; font:inherit; }
+    button:disabled { opacity:.4; cursor:default; } button:focus-visible,a:focus-visible,input:focus-visible { outline:3px solid #c68926; outline-offset:3px; }
+    .result { border-left:4px solid var(--accent); background:#eef8f6; padding:10px 16px; margin-top:12px; }
+    .ok { color:#17614e; font-weight:650; } .open { color:#97600f; font-weight:650; } li { margin:6px 0; }
+    @media(max-width:650px) { header,nav,main,footer { padding:18px; } section { padding:18px; } }
+  </style>
+</head>
+<body>
+<header>
+  <span class="badge">운영 제어 보류</span>
+  <h1>Batch 실행 경계·report 우선 배포<br>구현 제어 기록</h1>
+  <dl>
+    <dt>기준선</dt><dd><a href="batch-runtime-isolation-design.html">batch-runtime-isolation-design.html</a></dd>
+    <dt>purpose · audience · problem · core-flow</dt><dd>기준선과 동일. 목적이 바뀌면 이 기록을 이어 쓰지 않고 새 설계를 만든다.</dd>
+    <dt>승인</dt><dd>2026-09-20, 사용자 “ㄱㄱ”. 승인 범위: 역할별 초기화, API/batch target, pipeline 자산 패키징, 기존 실행 호환, report 배포 정의·안내, 테스트.</dd>
+    <dt>영향 경계</dt><dd><code>apps/batch</code>, <code>Dockerfile</code>, <code>compose.yaml</code>, <code>cloudbuild.yaml</code>, <code>deploy/cloud-run/report-worker</code>, 관련 테스트와 문서. API 업무 로직·DB 스키마·GCP 실 리소스는 변경하지 않는다.</dd>
+    <dt>최종 갱신</dt><dd><time datetime="2026-09-21">2026-09-21</time></dd>
+  </dl>
+</header>
+<nav aria-label="구현 제어 목차"><a href="#status">상태</a><a href="#implementation-control-state">제어 상태</a><a href="#current">현재 구현</a><a href="#issues">이슈</a><a href="#verification">검증</a><a href="#gaps">공백·잔여 위험</a><a href="#understanding">운영 이해</a><a href="#review">리뷰</a></nav>
+<main><article>
+<section id="status">
+  <h2>1. 구현 상태</h2>
+  <table><caption>세 상태를 분리해 기록한다</caption><thead><tr><th>축</th><th>상태</th><th>근거</th></tr></thead><tbody>
+    <tr><td>기술 상태</td><td class="ok">구현 완료</td><td>역할별 Nest 초기화, API/batch 이미지 target, pipeline 자산 패키징, Compose/Cloud Build 정의와 수동 report Worker Pool 안내를 반영했다. 단위·통합·정적·이미지 검증이 통과했다.</td></tr>
+    <tr><td>구현 이슈</td><td class="ok">코드 이슈 없음</td><td>역할 provider visibility, 이미지 자산 누락, API 자동 배포 범위는 검증했다. 실제 GCP 리소스·secret·quota 확인은 승인 범위 밖이라 운영 수용 전 잔여 항목으로 남긴다.</td></tr>
+    <tr><td>개발자 운영 이해</td><td class="open">미실시</td><td>as-built 기준 7문항을 아래에 생성했지만 답변은 아직 관찰하지 않았다. 자가 점검은 브라우저 로컬 상태이며 Codex에 자동 전달되지 않는다.</td></tr>
+    <tr><td>implementation-control-state</td><td class="open">운영 제어 보류</td><td>기술 구현은 완료됐지만 운영 이해 점검 답변이 아직 관찰되지 않았다. 아래 HTML 점검은 비차단 로컬 보조 수단이며, 미전달 결과를 확립으로 추정하지 않는다.</td></tr>
+  </tbody></table>
+</section>
+<section id="implementation-control-state">
+  <h2>1-1. 구현 제어 상태</h2>
+  <p><strong>implementation-control-state: 운영 제어 보류.</strong> 기술 상태·이슈·개발자 운영 이해를 분리한다. 운영 이해 질문은 실제 as-built 코드와 검증 증거를 예측하게 하며, 설계 선택 질문이나 배포 승인을 대신하지 않는다.</p>
+  <div class="table-wrap"><table><caption>구현 이해 점검 coverage</caption><thead><tr><th>축</th><th>점검 대상</th><th>문항</th></tr></thead><tbody>
+    <tr><td>목표·범위</td><td>공통 batch image와 pipeline 운영의 차이</td><td>Q1</td></tr>
+    <tr><td>경계·불변식</td><td>report role의 pipeline config 비초기화</td><td>Q2</td></tr>
+    <tr><td>버전·rollback</td><td>수동 Worker Pool digest 갱신 경계</td><td>Q3</td></tr>
+    <tr><td>실패·복구</td><td>SIGTERM, abort, usage/lease retry</td><td>Q4</td></tr>
+    <tr><td>관측·운영</td><td>API 생존과 report queue 소비의 분리</td><td>Q5</td></tr>
+    <tr><td>설계 delta</td><td>manifest 영속화가 제외된 이유</td><td>Q6</td></tr>
+    <tr><td>검증·잔여 위험</td><td>로컬 image 검증과 GCP 수용의 차이</td><td>Q7</td></tr>
+  </tbody></table></div>
+</section>
+<section id="current">
+  <h2>2. 현재 구현 기록</h2>
+  <p>승인된 설계 기준으로 다음을 반영했다.</p>
+  <ol><li><code>batch.role.ts</code>의 allowlist parser와 <code>batch.job.ts</code>의 공통 token/계약, databaseCheck·report·pipeline 역할 module/adapter를 추가했다.</li><li><code>main.ts</code>가 Nest 초기화 전에 role을 검증하고 <code>BatchModule.forRole()</code>만 생성한다. <code>BatchRunner</code>는 선택된 job만 실행하며 기존 event name과 lease/retry 호출 경계를 유지한다.</li><li>report module은 <code>LoggerModule</code>·<code>CoreModule</code>·report provider만 가져오고 <code>PipelineAiConfiguration</code>을 생성하지 않는다. pipeline module만 pipeline 설정과 pipeline provider를 등록한다.</li><li>Docker를 <code>api</code>/<code>batch</code> target으로 분리하고 batch target에 standalone news script, prompt, UX direction, config를 명시적으로 포함했다. 두 target 모두 non-root runtime이다.</li><li>Compose의 api/migrate는 api target, batch/report-worker는 batch target을 사용한다. Cloud Build는 API와 batch 이미지를 각각 push하지만 자동 deploy는 API만 수행한다.</li><li><code>deploy/cloud-run/report-worker/README.md</code>에 digest pin, command, secret, instance/resource, preflight를 포함한 수동 Worker Pool 운영 정의를 추가했다. 실제 GCP resource apply는 하지 않았다.</li><li>focused/full unit, integration, news runner, format/lint/typecheck/build, Docker build와 runtime asset/role smoke를 실행했다.</li></ol>
+  <h3>설계 대비 구현 차이</h3>
+  <table><caption>승인된 범위와 실제 반영의 경계</caption><thead><tr><th>항목</th><th>실제 반영</th><th>의미</th></tr></thead><tbody>
+    <tr><td>패키지 분리</td><td>새 npm package를 만들지 않고 하나의 batch 산출물 안에서 Nest role module로 분리</td><td>기존 import·실행 호환을 유지하면서 report가 pipeline provider/config를 초기화하지 않도록 경계를 만든다.</td></tr>
+    <tr><td>pipeline 운영</td><td>batch image 패키징과 기존 <code>news:pipeline</code> 실행 자산만 보장</td><td>새 Job 스케줄러, manifest 영속화·재개 계약은 이번 변경에 포함하지 않는다.</td></tr>
+    <tr><td>report 배포</td><td>Cloud Build push + 수동 Worker Pool 명령/운영 문서</td><td>실제 GCP Worker Pool 생성·갱신과 secret 연결은 운영 승인 후 별도 수행한다.</td></tr>
+  </tbody></table>
+  <p>금지된 변경: 외부 API 실제 호출, secret 값 커밋, GCP 리소스 생성/변경, DB migration/schema, report/pipeline 업무 알고리즘, 원본 워크트리의 미커밋 변경.</p>
+</section>
+<section id="issues">
+  <h2>3. 이슈 레지스터</h2>
+  <table><caption>구현 중 발견한 문제만 증거와 함께 갱신한다</caption><thead><tr><th>ID·상태</th><th>증상 / 원인</th><th>조치·검증·잔여 위험</th></tr></thead><tbody>
+    <tr><td>I-001 · 해결</td><td>역할별 module 분리 시 Nest의 imported module export와 <code>PinoLogger</code> visibility가 깨질 수 있음.</td><td>공통 logger export를 조정하고 focused bootstrap/runner, full unit, report runtime smoke에서 역할 module이 초기화됨을 확인했다. 업무 provider는 변경하지 않았다.</td></tr>
+    <tr><td>I-002 · 해결</td><td>standalone news CLI가 <code>/app</code> 기준 상대 경로의 prompt·UX·config를 요구함.</td><td>batch target Docker build와 image 내부 asset/UID/local writable check가 통과했다. API image에는 news CLI가 들어가지 않는다.</td></tr>
+    <tr><td>I-003 · 해결</td><td>Cloud Build가 API deploy만 해야 하며 batch push와 report 운영 배포가 자동 연결되면 범위 이탈.</td><td>Cloud Build YAML parse와 batch image push/API-only deploy 정적 검사를 통과했다. Worker Pool deploy step은 없다.</td></tr>
+    <tr><td>I-004 · 보류</td><td>실제 GCP Worker Pool·IAM·Secret Manager·Cloud SQL 환경에서의 운영 수용은 실행하지 않음.</td><td>의도적인 범위 외 항목이다. 운영자는 README preflight 후 digest pin으로 별도 배포하고, 배포 결과·로그·lease 회복을 확인해야 한다.</td></tr>
+  </tbody></table>
+</section>
+<section id="verification">
+  <h2>4. 검증 증거</h2>
+  <table><caption>실행 후 결과를 pass/fail과 실제 출력으로 채운다</caption><thead><tr><th>검증</th><th>명령</th><th>결과</th></tr></thead><tbody>
+    <tr><td>역할·초기화·worker</td><td><code>npm run test:jest -- test/unit/batchRunner.test.ts test/unit/batchBootstrap.test.ts test/unit/batchModuleWiring.test.ts test/unit/pipelineEmbeddingRepair.test.ts test/unit/pipelineBatchJob.test.ts test/unit/reportWorker.test.ts</code></td><td class="ok">PASS · 6 suites / 37 tests</td></tr>
+    <tr><td>전체 unit</td><td><code>npm run test:unit</code></td><td class="ok">PASS · 56 suites / 340 tests</td></tr>
+    <tr><td>news CLI·이미지 계약</td><td><code>npm run test:news-runner</code>, <code>npm run test:batch-image</code></td><td class="ok">PASS · 6 + 5 tests</td></tr>
+    <tr><td>정적·타입·빌드</td><td><code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm run build</code></td><td class="ok">PASS</td></tr>
+    <tr><td>이미지·runtime smoke</td><td><code>docker build --target api</code>, <code>docker build --target batch</code>, asset/UID check, invalid role check, report bootstrap smoke</td><td class="ok">PASS · API/batch build 및 report의 pipeline YAML 비초기화 확인</td></tr>
+    <tr><td>통합 lifecycle</td><td><code>npm run test:integration</code></td><td class="ok">PASS · 2 suites / 11 tests; 3 suites / 9 tests는 환경상 skip</td></tr>
+    <tr><td>Compose 정의</td><td><code>env JWT_SECRET=local-test-secret docker compose --profile tools --profile reports config --images</code></td><td class="ok">PASS · api/migrate/batch/report-worker image target 확인</td></tr>
+    <tr><td>운영 배포</td><td>실제 GCP 미실행. 스테이징 실행은 별도 승인 후 수행.</td><td class="ok">범위 외 / 미실행</td></tr>
+  </tbody></table>
+</section>
+<section id="gaps">
+  <h2>5. 검증 공백과 잔여 위험</h2>
+  <ul><li>GCP 프로젝트·Worker Pool·Cloud SQL 연결·IAM·Secret Manager 상태를 조회하지 않았다. 이번 결과는 배포 정의와 로컬 image 검증까지다.</li><li>실제 OpenAI/Naver 인증과 quota는 확인하지 않는다. 테스트에서는 외부 호출을 하지 않는다.</li><li>공통 DB와 AI quota는 API/batch 프로세스가 분리되어도 공유 영향이 남는다.</li><li>Cloud Run Worker Pool의 scale/instance 수·비용은 실사용량 측정 뒤 운영자가 정한다.</li><li>pipeline의 manifest 영속 저장·재개와 새 Cloud Run Job 운영은 승인 범위 밖이다.</li><li>원본 워크트리의 미커밋 report 변경과 이 브랜치의 기준 커밋이 다르므로 병합 시 재검증해야 한다.</li></ul>
+</section>
+<section id="understanding">
+  <h2>6. 구현 이해 점검</h2>
+  <p>상태: <strong>미실시</strong>. 아래는 브라우저 안에서만 동작하는 7문항 self-check다. 결과는 Codex에 자동 전달되지 않으며, 제출하지 않거나 미전달된 결과를 운영 이해 확립으로 기록하지 않는다.</p>
+  <form id="implementation-self-check">
+    <fieldset class="question" data-answer="b" data-explanation="이번 구현은 하나의 batch 산출물에서 role module을 나누고 기존 pipeline CLI 자산을 포장한 것이다. 새 Cloud Run Job 스케줄러나 manifest 영속화·재개는 포함하지 않았다."><legend>Q1. batch image에 news:pipeline 실행 자산이 들어갔다는 사실이 의미하는 범위는?</legend><label><input type="radio" name="q1" value="a">pipeline의 GCP 스케줄·영구 manifest·자동 재개까지 완료</label><label><input type="radio" name="q1" value="b">패키징과 기존 실행 호환이 확보됐고 pipeline 운영은 별도</label><div class="result" hidden><p><strong>상태:</strong> <span class="status"></span></p><p><strong>설명:</strong> <span class="explanation"></span></p><p><strong>다음 행동:</strong> <span class="next"></span></p></div></fieldset>
+    <fieldset class="question" data-answer="a" data-explanation="report 경로는 ReportBatchModule만 import하고 PipelineAiConfiguration provider를 만들지 않는다. pipeline YAML 문제가 report의 report 설정·DB 오류까지 없애 준다는 뜻은 아니다."><legend>Q2. pipeline-ai.yml이 없고 report 설정·DB는 정상일 때 report role이 보장해야 하는 동작은?</legend><label><input type="radio" name="q2" value="a">pipeline config를 생성하지 않고 report 설정 검증·queue 처리 경로로 진입</label><label><input type="radio" name="q2" value="b">공통 batch image이므로 pipeline config 생성 오류로 함께 기동 실패</label><div class="result" hidden><p><strong>상태:</strong> <span class="status"></span></p><p><strong>설명:</strong> <span class="explanation"></span></p><p><strong>다음 행동:</strong> <span class="next"></span></p></div></fieldset>
+    <fieldset class="question" data-answer="a" data-explanation="Cloud Build의 batch push는 Artifact Registry에 digest를 발행할 뿐이다. Worker Pool은 README 명령으로 별도 갱신하지 않으면 기존 revision/image를 계속 사용한다."><legend>Q3. 새 batch digest를 push했지만 report Worker Pool을 갱신하지 않았다면 무엇이 실행되는가?</legend><label><input type="radio" name="q3" value="a">Worker Pool에 설정된 기존 revision/image가 계속 실행</label><label><input type="radio" name="q3" value="b">Artifact Registry의 최신 digest로 자동 전환</label><div class="result" hidden><p><strong>상태:</strong> <span class="status"></span></p><p><strong>설명:</strong> <span class="explanation"></span></p><p><strong>다음 행동:</strong> <span class="next"></span></p></div></fieldset>
+    <fieldset class="question" data-answer="b" data-explanation="SIGTERM은 BatchRunner의 AbortSignal로 전달되고 report provider call은 중단·불확실 결과로 usage를 마감한 뒤 retryable INTERRUPTED 실패를 queue repository에 기록한다. 외부 호출이 늦게 끝나면 usage reconcile이 남을 수 있다."><legend>Q4. report가 AI 호출 중 SIGTERM을 받으면 안전한 설명은?</legend><label><input type="radio" name="q4" value="a">호출이 끝날 때까지 무조건 정상 완료하고 queue row도 완료 처리</label><label><input type="radio" name="q4" value="b">abort/retry 경로로 처리하며 외부 호출의 지연 완료·중복 비용 가능성도 관찰</label><div class="result" hidden><p><strong>상태:</strong> <span class="status"></span></p><p><strong>설명:</strong> <span class="explanation"></span></p><p><strong>다음 행동:</strong> <span class="next"></span></p></div></fieldset>
+    <fieldset class="question" data-answer="a" data-explanation="API의 health는 worker의 소비 증거가 아니다. report worker started/claimed 로그와 daily_reports의 QUEUED·RUNNING·FAILED/attempt 추세를 먼저 확인한다."><legend>Q5. API는 정상인데 report queue가 쌓이면 첫 확인 조합은?</legend><label><input type="radio" name="q5" value="a">report 기동·claim 로그와 queue 상태·lease/attempt 추세</label><label><input type="radio" name="q5" value="b">API health가 정상이므로 worker도 정상이라고 판단</label><div class="result" hidden><p><strong>상태:</strong> <span class="status"></span></p><p><strong>설명:</strong> <span class="explanation"></span></p><p><strong>다음 행동:</strong> <span class="next"></span></p></div></fieldset>
+    <fieldset class="question" data-answer="b" data-explanation="컨테이너 파일시스템은 영구 저장소가 아니므로 manifest 파일을 이미지나 local path에 두는 것은 재시작 후 보존·다른 instance 공유·재개 계약을 제공하지 않는다. 별도 durable store와 명시적 resume 설계가 필요하다."><legend>Q6. news:pipeline manifest를 image 내부 파일에 저장하면 왜 영구 재개가 보장되지 않는가?</legend><label><input type="radio" name="q6" value="a">batch image는 한 번 만들어지면 모든 Worker Pool instance가 같은 writable state를 공유</label><label><input type="radio" name="q6" value="b">local filesystem은 영구·공유 저장소가 아니며 durable store/resume 계약이 별도 필요</label><div class="result" hidden><p><strong>상태:</strong> <span class="status"></span></p><p><strong>설명:</strong> <span class="explanation"></span></p><p><strong>다음 행동:</strong> <span class="next"></span></p></div></fieldset>
+    <fieldset class="question" data-answer="a" data-explanation="검증은 local build, static contract, runtime smoke까지다. 실제 GCP IAM/Secret Manager/Cloud SQL/network/quota와 Worker Pool 수용은 아직 수행하지 않았다."><legend>Q7. 현재 결과를 운영 수용으로 설명할 때 맞는 범위는?</legend><label><input type="radio" name="q7" value="a">코드·image·정적 배포 정의는 검증됐고 실제 GCP 운영 수용은 별도</label><label><input type="radio" name="q7" value="b">Docker build가 성공했으므로 GCP secret/IAM/DB 연결도 검증 완료</label><div class="result" hidden><p><strong>상태:</strong> <span class="status"></span></p><p><strong>설명:</strong> <span class="explanation"></span></p><p><strong>다음 행동:</strong> <span class="next"></span></p></div></fieldset>
+    <div id="implementation-quiz-controls" hidden><button type="button" id="implementation-previous">이전</button><button type="button" id="implementation-submit">현재 답변 제출</button><button type="button" id="implementation-next">다음</button></div>
+    <output id="implementation-quiz-result" aria-live="polite">미실시 — 로컬 자가 점검은 운영 수용이나 구현 승인이 아닙니다.</output>
+  </form>
+</section>
+<section id="review">
+  <h2>7. 구현 리뷰</h2>
+  <dl>
+    <dt>리뷰 유형</dt><dd>자기 변경 read-only 리뷰 · 리뷰어 Codex</dd>
+    <dt>대상</dt><dd>브랜치 <code>codex/batch-runtime-design</code>, 기준 커밋 <code>092eec8dbd84fe64a9990ce62d4696a2ccdcb288</code>, 기준 커밋 대비 working tree 변경과 신규 파일</dd>
+    <dt>대조 기준</dt><dd>승인된 설계, as-built 구현, 실행 경로·provider 경계·배포 정의·검증 출력</dd>
+  </dl>
+  <table><caption>리뷰 finding</caption><thead><tr><th>ID·상태</th><th>근거</th><th>기대 동작과 실제 검증</th><th>최소 후속 조치</th></tr></thead><tbody>
+    <tr><td>R-001 · 해결 · P2</td><td><code>test/unit/batchModuleWiring.test.ts</code><br><code>apps/batch/src/pipeline/pipeline.batch.module.ts:37-64</code></td><td>외부 호출·실제 DB 없이 <code>BatchModule.forRole()</code> 네 역할을 실제 Nest testing container에서 compile하고, <code>BATCH_JOB</code>가 역할별 adapter로 해석되는지 확인한다. pipeline 두 역할의 provider token/export 누락이 배포 시점까지 미뤄지지 않는다.</td><td>조치 완료. <code>npm run test:jest -- --runInBand test/unit/batchModuleWiring.test.ts</code> 4/4 및 전체 unit 56 suites / 340 tests 통과.</td></tr>
+    <tr><td>R-002 · 해결 · P2</td><td><code>test/scripts/batchImage.check.mjs:14-70</code><br><code>.github/workflows/pr-ci.yml:49-50</code></td><td>batch image 계약 검사가 PR quality gate에 연결돼 Docker target·Compose·Cloud Build·report 배포 정의의 정적 경계를 함께 검사한다.</td><td>조치 완료. PR CI에 <code>npm run test:batch-image</code>를 추가했고 로컬 5/5 통과.</td></tr>
+  </tbody></table>
+  <h3>리뷰 판단</h3>
+  <p><strong>R-001/R-002 해결.</strong> concrete blocker나 승인된 설계와 충돌하는 동작은 확인하지 못했다. report의 pipeline config 비초기화, role별 실행 adapter, API/batch target, API-only 자동 배포, batch asset 계약은 코드·정적 검사·런타임 wiring·기존 검증 출력과 일치한다. 실제 GCP Worker Pool·secret·IAM·DB 연결은 이 리뷰의 대상에서 실행하지 않았으며 I-004 운영 보류를 유지한다.</p>
+  <p>개선 후 <code>npm run test:unit</code> 56 suites / 340 tests, <code>npm run test:batch-image</code> 5/5, <code>npm run format:check</code>, <code>npm run lint</code>, <code>npm run typecheck -- --incremental false</code>, <code>git diff --check</code>를 통과시켰다. PR에서는 새 CI step이 자동 실행된다.</p>
+</section>
+</article></main>
+<footer>승인된 기준선에 대한 구현 제어 기록 · 기술 구현 완료 · 운영 제어 보류</footer>
+<script>
+  (() => {
+    const questions = [...document.querySelectorAll('.question')];
+    const progress = document.createElement('p');
+    progress.id = 'implementation-quiz-progress';
+    progress.setAttribute('aria-live', 'polite');
+    document.getElementById('implementation-self-check').prepend(progress);
+    const overall = document.getElementById('implementation-quiz-result');
+    const previous = document.getElementById('implementation-previous');
+    const next = document.getElementById('implementation-next');
+    const submitted = new Map();
+    let current = 0;
+
+    function render() {
+      questions.forEach((question, index) => { question.hidden = index !== current; });
+      const answered = questions.filter((question) => question.querySelector('input:checked')).length;
+      progress.textContent = `${current + 1} / ${questions.length} 문항 · 선택 ${answered} / ${questions.length} · 제출 ${submitted.size} / ${questions.length}`;
+      previous.disabled = current === 0;
+      next.disabled = current === questions.length - 1;
+      const pending = [...submitted.values()].some((value) => value !== '확립');
+      const status = submitted.size === 0 ? '미실시' : pending ? '보류' : submitted.size === questions.length ? '확립' : '확인 중';
+      overall.textContent = `${status} — 브라우저 내부 결과이며 Codex에 자동 전달되거나 구현 승인을 대체하지 않습니다.`;
+    }
+
+    previous.addEventListener('click', () => { if (current > 0) current -= 1; render(); });
+    next.addEventListener('click', () => { if (current < questions.length - 1) current += 1; render(); });
+    questions.forEach((question) => question.addEventListener('change', () => {
+      submitted.delete(question);
+      question.querySelector('.result').hidden = true;
+      render();
+    }));
+    document.getElementById('implementation-submit').addEventListener('click', () => {
+      const question = questions[current];
+      const chosen = question.querySelector('input:checked');
+      const status = !chosen ? '미실시' : chosen.value === question.dataset.answer ? '확립' : '보류';
+      question.querySelector('.status').textContent = status;
+      question.querySelector('.explanation').textContent = chosen ? question.dataset.explanation : '아직 답변을 선택하지 않았습니다.';
+      question.querySelector('.next').textContent = !chosen ? '답을 선택한 뒤 제출하세요.' : status === '확립' ? '다음 문항으로 이동하세요. 실제 운영 적용은 별도 승인과 실행이 필요합니다.' : '관련 코드·검증 기록을 확인하고 다시 예측해 보세요.';
+      question.querySelector('.result').hidden = false;
+      submitted.set(question, status);
+      render();
+    });
+    document.getElementById('implementation-self-check').addEventListener('submit', (event) => event.preventDefault());
+    document.getElementById('implementation-quiz-controls').hidden = false;
+    render();
+  })();
+</script>
+</body>
+</html>
