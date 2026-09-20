@@ -3,7 +3,10 @@ import { test } from '@jest/globals';
 
 import { IssueDetailService } from '@newtine/api/issue/issueDetail.service.js';
 import { IssueFeedService } from '@newtine/api/issue/issueFeed.service.js';
-import { recommendFeed } from '@newtine/api/issue/recommendation/issueRecommendation.js';
+import {
+  ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2,
+  recommendFeed,
+} from '@newtine/api/issue/recommendation/issueRecommendation.js';
 import { InMemoryIssueQueryRepository } from '../fixtures/issue/inMemoryIssueQuery.repository.js';
 import { testTransactionManager } from '../fixtures/transactionManager.js';
 import { toIssueDetailResponse } from '@newtine/api/issue/type/issueDetail.mapper.js';
@@ -177,6 +180,32 @@ test('guest feed uses an anonymous owner and skips member context reads', async 
     }),
     /탐색 세션을 찾을 수 없습니다/,
   );
+});
+
+test('새 피드 세션이 설정된 추천 알고리즘 버전을 스냅샷한다', async () => {
+  const previousVersion = process.env.RECOMMENDATION_ALGORITHM_VERSION;
+  process.env.RECOMMENDATION_ALGORITHM_VERSION = 'issue-card-query-v2';
+  try {
+    const repository = new InMemoryIssueQueryRepository({
+      issues: Array.from({ length: 12 }, (_, index) => issue(index + 1)),
+    });
+    const service = new IssueFeedService(repository, testTransactionManager);
+    const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
+
+    assert.equal(
+      repository.getStoredSession(session.sessionId)?.algorithmVersion,
+      'issue-card-query-v2',
+    );
+    const result = await service.getBatch({
+      owner: { kind: 'MEMBER', userId: USER_ID },
+      sessionId: session.sessionId,
+      batchNo: 0,
+    });
+    assert.equal(result.items.length, 10);
+  } finally {
+    if (previousVersion === undefined) delete process.env.RECOMMENDATION_ALGORITHM_VERSION;
+    else process.env.RECOMMENDATION_ALGORITHM_VERSION = previousVersion;
+  }
 });
 
 test('connected cards require a verified later FOLLOW_UP event', async () => {
@@ -538,7 +567,7 @@ test('run-order ties prefer the quota-complete path after prefix saturation', ()
       freshnessScore: 0.1,
     }),
   ];
-  const result = recommendFeed({
+  const recommendationInput = {
     issues: candidates,
     context: {
       userId: USER_ID,
@@ -556,7 +585,9 @@ test('run-order ties prefer the quota-complete path after prefix saturation', ()
       topicRun: 2,
       entityRun: 2,
     },
-  });
+  };
+  const result = recommendFeed(recommendationInput);
+  const v2Result = recommendFeed(recommendationInput, ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2);
 
   assert.equal(result.items.length, 8);
   assert.equal(result.items.filter((item) => item.selectionType === 'PERSONALIZED').length, 4);
@@ -564,6 +595,8 @@ test('run-order ties prefer the quota-complete path after prefix saturation', ()
   assert.equal(result.items.filter((item) => item.selectionType === 'CONNECTED').length, 1);
   assert.equal(result.items.filter((item) => item.selectionType === 'EXPLORATION').length, 2);
   assert.equal(result.continuation, 'CONSTRAINT_LIMITED');
+  assert.equal(v2Result.items.length, 8);
+  assert.equal(v2Result.continuation, 'CONSTRAINT_LIMITED');
 });
 
 test('missing candidate tags are not treated as known mismatches', () => {

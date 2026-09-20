@@ -19,6 +19,8 @@ import {
 import {
   DEFAULT_CANDIDATE_BUDGET,
   DEFAULT_HIGH_SCORE_THRESHOLD,
+  ISSUE_RECOMMENDATION_ALGORITHM_VERSION,
+  isSupportedRecommendationAlgorithm,
   recommendFeed,
 } from './recommendation/issueRecommendation.js';
 import type { FeedBatchInput, FeedCursorPosition, FeedOwnerInput } from './type/feed.input.js';
@@ -44,6 +46,9 @@ export class IssueFeedService {
     DEFAULT_HIGH_SCORE_THRESHOLD,
     0,
     1,
+  );
+  private readonly algorithmVersion = readAlgorithmVersion(
+    process.env.RECOMMENDATION_ALGORITHM_VERSION,
   );
 
   constructor(
@@ -80,6 +85,7 @@ export class IssueFeedService {
   private createFeedSession(owner: FeedOwner): Promise<FeedSessionRecord> {
     return this.transactionManager.execute(() =>
       this.repository.createFeedSession(owner, new Date(), {
+        algorithmVersion: this.algorithmVersion,
         candidateBudget: this.candidateBudget,
         highScoreThreshold: this.highScoreThreshold,
       }),
@@ -135,6 +141,12 @@ export class IssueFeedService {
         '요청한 묶음 번호가 현재 탐색 순서와 일치하지 않습니다.',
       );
     }
+    if (!isSupportedRecommendationAlgorithm(session.algorithmVersion)) {
+      throw new IssueException(
+        IssueExceptionCode.FeedBatchConflict,
+        '지원하지 않는 탐색 알고리즘 버전입니다. 새 탐색을 시작하세요.',
+      );
+    }
 
     const excludedIssueIds = new Set(
       previousBatches.flatMap((batch) => batch.items.map((item) => item.issueId)),
@@ -156,16 +168,19 @@ export class IssueFeedService {
       session.candidateBudget + 1,
       toCandidateScope(context, actedCategoryCodes, connectedIssueIds, session.highScoreThreshold),
     );
-    const recommendation = recommendFeed({
-      issues,
-      context,
-      latestInteractions,
-      actedCategoryCodes,
-      connectedIssueIds,
-      previousSession: session,
-      highScoreThreshold: session.highScoreThreshold,
-      candidateBudget: session.candidateBudget,
-    });
+    const recommendation = recommendFeed(
+      {
+        issues,
+        context,
+        latestInteractions,
+        actedCategoryCodes,
+        connectedIssueIds,
+        previousSession: session,
+        highScoreThreshold: session.highScoreThreshold,
+        candidateBudget: session.candidateBudget,
+      },
+      session.algorithmVersion,
+    );
     const batch: FeedBatchRecord = {
       sessionId: session.id,
       batchNo: input.batchNo,
@@ -354,4 +369,13 @@ function readBoundedInteger(
   if (raw === undefined || raw.trim() === '') return fallback;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value >= minimum && value <= maximum ? value : fallback;
+}
+
+function readAlgorithmVersion(raw: string | undefined): string {
+  if (raw === undefined || raw.trim() === '') return ISSUE_RECOMMENDATION_ALGORITHM_VERSION;
+  const value = raw.trim();
+  if (!isSupportedRecommendationAlgorithm(value)) {
+    throw new Error(`unsupported recommendation algorithm version: ${value}`);
+  }
+  return value;
 }
