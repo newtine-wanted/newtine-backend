@@ -56,11 +56,11 @@
 ### D. 버전·활성화
 
 - 기존 text algorithm_version 사용; migration 없음. `FeedAlgorithmSnapshot`에 생성 시 알고리즘 버전 전달. 실제 repository와 in-memory fixture의 hardcoded v1 생성 위치 모두 수정.
-- 환경 `RECOMMENDATION_ALGORITHM_VERSION`: 지원 값 `issue-card-query-v1 | issue-card-query-v2`, 기본 v1. 잘못된 명시값은 초기화 실패. 설정은 새 세션 생성에만 사용.
+- 환경 `RECOMMENDATION_ALGORITHM_VERSION`: 지원 값 `issue-card-query-v1 | issue-card-query-v2`, 기본 v2. 잘못된 명시값은 초기화 실패. 설정은 새 세션 생성에만 사용.
 - 저장 batch fast path 뒤, **새 배치 계산 전** session.algorithmVersion으로 dispatch. 기존 세션의 후보 예산/threshold snapshot도 유지. 미지원 버전은 기존 FeedBatchConflict, 저장된 결과는 기존 검증 후 재사용.
-- 호환 코드(v1/v2, 기본v1)를 먼저 모든 트래픽에 반영한 뒤 v2 생성 활성화. 혼합된 오래된 revision에 v2 세션이 가지 않도록 운영 절차 명시.
+- 호환 코드(v1/v2, 기본v2)를 모든 트래픽에 반영한다. 새 세션은 v2로 생성하고, 기존 v1 세션은 저장된 snapshot으로 v1을 계속 사용한다. 혼합된 오래된 revision에 새 v2 세션이 가지 않도록 호환 revision 배포를 먼저 완료한다.
 - rollback은 신규 생성 버전만 v1로 바꾸고 v2 실행 코드 유지. 마지막 v2 생성부터24h TTL + 진행 요청 종료 확인 전 v2 미지원 바이너리로 복귀 금지.
-- 활성화/배포 실행은 이 계약의 자동 권한이 아니다. 목표 검증 후 별도 운영 승인.
+- v2 기본값 변경은 사용자 승인으로 구현 범위에 포함한다. 실제 배포 실행과 운영 p95 달성 판정은 여전히 별도 운영 승인·검증 대상이다.
 
 ## Scope / 파일·경계
 

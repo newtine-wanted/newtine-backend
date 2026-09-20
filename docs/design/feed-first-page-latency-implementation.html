@@ -43,7 +43,7 @@
     <dt>목적 지문</dt><dd>목적: 첫 피드 페이지 응답 개선 / 사용자: API·콘텐츠 파이프라인 개발자 / 문제: 첫 조회의 추천 계산과 불필요한 기사 hydrate / 핵심 흐름: 세션 snapshot → 후보 ID 조회 → feed projection → bounded 추천 → batch 저장·재사용</dd>
     <dt>리뷰 유형</dt><dd>자기 변경 리뷰; 구현자 Codex, 독립 critical reviewer Sol xhigh</dd>
     <dt>기준점</dt><dd><code>092eec8</code> · 브랜치 <code>codex/feed-first-page-latency</code> · 워크트리 <code>/Users/hyunseok/.codex/worktrees/feed-first-page-latency/newtine-backend</code></dd>
-    <dt>범위</dt><dd>추천 v2 opt-in, 세션 버전 snapshot/dispatch, feed/detail 조회 경량화, 관련 회귀 테스트. 커밋·PR·배포·운영 활성화는 제외.</dd>
+    <dt>범위</dt><dd>추천 v2 기본값, 세션 버전 snapshot/dispatch, feed/detail 조회 경량화, 관련 회귀 테스트. 실제 배포 실행과 운영 p95 판정은 제외.</dd>
   </dl>
 </header>
 <nav aria-label="문서 목차">
@@ -61,12 +61,12 @@
   <h2>1. 승인된 설계와 실제 결과</h2>
   <p>설계 기준은 <a href="feed-first-page-latency-design.html">첫 피드 조회 지연 개선 설계</a>와 실행 계약이다. 구현 중 새 API·DB schema·lock·pool·운영 로그 정책을 추가하지 않았다.</p>
   <table><caption>설계 기준 대비 as-built</caption><thead><tr><th>항목</th><th>승인 기준</th><th>구현 결과</th></tr></thead><tbody>
-    <tr><td>기존 동작</td><td>v1 결과와 세션 snapshot 보존</td><td><span class="ok">충족</span> 기본 env는 v1, 저장된 session.algorithmVersion으로 dispatch</td></tr>
+    <tr><td>기존 동작</td><td>v1 결과와 세션 snapshot 보존</td><td><span class="ok">충족</span> 기본 env는 v2, 저장된 session.algorithmVersion으로 dispatch; 기존 v1 세션은 v1 유지</td></tr>
     <tr><td>계산 상한</td><td>공유 transition 10,000 / proposal 24 / greedy 검사 20B</td><td><span class="ok">코드·경계 테스트 충족</span> cut은 정직한 상태로 전달; 증명된 full/same-topic 결과는 cut보다 우선</td></tr>
     <tr><td>조회 경량화</td><td>feed에서 기사·언론사 hydrate 제거, AVAILABLE count 집계</td><td><span class="ok">구현</span> ORM query-builder JOIN/GROUP BY, detail 기사 응답은 유지</td></tr>
     <tr><td>HTTP p95</td><td>≤500ms는 검증 목표</td><td><span class="warn">미측정</span> 기능·CPU 상한 통과가 p95 달성을 의미하지 않음</td></tr>
   </tbody></table>
-  <aside><strong>운영 판정:</strong> v2 활성화·배포 승인이 아니다. 새 세션의 기본은 계속 v1이며, p95와 전체 HTTP smoke 증거가 생긴 뒤 별도 운영 판단이 필요하다.</aside>
+  <aside><strong>운영 판정:</strong> 새 세션 v2 기본값은 승인된 구현 범위다. 실제 배포와 첫 HTTP p95·full smoke 달성 판정은 아직 남아 있으며, rollback은 신규 세션 설정을 v1로 되돌리는 방식이다.</aside>
 </section>
 
 <section id="flow">
@@ -99,7 +99,7 @@ getBatch
     <tr><th>fixtures/tests</th><td>v2 snapshot·상한·sentinel·proof·same-topic 경계와 in-memory snapshot 회귀 추가</td><td>기존 v1 테스트 및 기존 API 계약</td></tr>
   </tbody></table>
   <h3>설계 delta</h3>
-  <p>재승인이 필요한 행동 변경은 없다. 리뷰에서 발견된 witness materialization과 continuation 판정 순서 수정은 승인된 “전체 pool 증명·정직한 종료 상태”를 완성하기 위한 구현 보정이다. schema migration, API contract, lock 범위, pool/infra 설정은 변경하지 않았다.</p>
+  <p>사용자 결정으로 초기 승인 기준의 “v2 opt-in·기본 v1”을 “새 세션 기본 v2”로 변경했다. 기존 v1 session snapshot과 신규 v1 rollback은 유지한다. 리뷰에서 발견된 witness materialization과 continuation 판정 순서 수정은 승인된 “전체 pool 증명·정직한 종료 상태”를 완성하기 위한 구현 보정이다. schema migration, API contract, lock 범위, pool/infra 설정은 변경하지 않았다.</p>
 </section>
 
 <section id="issues">
@@ -141,10 +141,10 @@ getBatch
   <h2>7. 잔여 운영 위험과 다음 행동</h2>
   <ol>
     <li>배포 전 disposable PostgreSQL에서 candidate projection → feed/detail count equivalence → same EntityManager detail reload를 자동 smoke로 추가한다.</li>
-    <li>v2를 활성화하기 전에 새 세션 기준 cold/warm, 회원/게스트, 이력 규모, 동시성별 첫 HTTP p50/p95/p99를 직접 측정한다. 500ms 목표 미달이면 이 구현을 성공으로 포장하지 않는다.</li>
+    <li>v2 기본값으로 배포하기 전과 직후에 새 세션 기준 cold/warm, 회원/게스트, 이력 규모, 동시성별 첫 HTTP p50/p95/p99를 직접 측정한다. 500ms 목표 미달이면 이 구현을 성공으로 포장하지 않는다.</li>
     <li>v2 세션 TTL 동안 v2 코드를 유지하고, 운영 rollback은 신규 생성 버전만 v1로 바꾼다. 실제 설정·배포는 별도 승인이다.</li>
   </ol>
-  <aside><strong>현재 작업 상태:</strong> 구현은 이 worktree에만 있고 commit/PR/push/deploy하지 않았다. 기본 환경값은 v1이므로 운영에서 v2가 자동 활성화되지 않는다.</aside>
+  <aside><strong>현재 작업 상태:</strong> 구현은 기능별 커밋으로 PR #19에 push되어 있고 deploy하지 않았다. 기본 환경값은 v2이며, 명시적으로 v1을 설정하면 신규 세션만 v1으로 rollback할 수 있다.</aside>
 </section>
 
 <section id="control">
@@ -176,7 +176,7 @@ getBatch
     <dt>기술 상태</dt><dd><strong>구현 완료</strong> — 승인 범위의 코드·테스트·빌드가 완료됐다.</dd>
     <dt>리뷰 상태</dt><dd><strong>검토 완료</strong> — blocker 없음, N-01과 HTTP/PG 자동화 공백은 비차단으로 기록됐다.</dd>
     <dt>개발자 운영 이해</dt><dd><strong>미실시</strong> — HTML 결과를 Codex가 관찰하지 않았으므로 확립을 주장하지 않는다.</dd>
-    <dt>다음 소유자</dt><dd>운영 활성화 전 담당자: 실제 disposable PG 회귀와 Cloud Run 유사 첫 HTTP 측정</dd>
+    <dt>다음 소유자</dt><dd>운영 검증 담당자: 실제 disposable PG 회귀와 Cloud Run 유사 첫 HTTP 측정</dd>
   </dl>
 </section>
 </article>
