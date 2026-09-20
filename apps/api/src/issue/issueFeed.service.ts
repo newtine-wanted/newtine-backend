@@ -33,7 +33,6 @@ const DEFAULT_LIMIT = DEFAULT_CANDIDATE_BUDGET;
 
 @Injectable()
 export class IssueFeedService {
-  private readonly locks = new Map<string, Promise<void>>();
   private readonly candidateBudget = readBoundedInteger(
     process.env.RECOMMENDATION_CANDIDATE_BUDGET,
     DEFAULT_LIMIT,
@@ -90,12 +89,10 @@ export class IssueFeedService {
   private async getBatchPage(
     input: FeedBatchInput,
   ): Promise<{ batch: FeedBatchResult; expiresAt: Date }> {
-    return this.withLock(input.sessionId, () =>
-      this.transactionManager.execute(() => this.getBatchLocked(input)),
-    );
+    return this.getBatchUnlocked(input);
   }
 
-  private async getBatchLocked(
+  private async getBatchUnlocked(
     input: FeedBatchInput,
   ): Promise<{ batch: FeedBatchResult; expiresAt: Date }> {
     const owner = normalizeOwner(input.owner);
@@ -185,10 +182,20 @@ export class IssueFeedService {
       topicRun: recommendation.topicRun,
       entityRun: recommendation.entityRun,
     };
-    await this.repository.saveFeedBatch(nextSession, batch);
-    const committedBatch =
-      (await this.repository.findFeedBatch(session.id, input.batchNo)) ?? batch;
-    return { batch: await this.toBatchResult(committedBatch), expiresAt: session.expiresAt };
+    const saveResult = await this.transactionManager.execute(() =>
+      this.repository.saveFeedBatch(nextSession, batch),
+    );
+    const committedBatch = await this.repository.findFeedBatch(session.id, input.batchNo);
+    if (committedBatch === null && saveResult === 'EXISTING') {
+      throw new IssueException(
+        IssueExceptionCode.FeedBatchConflict,
+        '저장된 탐색 묶음을 다시 읽을 수 없습니다.',
+      );
+    }
+    return {
+      batch: await this.toBatchResult(committedBatch ?? batch),
+      expiresAt: session.expiresAt,
+    };
   }
 
   private async findActedCategoryCodes(
@@ -259,22 +266,6 @@ export class IssueFeedService {
     }
     const issues = await Promise.all([...ids].map((id) => this.repository.findIssue(id)));
     return issues.filter((issue): issue is IssueRecord => issue !== null);
-  }
-
-  private async withLock<T>(key: string, work: () => Promise<T>): Promise<T> {
-    const previous = this.locks.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.locks.set(key, current);
-    await previous;
-    try {
-      return await work();
-    } finally {
-      release();
-      if (this.locks.get(key) === current) this.locks.delete(key);
-    }
   }
 }
 

@@ -17,6 +17,7 @@ import {
   IssueException,
   IssueExceptionCode,
   type FeedBatchRecord,
+  type FeedBatchSaveResult,
   type FeedAlgorithmSnapshot,
   type FeedOwner,
   type FeedSessionRecord,
@@ -159,7 +160,10 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     return this.loadBatches(rows);
   }
 
-  async saveFeedBatch(session: FeedSessionRecord, batch: FeedBatchRecord): Promise<void> {
+  async saveFeedBatch(
+    session: FeedSessionRecord,
+    batch: FeedBatchRecord,
+  ): Promise<FeedBatchSaveResult> {
     const manager = this.currentEntityManager();
     if (!manager.isInTransaction()) {
       throw new Error('feed batch transaction context is unavailable');
@@ -167,7 +171,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
 
     const currentSession = await manager.findOne(
       FeedSessionEntity,
-      { id: session.id },
+      { id: session.id, ...feedOwnerWhere(session.owner) },
       { lockMode: LockMode.PESSIMISTIC_WRITE },
     );
     if (currentSession === null) {
@@ -191,7 +195,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       feedSessionId: batch.sessionId,
       batchNo: batch.batchNo,
     });
-    if (existing !== null) return;
+    if (existing !== null) return 'EXISTING';
 
     const latest = await manager.findOne(
       FeedBatchEntity,
@@ -234,7 +238,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       );
     }
 
-    currentSession.nextBatchNo = session.nextBatchNo;
+    currentSession.nextBatchNo = batch.batchNo + 1;
     currentSession.status = session.status;
     currentSession.lastTopic = session.lastTopic;
     currentSession.lastRepresentativeEntityId = session.lastRepresentativeEntityId;
@@ -242,6 +246,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     currentSession.entityRun = session.entityRun;
     manager.persist(currentSession);
     await manager.flush();
+    return 'SAVED';
   }
 
   async findCandidates(

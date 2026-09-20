@@ -150,6 +150,8 @@ export interface FeedBatchRecord {
   createdAt: Date;
 }
 
+export type FeedBatchSaveResult = 'SAVED' | 'EXISTING';
+
 export interface IssueQueryRepository {
   createFeedSession(
     owner: FeedOwner,
@@ -159,7 +161,7 @@ export interface IssueQueryRepository {
   findFeedSession(id: string, owner: FeedOwner, now: Date): Promise<FeedSessionRecord | null>;
   findFeedBatch(sessionId: string, batchNo: number): Promise<FeedBatchRecord | null>;
   findFeedBatches(sessionId: string): Promise<FeedBatchRecord[]>;
-  saveFeedBatch(session: FeedSessionRecord, batch: FeedBatchRecord): Promise<void>;
+  saveFeedBatch(session: FeedSessionRecord, batch: FeedBatchRecord): Promise<FeedBatchSaveResult>;
   findCandidates(
     excludedIssueIds: ReadonlySet<string>,
     limit?: number,
