@@ -51,3 +51,4 @@
 - 단계 단위 테스트 46개, 전체 단위 테스트 280개, 일반 통합 테스트 11개 통과. `REPORT_TEST_DATABASE_URL`이 없어 별도 report_test DB가 필요한 9개는 건너뜀.
 - 뉴스 파이프라인 실제 로컬 DB smoke 1~3단계 모두 통과. 배치 빌드·타입 검사·변경 코드 ESLint 통과.
 - 1~3단계 LLM 지시문 9개는 `prompts/news-pipeline`의 Markdown으로 분리했고 실제 호출 코드가 이를 읽는다.
+
