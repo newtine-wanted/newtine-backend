@@ -29,6 +29,9 @@ export class CollectionService {
     if (run.completed) return run;
     let heartbeatError: unknown;
     let beating: Promise<void> | undefined;
+    // A NAVER/LLM request can outlast the 5-minute lease. Renew every 30 seconds
+    // so another worker cannot reclaim this live run while we await external I/O.
+    // finally clears the timer and waits for an in-flight heartbeat before exit.
     const timer = setInterval(() => {
       if (beating) return;
       beating = this.store

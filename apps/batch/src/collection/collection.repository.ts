@@ -1,6 +1,14 @@
-import type { EntityManager } from '@mikro-orm/core';
+import { raw, type EntityManager } from '@mikro-orm/core';
+import type { EntityManager as SqlEntityManager } from '@mikro-orm/postgresql';
 import { generateUuidV7 } from '@newtine/core';
 import { executePostgresSql } from '@newtine/core/common/database/postgresSql.js';
+import { IssueSchema } from '@newtine/core/issue/persistence/issue.persistence.entity.js';
+import {
+  NewsCollectionRunSchema,
+  NewsDiscoveryRunSchema,
+  NewsIssueSearchSchema,
+  type NewsCollectionRun,
+} from '@newtine/core/news-pipeline/newsPipeline.entity.js';
 import type { DiscoverySnapshot } from '../discovery/discovery.types.js';
 import type {
   CollectionConfig,
@@ -10,114 +18,149 @@ import type {
   SimilarIssue,
 } from './collection.types.js';
 
-type RunRow = { id: string; owner: string; status: string; snapshot: CollectionSnapshot };
+const DETACHED = { disableIdentityMap: true } as const;
+const LEASE_MS = 5 * 60_000;
+function asRun(row: NewsCollectionRun): CollectionRun {
+  return {
+    id: row.id,
+    owner: row.owner,
+    discoveryRunId: row.discoveryRunId,
+    snapshot: structuredClone(row.snapshot) as CollectionSnapshot,
+    completed: row.status === 'COMPLETED',
+  };
+}
 export class CollectionRepository implements CollectionStore {
   constructor(private readonly em: EntityManager) {}
+  private async lock(em: EntityManager): Promise<void> {
+    // PostgreSQL transaction-scoped lock serializes claims even before a run row exists.
+    await executePostgresSql(em, 'select pg_advisory_xact_lock(92020002)');
+  }
   private async synchronizeSearch(em: EntityManager, at: string): Promise<void> {
-    // A single INSERT SELECT captures a consistent published-issue search snapshot.
-    await executePostgresSql(em, 'delete from news_issue_search');
-    await executePostgresSql(
-      em,
-      `insert into news_issue_search (issue_id, title, published_at)
-      select id, title, published_at from issues
-      where publication_status = 'PUBLISHED'
-        and published_at >= $1::timestamptz - interval '7 days'
-        and published_at <= $1::timestamptz`,
-      [at],
+    const until = new Date(at);
+    const issues = await em.find(
+      IssueSchema,
+      {
+        publicationStatus: 'PUBLISHED',
+        publishedAt: { $gte: new Date(until.getTime() - 7 * 86400_000), $lte: until },
+      },
+      { ...DETACHED, fields: ['id', 'title', 'publishedAt'] },
     );
+    await em.nativeDelete(NewsIssueSearchSchema, {});
+    if (issues.length)
+      await em.insertMany(
+        NewsIssueSearchSchema,
+        issues.map((issue) => ({
+          issueId: issue.id,
+          title: issue.title,
+          publishedAt: issue.publishedAt!,
+        })),
+      );
   }
   async refreshSearchIndex(at: string): Promise<void> {
     await this.em.transactional(async (em) => {
-      await executePostgresSql(em, 'select pg_advisory_xact_lock(92020002)');
+      await this.lock(em);
+      if (await em.count(NewsCollectionRunSchema, { status: 'RUNNING' }))
+        throw new Error('COLLECTION_ALREADY_RUNNING');
       await this.synchronizeSearch(em, at);
     });
   }
   async claim(discoveryRunId: string, at: Date, config: CollectionConfig): Promise<CollectionRun> {
     return this.em.transactional(async (em) => {
-      await executePostgresSql(em, 'select pg_advisory_xact_lock(92020002)');
-      const previous = await executePostgresSql<RunRow[]>(
-        em,
-        'select * from news_collection_runs where discovery_run_id = $1',
-        [discoveryRunId],
+      await this.lock(em);
+      const previous = await em.findOne(NewsCollectionRunSchema, { discoveryRunId }, DETACHED);
+      if (previous?.status === 'COMPLETED') return asRun(previous);
+      const source = await em.findOne(
+        NewsDiscoveryRunSchema,
+        { id: discoveryRunId, status: 'COMPLETED' },
+        DETACHED,
       );
-      if (previous[0]?.status === 'COMPLETED')
-        return { ...previous[0], discoveryRunId, completed: true };
-      const sources = await executePostgresSql<{ snapshot: DiscoverySnapshot }[]>(
-        em,
-        "select snapshot from news_discovery_runs where id = $1 and status = 'COMPLETED'",
-        [discoveryRunId],
-      );
-      const candidates = sources[0]?.snapshot.candidates;
+      const candidates = (source?.snapshot as DiscoverySnapshot | undefined)?.candidates;
       if (!Array.isArray(candidates)) throw new Error('COMPLETED_DISCOVERY_REQUIRED');
-      await executePostgresSql(
-        em,
-        "update news_collection_runs set status = 'FAILED', error_code = 'LEASE_EXPIRED' where status = 'RUNNING' and heartbeat_at < now() - interval '5 minutes'",
+      const now = new Date();
+      await em.nativeUpdate(
+        NewsCollectionRunSchema,
+        { status: 'RUNNING', heartbeatAt: { $lt: new Date(now.getTime() - LEASE_MS) } },
+        { status: 'FAILED', errorCode: 'LEASE_EXPIRED' },
       );
-      const active = await executePostgresSql<{ id: string }[]>(
-        em,
-        "select id from news_collection_runs where status = 'RUNNING'",
-      );
-      if (active.length) throw new Error('COLLECTION_ALREADY_RUNNING');
-      const snapshot: CollectionSnapshot = {
-        at: at.toISOString(),
-        config,
-        results: candidates.map((candidate) => ({ candidate })),
-        usage: [],
+      if (await em.count(NewsCollectionRunSchema, { status: 'RUNNING' }))
+        throw new Error('COLLECTION_ALREADY_RUNNING');
+      const snapshot: CollectionSnapshot = previous
+        ? (structuredClone(previous.snapshot) as CollectionSnapshot)
+        : {
+            at: at.toISOString(),
+            config,
+            results: candidates.map((candidate) => ({ candidate })),
+            usage: [],
+          };
+      const row: NewsCollectionRun = {
+        id: previous?.id ?? generateUuidV7(),
+        discoveryRunId,
+        owner: generateUuidV7(),
+        status: 'RUNNING',
+        snapshot,
+        errorCode: null,
+        heartbeatAt: now,
+        finishedAt: null,
       };
-      const rows = await executePostgresSql<RunRow[]>(
-        em,
-        `insert into news_collection_runs (id, discovery_run_id, owner, status, snapshot)
-        values ($1, $2, $3, 'RUNNING', $4::jsonb)
-        on conflict (discovery_run_id) do update set owner = excluded.owner, status = 'RUNNING', error_code = null,
-        heartbeat_at = now(), finished_at = null returning *`,
-        [generateUuidV7(), discoveryRunId, generateUuidV7(), JSON.stringify(snapshot)],
-      );
-      await this.synchronizeSearch(em, rows[0]!.snapshot.at);
-      return { ...rows[0]!, discoveryRunId, completed: false };
+      if (previous)
+        await em.nativeUpdate(
+          NewsCollectionRunSchema,
+          { id: previous.id },
+          {
+            owner: row.owner,
+            status: row.status,
+            errorCode: null,
+            heartbeatAt: now,
+            finishedAt: null,
+          },
+        );
+      else await em.insert(NewsCollectionRunSchema, row);
+      await this.synchronizeSearch(em, snapshot.at);
+      return asRun(row);
     });
   }
   async similar(title: string, at: string): Promise<SimilarIssue[]> {
-    return executePostgresSql<SimilarIssue[]>(
-      this.em,
-      `select issue_id as id, title, similarity(title, $1) as similarity from news_issue_search
-      where published_at >= $2::timestamptz - interval '7 days'
-        and published_at <= $2::timestamptz
-      order by title <-> $1, published_at desc, issue_id limit 10`,
-      [title, at],
+    // pg_trgm is PostgreSQL-specific; filtering and retrieval still use the ORM.
+    const until = new Date(at);
+    return (this.em as SqlEntityManager)
+      .createQueryBuilder(NewsIssueSearchSchema)
+      .select(['issueId as id', 'title', raw('similarity(title, ?) as similarity', [title])])
+      .where({ publishedAt: { $gte: new Date(until.getTime() - 7 * 86400_000), $lte: until } })
+      .orderBy([
+        { [raw('title <-> ?', [title])]: 'asc' },
+        { publishedAt: 'desc' },
+        { issueId: 'asc' },
+      ])
+      .limit(10)
+      .execute<SimilarIssue[]>('all', false);
+  }
+  private async updateOwned(run: CollectionRun, data: Partial<NewsCollectionRun>): Promise<void> {
+    const count = await this.em.nativeUpdate(
+      NewsCollectionRunSchema,
+      { id: run.id, owner: run.owner, status: 'RUNNING' },
+      data,
     );
+    if (!count) throw new Error('COLLECTION_LEASE_LOST');
   }
   async save(run: CollectionRun): Promise<void> {
-    const rows = await executePostgresSql<{ id: string }[]>(
-      this.em,
-      `update news_collection_runs set snapshot = $3::jsonb, heartbeat_at = now()
-      where id = $1 and owner = $2 and status = 'RUNNING' returning id`,
-      [run.id, run.owner, JSON.stringify(run.snapshot)],
-    );
-    if (!rows.length) throw new Error('COLLECTION_LEASE_LOST');
+    await this.updateOwned(run, { snapshot: run.snapshot, heartbeatAt: new Date() });
   }
   async heartbeat(run: CollectionRun): Promise<void> {
-    const rows = await executePostgresSql<{ id: string }[]>(
-      this.em,
-      "update news_collection_runs set heartbeat_at = now() where id = $1 and owner = $2 and status = 'RUNNING' returning id",
-      [run.id, run.owner],
-    );
-    if (!rows.length) throw new Error('COLLECTION_LEASE_LOST');
+    await this.updateOwned(run, { heartbeatAt: new Date() });
   }
   async complete(run: CollectionRun): Promise<void> {
-    const rows = await executePostgresSql<{ id: string }[]>(
-      this.em,
-      `update news_collection_runs set status = 'COMPLETED', snapshot = $3::jsonb, finished_at = now()
-      where id = $1 and owner = $2 and status = 'RUNNING' returning id`,
-      [run.id, run.owner, JSON.stringify(run.snapshot)],
-    );
-    if (!rows.length) throw new Error('COLLECTION_LEASE_LOST');
+    await this.updateOwned(run, {
+      status: 'COMPLETED',
+      snapshot: run.snapshot,
+      finishedAt: new Date(),
+    });
     run.completed = true;
   }
   async fail(run: CollectionRun, reason: string): Promise<void> {
-    await executePostgresSql(
-      this.em,
-      "update news_collection_runs set status = 'FAILED', error_code = $3, finished_at = now() where id = $1 and owner = $2 and status = 'RUNNING'",
-      [run.id, run.owner, reason],
+    await this.em.nativeUpdate(
+      NewsCollectionRunSchema,
+      { id: run.id, owner: run.owner, status: 'RUNNING' },
+      { status: 'FAILED', errorCode: reason },
     );
   }
 }

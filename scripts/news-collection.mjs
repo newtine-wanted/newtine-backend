@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { MikroORM } from '@mikro-orm/postgresql';
 import { createDatabaseOptions } from '../dist/libs/core/src/common/database/database.options.js';
+import { NEWS_PIPELINE_ENTITIES } from '../dist/libs/core/src/news-pipeline/newsPipeline.entity.js';
 import { CollectionRepository } from '../dist/apps/batch/src/collection/collection.repository.js';
 import { CollectionService } from '../dist/apps/batch/src/collection/collection.service.js';
 import { CollectionOpenAiModel } from '../dist/apps/batch/src/collection/collection.model.js';
@@ -13,6 +14,8 @@ import { NaverNewsProvider } from '../dist/apps/batch/src/pipeline/naverNews.pro
 
 export async function collectionOrm() {
   const options = createDatabaseOptions();
+  options.entities.push(...NEWS_PIPELINE_ENTITIES);
+  options.entitiesTs.push(...NEWS_PIPELINE_ENTITIES);
   return MikroORM.init(options);
 }
 async function main() {

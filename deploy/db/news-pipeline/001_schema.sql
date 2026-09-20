@@ -1,18 +1,8 @@
 -- Existing application tables AND their production data are already present.
 -- Add only pipeline-owned tables/indexes; never initialize or rewrite application data.
--- Preserves existing pipeline rows, including historical validation modes.
+-- Defines the final pipeline schema; existing tables/data are never recreated.
 -- Apply with psql -X -v ON_ERROR_STOP=1 -f this-file.sql.
 begin;
-
--- Fail before creating anything if the existing application schema is missing.
-do $$
-begin
-  if to_regclass('issues') is null or to_regclass('issue_details') is null
-    or to_regclass('issue_categories') is null or to_regclass('regions') is null
-    or to_regclass('entities') is null then
-    raise exception 'Existing application schema is required; this script does not create or seed it';
-  end if;
-end $$;
 
 create table if not exists news_discovery_runs (
   id uuid primary key,
@@ -80,7 +70,9 @@ create unique index if not exists news_generation_single_running on news_generat
 
 create table if not exists news_validation_runs (
   id uuid primary key,
-  generation_run_id uuid not null unique references news_generation_runs(id),
+  generation_run_id uuid not null references news_generation_runs(id),
+  validation_mode text not null default 'AI' check (validation_mode in ('AI', 'RULES_ONLY', 'TONE')),
+  constraint news_validation_source_mode_unique unique (generation_run_id, validation_mode),
   owner uuid not null,
   status text not null check (status in ('RUNNING', 'FAILED', 'COMPLETED')),
   snapshot jsonb not null,
@@ -90,13 +82,5 @@ create table if not exists news_validation_runs (
   finished_at timestamptz
 );
 create unique index if not exists news_validation_single_running on news_validation_runs ((true)) where status = 'RUNNING';
-
-alter table news_validation_runs add column if not exists validation_mode text not null default 'AI';
-alter table news_validation_runs drop constraint if exists news_validation_runs_validation_mode_check;
-alter table news_validation_runs add constraint news_validation_runs_validation_mode_check
-  check (validation_mode in ('AI', 'RULES_ONLY', 'TONE'));
-alter table news_validation_runs drop constraint if exists news_validation_runs_generation_run_id_key;
-alter table news_validation_runs drop constraint if exists news_validation_source_mode_unique;
-alter table news_validation_runs add constraint news_validation_source_mode_unique unique (generation_run_id, validation_mode);
 
 commit;

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from '@jest/globals';
+import { test, jest } from '@jest/globals';
 import type { DiscoveredArticle } from '@newtine/core';
 import { CollectionService } from '@newtine/batch/collection/collection.service.js';
 import { CollectionOpenAiModel } from '@newtine/batch/collection/collection.model.js';
@@ -408,3 +408,35 @@ for (const unrelated of [false, true])
     assert.equal(run.snapshot.results[0]!.publisherCount, 1);
     assert.equal(run.snapshot.results[0]!.selectedArticles!.length, 0);
   });
+
+test('heartbeat renews the lease during a long external call and stops on completion', async () => {
+  jest.useFakeTimers();
+  try {
+    const store = new Store();
+    let beats = 0;
+    store.heartbeat = async () => {
+      beats++;
+    };
+    let release!: (value: number[]) => void;
+    const pending = new Promise<number[]>((resolve) => {
+      release = resolve;
+    });
+    const execution = new CollectionService(
+      store,
+      { search: async () => [] },
+      {
+        duplicates: async () => pending,
+        relevant: async () => [],
+      },
+    ).execute('source', config, at);
+    await jest.advanceTimersByTimeAsync(310_000);
+    assert.equal(beats, 10);
+    release([]);
+    await execution;
+    assert.equal(jest.getTimerCount(), 0);
+    await jest.advanceTimersByTimeAsync(60_000);
+    assert.equal(beats, 10);
+  } finally {
+    jest.useRealTimers();
+  }
+});
