@@ -5,7 +5,8 @@
 .gitignore
 
 **/node_modules/
-dist/
+.cache/
+.ttsc-plugins.tgz
 coverage/
 logs/
 *.log

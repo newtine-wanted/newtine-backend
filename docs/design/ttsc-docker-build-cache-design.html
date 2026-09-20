@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Docker ttsc 빌드 캐시 개선 설계</title>
+    <title>Cloud Build ttsc 원격 캐시·단일 push 설계</title>
     <meta name="purpose" content="Docker에서 ttsc 네이티브 플러그인 cold build 반복을 줄이는 빌드 경로 개선" />
     <meta name="audience" content="NEWTINE 백엔드 개발자와 빌드 운영자" />
     <meta name="problem" content="소스 변경 때마다 Docker의 ttsc 네이티브 플러그인 캐시가 사라져 저메모리 환경에서 빌드가 반복적으로 느림" />
-    <meta name="core-flow" content="Docker BuildKit 캐시 mount로 ttsc 캐시 보존 → 순차 빌드 → 연속 빌드 시간과 산출물 검증" />
+    <meta name="core-flow" content="GCS ttsc 플러그인 캐시 복원 → Cloud Build Node 빌드 → runtime 이미지 단일 push → Cloud Run 배포 → cache hit·산출물 검증" />
     <style>
       :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; }
       body { margin: 0; color: #182230; background: #f5f7fa; }
@@ -36,94 +36,156 @@
   </head>
   <body>
     <header>
-      <h1>Docker ttsc 빌드 캐시 개선 설계</h1>
-      <p><span class="state">설계 승인됨</span> · 강도: Compact · 기준일: 2026-09-16</p>
+      <h1>Cloud Build ttsc 원격 캐시·단일 push 설계</h1>
+      <p><span class="state">승인됨 · 구현 진행</span> · 강도: Standard · 기준일: 2026-09-20 · <time datetime="2026-09-20">2026-09-20</time></p>
     </header>
     <main>
       <article>
         <nav aria-label="문서 목차">
-          <a href="#model">목적</a> · <a href="#decision">결정</a> · <a href="#risk">불변식·위험</a> · <a href="#control">설계 이해 점검</a>
+          <a href="#model">목적</a> · <a href="#system-model">흐름</a> · <a href="#decision">결정</a> · <a href="#economics">비용·성능</a> · <a href="#risk">불변식·위험</a> · <a href="#grilling-state">의사결정</a> · <a href="#control">설계 이해 점검</a>
         </nav>
 
         <section id="model">
           <h2>목적과 범위</h2>
           <dl>
             <dt>목표</dt>
-            <dd>Docker 소스 변경 때 반복되는 ttsc 네이티브 플러그인 cold build를 줄인다.</dd>
+            <dd>기본 Cloud Build worker 비용은 유지하면서, 소스 변경마다 반복되는 ttsc 네이티브 플러그인 cold build와 중복 image push를 줄인다.</dd>
             <dt>범위</dt>
-            <dd><code>Dockerfile</code>의 BuildKit cache mount와 중첩 <code>node_modules</code>를 제외하는 <code>.dockerignore</code> 보완을 적용한다.</dd>
+            <dd>Cloud Build의 ttsc 플러그인 캐시 복원·저장, 빌드 산출물과 runtime image 조립 분리, 이미지 단일 push, Cloud Build trigger 설정의 버전 관리·연결을 설계한다.</dd>
             <dt>비범위</dt>
-            <dd>ttsc/Typia 교체, <code>GOMAXPROCS</code>·<code>GOGC</code> 변경, 런타임 이미지 구조 변경, 애플리케이션 코드 변경.</dd>
+            <dd>worker machine type 상향, ttsc/Typia 교체, API·batch 이미지 분리, <code>GOMAXPROCS</code>·<code>GOGC</code> 조정, 런타임 동작 변경.</dd>
           </dl>
         </section>
 
-        <section id="decision">
-          <h2>확정 결정</h2>
-          <ol>
-            <li>중첩 dependency cache가 Docker context에 들어오지 않도록 <code>.dockerignore</code>에 중첩 <code>node_modules</code> 패턴을 명시한다.</li>
-            <li><code>/app/node_modules/.cache/ttsc</code>를 BuildKit cache mount로 보존한다.</li>
-            <li>캐시 id는 <code>newtine-backend-ttsc</code>로 고정하고 <code>sharing=locked</code>로 동시 plugin build 경합을 피한다.</li>
-            <li>기존 저메모리 설정은 유지하고, 컨텍스트 크기·연속 Docker build·산출물을 검증한다.</li>
-          </ol>
-          <pre><code>.dockerignore
-**/node_modules/
+        <section id="system-model">
+          <h2>현재 흐름과 목표 흐름</h2>
+          <figure>
+            <figcaption>현재: Docker 안에서 ttsc cold build와 이중 push</figcaption>
+            <pre><code>Cloud Build worker
+  → docker build
+    → npm ci
+    → ttsc native plugin cold compile
+    → API + batch build
+  → docker push
+  → gcloud run deploy
+  → images: 자동 push (중복)</code></pre>
+          </figure>
+          <figure>
+            <figcaption>목표: GCS에서 작은 plugin cache를 복원하고 image는 한 번 push</figcaption>
+            <pre><code>Cloud Build worker
+  → GCS에서 ttsc/plugins cache 복원
+  → node:24에서 npm ci + npm run build
+  → GCS에 성공한 plugin cache만 저장
+  → runtime-only docker build (dist 조립)
+  → docker push 1회
+  → gcloud run deploy</code></pre>
+          </figure>
+          <p>BuildKit의 registry cache는 Docker layer 공유에는 유효하지만 <code>RUN --mount=type=cache</code>의 디렉터리를 Cloud Build worker 사이에 보존하는 수단으로 전제하지 않는다. Cloud Build가 제공하는 GCS directory cache 방식으로 ttsc의 compiled plugin cache를 직접 복원·저장한다. 현재 저장소에는 <code>cloudbuild.yaml</code>이 없으므로 새 설정 파일을 추가해 trigger가 이를 사용하도록 연결하는 안을 우선 권고한다.</p>
+        </section>
 
-Dockerfile
-RUN --mount=type=cache,id=newtine-backend-ttsc,target=/app/node_modules/.cache/ttsc,sharing=locked \
-    npm run build</code></pre>
-          <p>호스트에서 확인된 약 3.2GB의 ttsc cache는 Docker context에 복사하지 않고 BuildKit builder가 별도로 보존한다.</p>
+        <section id="decision">
+          <h2>현재 권고 결정</h2>
+          <ol>
+            <li>빌드와 image 조립을 분리한다. Cloud Build의 Node step이 <code>npm ci</code>와 <code>npm run build</code>를 실행하고, Dockerfile은 이미 생성된 <code>dist</code>를 runtime image에 복사하는 역할만 맡는다.</li>
+            <li>GCS에는 우선 <code>ttsc/plugins</code>만 저장한다. 현재 로컬 관찰값은 약 93MB이며, 3.1GB인 <code>go-build</code> 전체를 매 build 전송하지 않는다.</li>
+            <li>cache key는 Linux·Node 24·lockfile hash를 포함한다. ttsc/Typia·TypeScript 버전 변경도 새 namespace로 분리하고, cache miss는 정상 cold build로 fallback한다.</li>
+            <li>빌드 성공 후에만 plugin cache를 GCS에 업로드한다. cache 복원·저장은 성능 최적화이므로 GCS 장애가 배포 자체를 막지 않게 한다.</li>
+            <li>cache object는 lockfile hash별 경로를 유지하고, 저장 직후 최신 <strong>3개</strong>의 <code>plugins.tgz</code>만 남긴다. bucket lifecycle의 30일 삭제 규칙은 cleanup 실패를 위한 안전망이며, 정확한 개수 보존은 Cloud Build prune step이 담당한다.</li>
+            <li>이미지는 명시적인 <code>docker push</code> 한 경로만 남기고, 같은 image를 다시 push하는 <code>images:</code> 자동 push는 제거한다. 기본 worker와 <code>GOMAXPROCS=1 GOGC=50</code>, API·batch 순차 빌드는 유지한다.</li>
+          </ol>
+          <pre><code>Dockerfile
+FROM node:24-bookworm-slim AS runtime
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --omit=optional && npm cache clean --force
+COPY dist ./dist
+COPY config ./config
+COPY scripts/migrate.mjs ./scripts/migrate.mjs
+
+Cloud Build
+restore GCS: ttsc/plugins/&lt;platform&gt;/&lt;lock-hash&gt;
+TTSC_CACHE_DIR=/workspace/.cache/ttsc npm ci && npm run build
+save GCS:  ttsc/plugins/&lt;platform&gt;/&lt;lock-hash&gt;  # build 성공 뒤
+docker build -t &lt;image&gt;:$COMMIT_SHA .
+docker push &lt;image&gt;:$COMMIT_SHA</code></pre>
+          <p><code>RUN --mount=type=cache</code>는 로컬·동일 builder 반복에는 유효하지만, 현재처럼 worker가 매번 바뀌는 Cloud Build에서 remote ttsc cache의 저장 경계로 사용하지 않는다.</p>
         </section>
 
         <section id="risk">
           <h2>불변식·실패 복구</h2>
           <ul>
-            <li>runtime stage와 애플리케이션 실행 동작은 변경하지 않는다.</li>
-            <li>Docker context에는 dependency directory가 포함되지 않으며, context transfer가 수 MB 수준으로 줄어야 한다.</li>
-            <li>캐시가 없거나 손상되어도 <code>npm run build</code>가 다시 plugin을 컴파일하는 fallback이 남는다.</li>
-            <li><code>sharing=locked</code>는 같은 builder의 동시 빌드 일부를 직렬화할 수 있다.</li>
-            <li>다른 아키텍처·컴파일러 버전으로 전환할 때는 캐시 id를 분리하거나 clean build를 수행한다.</li>
+            <li>runtime image의 실행 명령·환경·포트는 유지하고, Docker는 이미 생성된 <code>dist</code>만 조립한다.</li>
+            <li>Docker context에는 <code>node_modules</code>가 계속 포함되지 않으며, 빌드 산출물 <code>dist</code>는 runtime image 조립을 위해 context에 허용한다.</li>
+            <li>GCS cache가 없거나 손상되어도 <code>npm run build</code>가 plugin을 다시 컴파일하는 fallback이 남는다.</li>
+            <li>cache 복원은 best-effort이고, cache 저장은 build 성공 뒤에만 수행한다. cache 저장 실패가 image push·deploy 실패로 번지지 않도록 한다.</li>
+            <li>cache prune도 best-effort이다. 목록 조회·삭제 실패는 배포를 막지 않으며, 30일 lifecycle이 오래된 cache namespace를 최종 정리한다. 동시 build 중에는 prune 사이에 일시적으로 3개를 초과할 수 있다.</li>
+            <li>다른 OS·CPU 아키텍처·Node·ttsc·Typia·TypeScript·lockfile 조합은 cache namespace를 분리한다.</li>
+            <li>cache object에는 build 산출물이나 비밀값을 넣지 않고 compiled plugin cache만 저장한다. bucket lifecycle로 오래된 namespace를 정리한다.</li>
           </ul>
-          <p class="risk"><strong>가장 큰 잔여 위험:</strong> BuildKit cache mount를 지원하지 않는 CI builder에서는 문법 또는 캐시 동작이 달라질 수 있다. 그런 환경은 clean build로도 검증해야 한다.</p>
+          <p class="risk"><strong>가장 큰 잔여 위험:</strong> GCS plugin cache가 실제로 <code>ttsc: building source plugin</code> 로그를 없애는지 2회 연속 build로 입증해야 한다. hit가 되지 않으면 그때만 <code>go-build</code> cache 추가 또는 별도 BuildKit cache-dance를 검토한다.</p>
+        </section>
+
+        <section id="economics">
+          <h2>비용·성능·사이드 이펙트</h2>
+          <table>
+            <thead><tr><th>항목</th><th>예상 효과</th><th>주의점</th></tr></thead>
+            <tbody>
+              <tr><td>Cloud Build worker</td><td>machine type 상향 없음. 현재 비용 구조 유지</td><td>cache miss 첫 build의 시간은 그대로일 수 있음</td></tr>
+              <tr><td>GCS plugin cache</td><td>현재 관찰된 약 93MB만 저장·복원. 같은 lockfile·플랫폼이면 plugin cold compile을 건너뛸 가능성이 큼. 최신 3개만 유지</td><td>3.1GB <code>go-build</code> 전체는 처음부터 전송하지 않음. bucket/IAM, prune step과 30일 lifecycle 안전망 필요</td></tr>
+              <tr><td>Docker runtime image</td><td>Docker 안에서 ttsc를 재실행하지 않아 image 조립이 단순해짐. runtime <code>npm ci</code>는 로그상 8초 수준</td><td>CI가 먼저 <code>dist</code>를 만들어야 하며, 로컬 단독 <code>docker build</code> 동작이 달라짐</td></tr>
+              <tr><td>중복 push 제거</td><td>이미 존재하는 layer를 다시 검사·push하는 구간 제거</td><td>20분의 주원인은 아니며, 주로 수 초~수 분의 부수 개선</td></tr>
+            </tbody>
+          </table>
+          <p>현재 로그에서 build context는 4.066MB, build-stage <code>npm ci</code>는 23초, runtime <code>npm ci</code>는 8초였다. 따라서 20분 전체를 dependency 설치나 context 전송으로 설명할 수 없고, ttsc cold compile과 Cloud Run readiness를 별도 측정해야 한다. 첫 cold build는 기존과 비슷할 수 있지만, warm build에서는 plugin compile 시간만큼 줄어드는 것이 1차 목표다.</p>
+          <p>검증은 같은 trigger에서 (1) cache miss, (2) 동일 lockfile의 소스만 변경한 cache hit, (3) lockfile 변경으로 의도적인 miss를 각각 실행한다. hit 케이스에서 <code>ttsc: building source plugin</code> 로그가 사라지고, cache restore/save 실패가 배포 실패로 이어지지 않는지 확인한다.</p>
         </section>
 
         <section id="grilling-state">
           <h2>설계 의사결정 기록</h2>
           <dl>
-            <dt>진행 상태</dt><dd>완료</dd>
-            <dt>확정 근거</dt><dd>Docker Desktop 1.93GiB·2 CPU, 호스트 ttsc cache 약 3.2GB, 반복되는 Docker <code>RUN npm run build</code> cache layer 약 3.48GB, cold build 약 353초 기록. 새 검증에서 Docker context 3.26GB와 <code>apps/api/node_modules/.cache/ttsc</code> 포함을 관찰했다.</dd>
-            <dt>보류 범위</dt><dd>메모리 증설과 <code>GOMAXPROCS</code> 조정은 cache mount 효과 확인 후 별도 판단한다.</dd>
-            <dt>현재 frontier</dt><dd>해결 — <code>**/node_modules/</code>로 root와 nested dependency를 모두 제외한다.</dd>
+            <dt>진행 상태</dt><dd>구현 진행</dd>
+            <dt>범위</dt><dd>기본 worker 유지, GCS ttsc plugin cache, runtime-only image 조립, 단일 push, trigger 설정의 버전 관리.</dd>
+            <dt>확인된 근거</dt><dd>로그는 <code>ttsc</code> source plugin cold compile을 출력했고, Dockerfile은 plain <code>RUN npm run build</code>를 사용한다. context는 4.066MB이며 build-stage <code>npm ci</code>는 23초, runtime <code>npm ci</code>는 8초였다.</dd>
+            <dt>기술적 보정</dt><dd>BuildKit registry cache는 layer cache와 cache mount를 동일하게 보존하지 않으므로 ttsc remote cache의 근거로 삼지 않는다. 현재 local cache는 <code>plugins</code> 약 93MB, <code>go-build</code> 약 3.1GB다.</dd>
+            <dt>기존 결정</dt><dd><code>**/node_modules/</code> ignore와 기본 worker 유지. 패키지 스크립트·ttsc 도입 자체·API와 batch의 순차 빌드는 변경하지 않는다.</dd>
+            <dt>확정된 선택</dt><dd>G1-A: GCS plugin cache. G2-A: 새 <code>cloudbuild.yaml</code>을 저장소에서 버전 관리하고 trigger가 사용하도록 연결. G3-A: 해시별 cache path를 유지하면서 prune step으로 최신 3개를 보존하고, 30일 lifecycle을 안전망으로 둔다.</dd>
           </dl>
         </section>
 
         <section id="control">
           <h2>설계 이해·통제 점검 (design-control)</h2>
-          <p>추가 설계 결정은 <code>**/node_modules/</code>로 확정했다. 점검 상태는 미실시이며, 구현 승인은 별도 기록으로 관리한다.</p>
+          <p>G1·G2·G3가 확정되어 구현으로 진행한다. 구현 후에는 GCS cache 경계, 최신 3개 보존, cache miss fallback, dist 전달, 단일 push, 운영 복구를 확인한다.</p>
           <form id="control-form">
             <p id="progress" aria-live="polite">질문 1 / 4</p>
             <fieldset data-question="0">
-              <legend>Q1. 소스 파일을 수정하면 무엇이 재사용되는가?</legend>
-              <label><input type="radio" name="q0" value="a" /> 애플리케이션 runtime 이미지 전체</label>
-              <label><input type="radio" name="q0" value="b" /> BuildKit이 보존한 ttsc plugin cache</label>
-              <label><input type="radio" name="q0" value="c" /> 기존 dist가 항상 그대로 재사용됨</label>
+              <legend>Q1. 현재 설계에서 새 worker 간 ttsc plugin cache를 공유하는 경계는?</legend>
+              <label><input type="radio" name="q0" value="a" /> Dockerfile의 <code>RUN --mount</code>만 추가</label>
+              <label><input type="radio" name="q0" value="b" /> GCS에 plugin cache를 저장하고 Cloud Build에서 복원·저장</label>
+              <label><input type="radio" name="q0" value="c" /> runtime image에 devDependencies를 포함</label>
             </fieldset>
             <fieldset data-question="1" hidden>
-              <legend>Q2. cache mount가 손상되거나 사라지면 어떻게 되는가?</legend>
+              <legend>Q2. GCS cache가 없거나 손상되면 어떻게 되는가?</legend>
               <label><input type="radio" name="q1" value="a" /> 빌드가 반드시 실패함</label>
               <label><input type="radio" name="q1" value="b" /> plugin을 다시 컴파일하므로 느려질 수 있음</label>
               <label><input type="radio" name="q1" value="c" /> runtime 데이터가 삭제됨</label>
             </fieldset>
             <fieldset data-question="2" hidden>
-              <legend>Q3. <code>sharing=locked</code>의 주된 대가는 무엇인가?</legend>
-              <label><input type="radio" name="q2" value="a" /> 동시 build의 cache 구간이 직렬화될 수 있음</label>
-              <label><input type="radio" name="q2" value="b" /> production API 요청이 느려짐</label>
-              <label><input type="radio" name="q2" value="c" /> TypeScript 변환이 비활성화됨</label>
+              <legend>Q3. 단일 push 흐름은 무엇인가?</legend>
+              <label><input type="radio" name="q2" value="a" /> 명시적인 <code>docker push</code>만 사용하고 <code>images:</code> 자동 push는 제거</label>
+              <label><input type="radio" name="q2" value="b" /> 기존 push를 두 번 유지</label>
+              <label><input type="radio" name="q2" value="c" /> Cloud Run이 build를 다시 수행하도록 image push를 제거</label>
             </fieldset>
             <fieldset data-question="3" hidden>
-              <legend>Q4. 효과를 확인하는 최소 검증은 무엇인가?</legend>
-              <label><input type="radio" name="q3" value="a" /> Docker build를 한 번만 실행</label>
-              <label><input type="radio" name="q3" value="b" /> 연속 build에서 plugin 재컴파일 감소와 산출물 성공을 확인</label>
-              <label><input type="radio" name="q3" value="c" /> tsc로 바꾼 뒤 TypeScript 오류만 확인</label>
+              <legend>Q4. worker 비용을 늘리지 않는다는 불변식은 무엇인가?</legend>
+              <label><input type="radio" name="q3" value="a" /> 고CPU machine type을 추가로 선택</label>
+              <label><input type="radio" name="q3" value="b" /> 기본 worker는 유지하고 cache 재사용으로 시간을 줄임</label>
+              <label><input type="radio" name="q3" value="c" /> Cloud Run runtime CPU를 올림</label>
+            </fieldset>
+            <fieldset data-question="4" hidden>
+              <legend>Q5. 최신 캐시 3개 보존을 담당하는 경계는?</legend>
+              <label><input type="radio" name="q4" value="a" /> <code>age: 3</code> lifecycle만으로 항상 정확히 3개 유지</label>
+              <label><input type="radio" name="q4" value="b" /> 저장 후 prune step이 최신 3개를 남기고, 30일 lifecycle은 안전망으로 동작</label>
+              <label><input type="radio" name="q4" value="c" /> Object Versioning을 켜고 모든 lockfile hash 경로를 하나로 합침</label>
             </fieldset>
             <button type="button" id="previous" class="secondary">이전</button>
             <button type="button" id="next">다음</button>
@@ -138,14 +200,14 @@ RUN --mount=type=cache,id=newtine-backend-ttsc,target=/app/node_modules/.cache/t
 
         <section id="approval-state">
           <h2>승인 상태</h2>
-          <p>2026-09-16 사용자 지시 <q>그럼 개선하자</q>와 후속 지시 <q>그래 개선해</q>로 cache mount와 중첩 <code>node_modules</code> 제외 범위를 승인했다.</p>
-          <p>승인 범위: <code>Dockerfile</code>의 ttsc BuildKit cache mount, <code>.dockerignore</code>의 <code>**/node_modules/</code>, context 크기와 연속 Docker build 검증.</p>
+          <p>사용자가 G1-A·G2-A 권고안에 동의하고 구현을 지시했다. 승인일: 2026-09-20.</p>
+          <p>승인 범위: 기본 worker 유지, GCS <code>ttsc/plugins</code> cache, Node build step 분리, runtime-only image, cache miss fallback, 명시적 단일 push, <code>cloudbuild.yaml</code> trigger 연결과 연속 build·push·deploy 검증.</p>
         </section>
       </article>
     </main>
     <script>
       (() => {
-        const answers = ['b', 'b', 'a', 'b'];
+        const answers = ['b', 'b', 'a', 'b', 'b'];
         const questions = [...document.querySelectorAll('[data-question]')];
         const progress = document.querySelector('#progress');
         const previous = document.querySelector('#previous');

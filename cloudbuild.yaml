@@ -1,0 +1,162 @@
+# Cloud Build deployment for newtine.
+#
+# Before enabling the trigger, create the cache bucket and grant the Cloud Build
+# service account object read/write access. Override _TTSC_CACHE_BUCKET when the
+# project uses a different bucket name. Use this file only from a trusted main
+# or deployment trigger; do not grant cache write access to PR/untrusted builds.
+# Cache failures are intentionally non-fatal; a missing cache falls back to a
+# cold ttsc build. The prune step keeps the three newest lockfile-keyed plugin
+# archives; the bucket lifecycle is a longer-lived safety net for cleanup
+# failures. For this disposable cache bucket, disable GCS soft delete and keep
+# the lifecycle file as the cleanup fallback.
+
+timeout: 1800s
+
+substitutions:
+  _REGION: asia-northeast3
+  _IMAGE_REPOSITORY: cloud-run-source-deploy/newtine-backend
+  _IMAGE: newtine
+  _SERVICE: newtine
+  _TTSC_CACHE_BUCKET: workvoys-newtine-ttsc-cache
+  _TTSC_CACHE_PREFIX: newtine-backend
+
+steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: restore-ttsc-cache
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        lock_hash="$(sha256sum package-lock.json | cut -c1-16)"
+        cache_key="linux-amd64-node24-${lock_hash}"
+        cache_uri="gs://${_TTSC_CACHE_BUCKET}/${_TTSC_CACHE_PREFIX}/${cache_key}/plugins.tgz"
+        cache_file=/workspace/.ttsc-plugins.tgz
+
+        mkdir -p /workspace/.cache/ttsc
+        rm -rf /workspace/.cache/ttsc/plugins
+
+        if gcloud storage cp "${cache_uri}" "${cache_file}"; then
+          if tar -xzf "${cache_file}" -C /workspace/.cache/ttsc; then
+            echo "Restored ttsc plugin cache: ${cache_key}"
+          else
+            echo "WARNING: ttsc plugin cache is invalid; continuing without it."
+            rm -rf /workspace/.cache/ttsc/plugins
+          fi
+        else
+          echo "No ttsc plugin cache found; continuing with a cold build."
+        fi
+
+  - name: node:24-bookworm-slim
+    id: build-application
+    entrypoint: bash
+    env:
+      - TTSC_CACHE_DIR=/workspace/.cache/ttsc
+      - TTSC_GO_CACHE_DIR=/tmp/ttsc-go-build
+      - GOMAXPROCS=1
+      - GOGC=50
+    args:
+      - -ceu
+      - |
+        npm ci
+        npm run build
+        test -d dist
+
+        # Only compiled plugin binaries cross build boundaries. The much larger
+        # Go object cache stays on the worker and is never uploaded.
+        if [ -d /workspace/.cache/ttsc/plugins ]; then
+          cache_file=/workspace/.ttsc-plugins.tgz
+          cache_tmp=/workspace/.ttsc-plugins.tgz.tmp
+          rm -f "${cache_tmp}"
+          if tar -C /workspace/.cache/ttsc -czf "${cache_tmp}" plugins \
+            && mv -f "${cache_tmp}" "${cache_file}"; then
+            :
+          else
+            rm -f "${cache_tmp}" "${cache_file}" || true
+            echo "WARNING: failed to package ttsc plugin cache; continuing."
+          fi
+        fi
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: save-ttsc-cache
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        cache_file=/workspace/.ttsc-plugins.tgz
+        if [ ! -f "${cache_file}" ]; then
+          echo "No ttsc plugin cache archive to upload."
+          exit 0
+        fi
+
+        lock_hash="$(sha256sum package-lock.json | cut -c1-16)"
+        cache_key="linux-amd64-node24-${lock_hash}"
+        cache_uri="gs://${_TTSC_CACHE_BUCKET}/${_TTSC_CACHE_PREFIX}/${cache_key}/plugins.tgz"
+
+        gcloud storage cp "${cache_file}" "${cache_uri}" \
+          || echo "WARNING: failed to save ttsc plugin cache; deployment continues."
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: prune-ttsc-cache
+    waitFor:
+      - save-ttsc-cache
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        cache_glob="gs://${_TTSC_CACHE_BUCKET}/${_TTSC_CACHE_PREFIX}/**/plugins.tgz"
+        cache_list=/tmp/ttsc-cache-objects.txt
+
+        if ! gcloud storage objects list \
+          "${cache_glob}" \
+          --sort-by='~updateTime' \
+          --uri > "${cache_list}"; then
+          echo "WARNING: failed to list ttsc plugin caches; deployment continues."
+          exit 0
+        fi
+
+        mapfile -t cache_objects < "${cache_list}"
+        if (( ${#cache_objects[@]} <= 3 )); then
+          echo "ttsc plugin cache objects: ${#cache_objects[@]} (nothing to prune)"
+          exit 0
+        fi
+
+        echo "Keeping the three newest ttsc plugin caches."
+        for ((index = 3; index < ${#cache_objects[@]}; index++)); do
+          cache_uri="${cache_objects[index]}"
+          if [ -z "${cache_uri}" ]; then
+            continue
+          fi
+          gcloud storage rm "${cache_uri}" \
+            || echo "WARNING: failed to prune ${cache_uri}; deployment continues."
+        done
+
+  - name: gcr.io/cloud-builders/docker
+    id: build-image
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_IMAGE_REPOSITORY}/${_IMAGE}:$COMMIT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    id: push-image
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_IMAGE_REPOSITORY}/${_IMAGE}:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_IMAGE_REPOSITORY}/${_IMAGE}:$COMMIT_SHA
+      - --region
+      - ${_REGION}
+      - --project
+      - $PROJECT_ID
+      - --platform
+      - managed
+      - --quiet
