@@ -15,7 +15,7 @@ function createLogger(): PinoLogger {
   } as unknown as PinoLogger;
 }
 
-test('BatchRunner rejects an unknown job without running a job', async () => {
+test('알 수 없는 작업은 실행하지 않고 종료 코드 1을 반환한다', async () => {
   let called = false;
   const runner = new BatchRunner(
     {
@@ -24,19 +24,24 @@ test('BatchRunner rejects an unknown job without running a job', async () => {
       },
     } as never,
     createLogger(),
+    'databaseCheck',
   );
 
   assert.equal(await runner.run('unknown'), 1);
   assert.equal(called, false);
 });
 
-test('BatchRunner returns zero after a successful database check', async () => {
-  const runner = new BatchRunner({ run: async () => undefined } as never, createLogger());
+test('선택한 작업이 성공하면 종료 코드 0을 반환한다', async () => {
+  const runner = new BatchRunner(
+    { run: async () => undefined } as never,
+    createLogger(),
+    'databaseCheck',
+  );
 
   assert.equal(await runner.run('databaseCheck'), 0);
 });
 
-test('BatchRunner converts a job failure to exit code one', async () => {
+test('작업 실패를 종료 코드 1로 변환한다', async () => {
   const runner = new BatchRunner(
     {
       run: async () => {
@@ -44,39 +49,39 @@ test('BatchRunner converts a job failure to exit code one', async () => {
       },
     } as never,
     createLogger(),
+    'databaseCheck',
   );
 
   assert.equal(await runner.run('databaseCheck'), 1);
 });
 
-test('BatchRunner gives pipeline jobs a process execution id separate from the run id', async () => {
+test('파이프라인 작업에는 실행 ID와 별도의 프로세스 실행 ID를 전달한다', async () => {
   let processExecutionId: string | undefined;
-  const runner = new BatchRunner({ run: async () => undefined } as never, createLogger(), {
-    run: async (value: string) => {
-      processExecutionId = value;
-    },
-  } as never);
+  const runner = new BatchRunner(
+    {
+      run: async (value: string) => {
+        processExecutionId = value;
+      },
+    } as never,
+    createLogger(),
+    'pipelineWorker',
+  );
 
   assert.equal(await runner.run('pipelineWorker'), 0);
   assert.ok(processExecutionId);
   assert.equal(isUuidV7(processExecutionId), true);
 });
 
-test('BatchRunner forwards the shutdown signal to embedding repair', async () => {
+test('임베딩 복구에 종료 신호를 전달한다', async () => {
   let receivedSignal: AbortSignal | undefined;
   const runner = new BatchRunner(
-    { run: async () => undefined } as never,
-    createLogger(),
-    undefined,
     {
-      run: async (
-        _processExecutionId: string,
-        _reclaimProcessExecutionId: string,
-        signal?: AbortSignal,
-      ) => {
+      run: async (_processExecutionId: string, signal?: AbortSignal) => {
         receivedSignal = signal;
       },
     } as never,
+    createLogger(),
+    'pipelineEmbeddingRepair',
   );
   const controller = new AbortController();
 
@@ -84,21 +89,19 @@ test('BatchRunner forwards the shutdown signal to embedding repair', async () =>
   assert.equal(receivedSignal, controller.signal);
 });
 
-test('BatchRunner forwards the process owner and shutdown signal to report worker', async () => {
+test('리포트 워커에 프로세스 소유자와 종료 신호를 전달한다', async () => {
   let owner: string | undefined;
   let receivedSignal: AbortSignal | undefined;
   const controller = new AbortController();
   const runner = new BatchRunner(
-    { run: async () => undefined } as never,
-    createLogger(),
-    undefined,
-    undefined,
     {
       run: async (value: string, signal?: AbortSignal) => {
         owner = value;
         receivedSignal = signal;
       },
     } as never,
+    createLogger(),
+    'reportWorker',
   );
   assert.equal(await runner.run('reportWorker', controller.signal), 0);
   assert.ok(owner && isUuidV7(owner));
