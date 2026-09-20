@@ -1,3 +1,7 @@
+import {
+  assertFollowUpTrack,
+  checkedRunStatus,
+} from '@newtine/core/news-pipeline/newsPipeline.policy.js';
 import type { EntityManager } from '@mikro-orm/core';
 import { generateUuidV7 } from '@newtine/core';
 import { executePostgresSql } from '@newtine/core/common/database/postgresSql.js';
@@ -28,6 +32,7 @@ export class DiscoveryRepository implements DiscoveryStore {
         'select * from news_discovery_runs where day = $1',
         [day],
       );
+      if (existing[0]) checkedRunStatus(existing[0].status);
       if (existing[0]?.status === 'COMPLETED') return { ...existing[0], day, completed: true };
       await executePostgresSql(
         em,
@@ -95,15 +100,20 @@ export class DiscoveryRepository implements DiscoveryStore {
         order by t.issue_id`,
       [at],
     );
-    return rows.map((r) => ({
-      issueId: r.issue_id,
-      title: r.title,
-      keywords: [...new Set([...r.keywords, ...r.related_names])],
-      lastCheckedAt: new Date(r.last_checked_at).toISOString(),
-      expiresAt: new Date(r.expires_at).toISOString(),
-      knownTitles: r.known_titles,
-    }));
+    return rows.map((r) => {
+      const track = {
+        issueId: r.issue_id,
+        title: r.title,
+        keywords: r.keywords,
+        lastCheckedAt: new Date(r.last_checked_at).toISOString(),
+        expiresAt: new Date(r.expires_at).toISOString(),
+        knownTitles: r.known_titles,
+      };
+      assertFollowUpTrack(track);
+      return { ...track, keywords: [...new Set([...track.keywords, ...r.related_names])] };
+    });
   }
+
   async save(run: DiscoveryRun): Promise<void> {
     const rows = await executePostgresSql<{ id: string }[]>(
       this.em,
@@ -131,6 +141,7 @@ export class DiscoveryRepository implements DiscoveryStore {
       );
       if (!rows.length) throw new Error('DISCOVERY_LEASE_LOST');
       for (const track of run.snapshot.tracks ?? []) {
+        assertFollowUpTrack(track);
         const titles = [
           ...new Set([
             ...track.knownTitles,
@@ -139,11 +150,21 @@ export class DiscoveryRepository implements DiscoveryStore {
               .map((c) => c.title),
           ]),
         ];
+        const lastCheckedAt = new Date(
+          Math.min(Date.parse(run.snapshot.at), Date.parse(track.expiresAt) - 1),
+        ).toISOString();
+        assertFollowUpTrack({ ...track, knownTitles: titles, lastCheckedAt });
         await executePostgresSql(
           em,
-          `update news_follow_up_tracks set last_checked_at = least($2::timestamptz, expires_at - interval '1 microsecond'), known_titles = $3::jsonb
-          where issue_id = $1 and last_checked_at = $4::timestamptz`,
-          [track.issueId, run.snapshot.at, JSON.stringify(titles), track.lastCheckedAt],
+          `update news_follow_up_tracks set last_checked_at = $2::timestamptz, known_titles = $3::jsonb
+          where issue_id = $1 and last_checked_at = $4::timestamptz and expires_at = $5::timestamptz`,
+          [
+            track.issueId,
+            lastCheckedAt,
+            JSON.stringify(titles),
+            track.lastCheckedAt,
+            track.expiresAt,
+          ],
         );
       }
     });

@@ -1,3 +1,4 @@
+import { checkedRunStatus } from '@newtine/core/news-pipeline/newsPipeline.policy.js';
 import { raw, type EntityManager } from '@mikro-orm/core';
 import type { EntityManager as SqlEntityManager } from '@mikro-orm/postgresql';
 import { generateUuidV7 } from '@newtine/core';
@@ -68,6 +69,7 @@ export class CollectionRepository implements CollectionStore {
     return this.em.transactional(async (em) => {
       await this.lock(em);
       const previous = await em.findOne(NewsCollectionRunSchema, { discoveryRunId }, DETACHED);
+      if (previous) checkedRunStatus(previous.status);
       if (previous?.status === 'COMPLETED') return asRun(previous);
       const source = await em.findOne(
         NewsDiscoveryRunSchema,
@@ -135,6 +137,7 @@ export class CollectionRepository implements CollectionStore {
       .execute<SimilarIssue[]>('all', false);
   }
   private async updateOwned(run: CollectionRun, data: Partial<NewsCollectionRun>): Promise<void> {
+    if (data.status !== undefined) checkedRunStatus(data.status);
     const count = await this.em.nativeUpdate(
       NewsCollectionRunSchema,
       { id: run.id, owner: run.owner, status: 'RUNNING' },

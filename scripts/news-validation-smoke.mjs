@@ -233,7 +233,7 @@ try {
     { term: rollbackTerm, definition: '롤백되어야 함', source: 'GENERATED' },
     { term: `${rollbackTerm} invalid`, definition: '', source: 'GENERATED' },
   ];
-  await assert.rejects(store.complete(rollback));
+  await assert.rejects(store.complete(rollback), /INVALID_NEWS_TERM/);
   assert.equal(rollback.completed, false);
   assert.equal(
     (await sql(em, 'select status from news_validation_runs where id=$1', [rollback.id]))[0].status,

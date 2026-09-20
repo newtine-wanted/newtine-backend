@@ -1,3 +1,9 @@
+import {
+  assertTermDefinition,
+  checkedValidationMode,
+  validationModeFor,
+  checkedRunStatus,
+} from '@newtine/core/news-pipeline/newsPipeline.policy.js';
 import type { EntityManager } from '@mikro-orm/core';
 import { generateUuidV7 } from '@newtine/core';
 import { executePostgresSql } from '@newtine/core/common/database/postgresSql.js';
@@ -14,7 +20,7 @@ export class ValidationRepository implements ValidationStore {
     at: Date,
     aiValidationEnabled = false,
   ): Promise<ValidationRun> {
-    const mode = aiValidationEnabled ? 'TONE' : 'RULES_ONLY';
+    const mode = validationModeFor(aiValidationEnabled);
     return this.em.transactional(async (em) => {
       await executePostgresSql(em, 'select pg_advisory_xact_lock(92020004)');
       const previous = await executePostgresSql<RunRow[]>(
@@ -22,6 +28,7 @@ export class ValidationRepository implements ValidationStore {
         'select * from news_validation_runs where generation_run_id = $1 and validation_mode = $2',
         [generationRunId, mode],
       );
+      if (previous[0]) checkedRunStatus(previous[0].status);
       if (previous[0]?.status === 'COMPLETED')
         return { ...previous[0], generationRunId, completed: true };
       const sources = await executePostgresSql<{ snapshot: GenerationSnapshot }[]>(
@@ -66,6 +73,7 @@ export class ValidationRepository implements ValidationStore {
     });
   }
   async save(run: ValidationRun): Promise<void> {
+    checkedValidationMode(run.snapshot.validationMode);
     const rows = await executePostgresSql<{ id: string }[]>(
       this.em,
       `update news_validation_runs set snapshot = $3::jsonb, heartbeat_at = now()
@@ -83,6 +91,7 @@ export class ValidationRepository implements ValidationStore {
     if (!rows.length) throw new Error('VALIDATION_LEASE_LOST');
   }
   async complete(run: ValidationRun): Promise<void> {
+    checkedValidationMode(run.snapshot.validationMode);
     await this.em.transactional(async (em) => {
       const rows = await executePostgresSql<{ id: string }[]>(
         em,
@@ -94,6 +103,7 @@ export class ValidationRepository implements ValidationStore {
       for (const result of run.snapshot.results) {
         if (result.status !== 'PASSED') continue;
         for (const term of result.current.glossary ?? []) {
+          assertTermDefinition(term);
           await executePostgresSql(
             em,
             `insert into news_terms (normalized_term, term, definition) values ($1, $2, $3)

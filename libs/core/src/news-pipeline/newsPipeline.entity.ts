@@ -1,9 +1,10 @@
 import { EntitySchema } from '@mikro-orm/core';
+import type { NewsRunStatus } from './newsPipeline.policy.js';
 
 interface NewsRun {
   id: string;
   owner: string;
-  status: string;
+  status: NewsRunStatus;
   snapshot: unknown;
   errorCode: string | null;
   heartbeatAt: Date;

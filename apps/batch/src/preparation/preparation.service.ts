@@ -1,3 +1,4 @@
+import { assertTermDefinition } from '@newtine/core/news-pipeline/newsPipeline.policy.js';
 import type { EntityManager } from '@mikro-orm/core';
 import { IssueSchema } from '@newtine/core/issue/persistence/issue.persistence.entity.js';
 import { IssueQueryDetailEntity } from '@newtine/core/issue/persistence/issueQuery.persistence.entity.js';
@@ -47,6 +48,7 @@ export class NewsPipelinePreparation {
           )
         : [];
       const terms = reusableTerms(details.map((d) => d.glossary));
+      terms.forEach(assertTermDefinition);
       if (terms.length)
         await em.upsertMany(NewsTermSchema, terms, {
           onConflictAction: 'ignore',

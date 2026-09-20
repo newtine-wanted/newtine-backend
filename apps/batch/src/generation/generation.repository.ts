@@ -1,3 +1,4 @@
+import { checkedRunStatus } from '@newtine/core/news-pipeline/newsPipeline.policy.js';
 import type { EntityManager } from '@mikro-orm/core';
 import { generateUuidV7 } from '@newtine/core';
 import { executePostgresSql } from '@newtine/core/common/database/postgresSql.js';
@@ -23,6 +24,7 @@ export class GenerationRepository implements GenerationStore {
         'select * from news_generation_runs where collection_run_id = $1',
         [collectionRunId],
       );
+      if (previous[0]) checkedRunStatus(previous[0].status);
       if (previous[0]?.status === 'COMPLETED')
         return { ...previous[0], collectionRunId, completed: true };
       const sources = await executePostgresSql<{ snapshot: CollectionSnapshot }[]>(
