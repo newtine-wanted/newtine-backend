@@ -1,4 +1,9 @@
-import { calculateScores, eventTime, termKey } from '../generation/generation.policy.js';
+import {
+  calculateScores,
+  eventTime,
+  isBriefSummary,
+  termKey,
+} from '../generation/generation.policy.js';
 import { GENERATIONS, type GenerationResult } from '../generation/generation.types.js';
 import {
   FIELDS,
@@ -37,6 +42,8 @@ export function rules(r: GenerationResult, s: ValidationSnapshot): Finding[] {
   }
   for (const field of ['title', 'integratedSummary', 'importanceReason'] as const)
     if (!text(d[field])) fail(field, '비어 있지 않은 문자열이 필요합니다.');
+  if (!isBriefSummary(d.integratedSummary))
+    fail('integratedSummary', '요약 본문은 1~2문장이어야 합니다.');
   // A discarded proposal is audit data. FIRST_REPORT is checked against the
   // selected articles below; do not reinterpret it as a confirmed event time.
   if (!(d.eventAt === null || typeof d.eventAt === 'string'))

@@ -529,3 +529,14 @@ for (const finding of [
     );
   });
 }
+
+test('validation flags only the overlong summary body for repair', () => {
+  const s = snapshot();
+  const r = s.results[0]!.current;
+  r.draft!.integratedSummary =
+    '정부가 보증금 지원을 발표했어요. 다음 달 시행해요. 대상은 추후 안내해요.';
+  const findings = rules(r, s);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0]!.field, 'integratedSummary');
+  assert.equal(findings[0]!.category, 'RULE');
+});

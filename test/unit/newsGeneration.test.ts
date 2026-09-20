@@ -11,6 +11,7 @@ import {
   eventTime,
   parseGenerationConfig,
   ruleClassification,
+  summarySentenceCount,
 } from '@newtine/batch/generation/generation.policy.js';
 import {
   GENERATIONS,
@@ -344,4 +345,21 @@ test('generation rejects more than three terms', () => {
   const d = draft();
   d.terms = ['보증금', '주거', '지원', '정부'];
   assert.throws(() => checkDraft(d, articles, config), /INVALID_TERMS/);
+});
+
+test('summary body accepts one or two sentences including decimals, rejects three', () => {
+  for (const summary of [
+    '정부가 보증금 지원을 발표했어요.',
+    '정부가 보증금 지원을 발표했어요. 금리는 3.5%예요.',
+    '정부는 “보증금을 지원해요.”라고 밝혔어요.',
+  ]) {
+    const d = draft();
+    d.integratedSummary = summary;
+    assert.equal(checkDraft(d, articles, config).integratedSummary, summary);
+  }
+  assert.equal(summarySentenceCount('정부가 보증금 지원을 발표했어요. 금리는 3.5%예요.'), 2);
+  const d = draft();
+  d.integratedSummary =
+    '정부가 보증금 지원을 발표했어요. 다음 달 시행해요. 자세한 내용은 추후 안내해요.';
+  assert.throws(() => checkDraft(d, articles, config), /INVALID_SUMMARY_SENTENCE_COUNT/);
 });

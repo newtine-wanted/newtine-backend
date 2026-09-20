@@ -42,7 +42,10 @@ export class GenerationOpenAiModel implements GenerationModel {
         title: str,
         eventAt: { type: ['string', 'null'] },
         eventEvidence: { type: ['string', 'null'] },
-        integratedSummary: str,
+        integratedSummary: {
+          ...str,
+          description: '핵심 사건과 직접적인 결과만 담은 짧은 1~2문장의 요약 본문.',
+        },
         summaryLines: { ...arr(str, 3), minItems: 3 },
         viewpoints: {
           type: 'array',

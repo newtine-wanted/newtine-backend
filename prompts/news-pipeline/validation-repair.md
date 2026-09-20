@@ -7,3 +7,5 @@ classification은 topics/regions/entities/generations 배열이며 제공한 DB 
 사건 시각이 불확실하면 eventAt와 eventEvidence는 null이다. 명시된 사건 시각을 쓰는 경우 eventEvidence는 원문의 정확한 발췌다. 점수와 보도 시각은 코드가 계산한다.
 후속 추적은 최대 {{maxTrackingDays}}일, 검색어 최대 3개다. 비활성이면 days=0, queries=[]다.
 terms와 glossary는 최대 3개이며 정확히 대응한다. glossary는 term/definition/source 배열이고 수정한 정의의 source는 GENERATED다.
+
+integratedSummary를 수정할 때는 핵심 사건과 직접적인 결과만 담은 짧은 1~2문장, 한 문단으로 작성한다. 긴 배경과 세부 나열은 제외하고 사실·주체·불확실성은 유지한다. summaryLines는 별도의 핵심요약 3줄이다.

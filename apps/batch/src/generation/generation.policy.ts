@@ -27,6 +27,17 @@ export function parseGenerationConfig(value: unknown): GenerationConfig {
     throw new Error('INVALID_GENERATION_CONFIG');
   return c;
 }
+const summarySegmenter = new Intl.Segmenter('ko', { granularity: 'sentence' });
+export function summarySentenceCount(value: string): number {
+  return [...summarySegmenter.segment(value)].filter((part) => part.segment.trim()).length;
+}
+export function isBriefSummary(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    summarySentenceCount(value) >= 1 &&
+    summarySentenceCount(value) <= 2
+  );
+}
 export const termKey = (term: string): string => normalizedTitle(term);
 export function ruleClassification(
   catalog: Catalog,
@@ -86,6 +97,7 @@ export function checkDraft(
     !text(draft.importanceReason)
   )
     throw new Error('INVALID_GENERATED_DRAFT');
+  if (!isBriefSummary(draft.integratedSummary)) throw new Error('INVALID_SUMMARY_SENTENCE_COUNT');
   if (!Array.isArray(draft.generations) || draft.generations.some((g) => !GENERATIONS.includes(g)))
     throw new Error('INVALID_GENERATIONS');
   if (
