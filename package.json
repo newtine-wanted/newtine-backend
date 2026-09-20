@@ -35,13 +35,9 @@
     "contracts:all": "npm run contracts:sdk && npm run contracts:e2e && npm run contracts:swagger",
     "contracts:check": "npm run contracts:all && npm run test:contracts && npm run typecheck:generated",
     "news:discovery": "node scripts/news-discovery.mjs",
-    "news:discovery:local": "node scripts/news-discovery-local.mjs",
     "news:collection": "node scripts/news-collection.mjs",
-    "news:collection:local": "node scripts/news-collection-local.mjs",
     "news:generation": "node scripts/news-generation.mjs",
-    "news:generation:local": "node scripts/news-generation-local.mjs",
-    "news:validation": "node scripts/news-validation.mjs",
-    "news:validation:local": "node scripts/news-validation-local.mjs"
+    "news:validation": "node scripts/news-validation.mjs"
   },
   "dependencies": {
     "@mikro-orm/core": "7.2.0",
