@@ -57,16 +57,17 @@ export class DiscoveryOpenAiModel implements DiscoveryModel {
     const indexSchema = { type: 'integer', minimum: 0, maximum: titles.length - 1 };
     const response = await this.json<{
       duplicates: { keepIndex: number; duplicateIndexes: number[] }[];
-      excluded: { index: number; reason: 'IRRELEVANT' | 'HYPERLOCAL' }[];
+      excluded: { index: number; title: string; reason: 'IRRELEVANT' | 'HYPERLOCAL' }[];
     }>(
       'deduplicate',
       newsPrompt('discovery-finalize'),
-      titles,
+      titles.map((title, index) => ({ index, title })),
       objectSchema({
         excluded: {
           type: 'array',
           items: objectSchema({
             index: indexSchema,
+            title: { type: 'string' },
             reason: { type: 'string', enum: ['IRRELEVANT', 'HYPERLOCAL'] },
           }),
         },
@@ -90,6 +91,7 @@ export class DiscoveryOpenAiModel implements DiscoveryModel {
         item.index < 0 ||
         item.index >= titles.length ||
         used.has(item.index) ||
+        item.title !== titles[item.index] ||
         !['IRRELEVANT', 'HYPERLOCAL'].includes(item.reason)
       )
         throw new Error('INVALID_EXCLUDED_CANDIDATE');

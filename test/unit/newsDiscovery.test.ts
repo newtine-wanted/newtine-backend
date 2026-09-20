@@ -558,7 +558,13 @@ test('final review excludes a single hyperlocal candidate and records its reason
                   type: 'output_text',
                   text: JSON.stringify({
                     duplicates: [],
-                    excluded: [{ index: 0, reason: 'HYPERLOCAL' }],
+                    excluded: [
+                      {
+                        index: 0,
+                        title: '용인 능원초 등굣길 승하차구역 조성',
+                        reason: 'HYPERLOCAL',
+                      },
+                    ],
                   }),
                 },
               ],
@@ -568,7 +574,9 @@ test('final review excludes a single hyperlocal candidate and records its reason
       )) as typeof fetch,
   );
   assert.deepEqual(await client.groups(['용인 능원초 등굣길 승하차구역 조성']), []);
-  assert.deepEqual(client.excludedCandidates, [{ index: 0, reason: 'HYPERLOCAL' }]);
+  assert.deepEqual(client.excludedCandidates, [
+    { index: 0, title: '용인 능원초 등굣길 승하차구역 조성', reason: 'HYPERLOCAL' },
+  ]);
   const store = new Store();
   store.catalogQueries = [query()];
   const m = model({
@@ -598,7 +606,7 @@ test('final review rejects an index shared by exclusion and duplicate groups', a
                   type: 'output_text',
                   text: JSON.stringify({
                     duplicates: [{ keepIndex: 0, duplicateIndexes: [1] }],
-                    excluded: [{ index: 0, reason: 'IRRELEVANT' }],
+                    excluded: [{ index: 0, title: 'A', reason: 'IRRELEVANT' }],
                   }),
                 },
               ],
@@ -608,4 +616,31 @@ test('final review rejects an index shared by exclusion and duplicate groups', a
       )) as typeof fetch,
   );
   await assert.rejects(client.groups(['A', 'B']), /INVALID_DUPLICATE_INDEX/);
+});
+
+test('final review rejects an exclusion whose title does not match its index', async () => {
+  const client = new DiscoveryOpenAiModel(
+    'test',
+    (async () =>
+      new Response(
+        JSON.stringify({
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify({
+                    duplicates: [],
+                    excluded: [{ index: 0, title: '잘못된 제목', reason: 'IRRELEVANT' }],
+                  }),
+                },
+              ],
+            },
+          ],
+        }),
+      )) as typeof fetch,
+  );
+  await assert.rejects(client.groups(['관세 협상']), /INVALID_EXCLUDED_CANDIDATE/);
 });

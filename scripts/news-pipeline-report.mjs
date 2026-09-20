@@ -25,6 +25,9 @@ const phases = [
   ['2단계', c],
   ['3단계', g],
 ];
+const priorUsageFile = process.argv[6];
+if (priorUsageFile)
+  phases.push(['중단된 2단계 시도', JSON.parse(await readFile(priorUsageFile, 'utf8'))]);
 const lines = [
   '# 뉴스 파이프라인 전체 재실행 결과',
   '',
