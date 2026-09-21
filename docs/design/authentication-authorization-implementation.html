@@ -124,13 +124,14 @@
     <header>
       <p>
         구현 제어 기준선 · 2026-09-14 · 브랜치 <code>codex/authentication-jwt</code> ·
-        <strong class="state">구조 리팩터링 완료 · 운영 적용 보류</strong>
+        <strong class="state">G8-R1 구현 완료 · 운영 제어 보류</strong>
       </p>
       <h1>회원 인증·JWT·사용자/관리자 권한 구현 제어</h1>
       <p>
         승인된 설계를 코드와 실행 가능한 검증 증거로 옮기는 living control artifact다. 현재 상태와
         변경 경계, 실패·복구 불변식, 실제 게이트 결과를 한곳에 기록하고, 구현 중 설계가 바뀌면
-        기준선으로 돌아가 재승인을 요구한다.
+        기준선으로 돌아가 재승인을 요구한다. 현재 승인된 후속 범위는 비밀번호 최소 길이를 12자에서
+        8자로 낮추고 최대 128자와 기존 Argon2id·trim 금지·복잡도 정규식 없음 정책을 유지하는 G8-R1이다.
       </p>
       <dl>
         <dt>목적</dt>
@@ -142,14 +143,15 @@
         <dt>핵심 흐름</dt>
         <dd>승인 기준선 → dependency/schema → auth API/session → JWT principal·role guard → 기존 API 보호 → contract·test·gate 증거</dd>
         <dt>승인 근거</dt>
-        <dd>사용자의 명시적 “구현 ㄱ” 지시와 후속 G14-A 선택·진행 지시(<code>r</code>). 설계 기준선은 <a href="authentication-authorization-design.html">authentication-authorization-design.html</a>에서 관리한다.</dd>
+        <dd>사용자의 명시적 “구현 ㄱ” 지시와 후속 G14-A 선택·진행 지시(<code>r</code>), 2026-09-21 G8-R1 후속 승인. 설계 기준선은 <a href="authentication-authorization-design.html">authentication-authorization-design.html</a>에서 관리한다.</dd>
         <dt>범위 고정</dt>
-        <dd>email/password 로컬 인증, JWT access, HttpOnly refresh rotation, USER/ADMIN role, 현재 /me API 보호, G14-A Compose local bootstrap과 R1-A/R2-A/R3-A 구조 리팩터링. 소셜 로그인과 <code>kakao_id</code>는 이번 구현에서 제거한다.</dd>
+        <dd>email/password 로컬 인증, 8~128자 password policy, JWT access, HttpOnly refresh rotation, USER/ADMIN role, 현재 /me API 보호, G14-A Compose local bootstrap과 R1-A/R2-A/R3-A 구조 리팩터링. 소셜 로그인과 <code>kakao_id</code>는 이번 구현에서 제거한다.</dd>
       </dl>
     </header>
 
     <nav aria-label="구현 제어 탐색">
       <a href="#baseline">기준선</a>
+      <a href="#design-delta">정책 delta</a>
       <a href="#status">상태</a>
       <a href="#refactor-contract">리팩터링 계약</a>
       <a href="#refactor-result">리팩터링 결과</a>
@@ -176,7 +178,7 @@
             </thead>
             <tbody>
               <tr><th scope="row">identity</th><td>email/password local only. canonical email은 trim/lowercase, password는 trim하지 않음.</td><td>DTO/service/unit test</td></tr>
-              <tr><th scope="row">password</th><td>Argon2id hash만 저장. 길이 12~128자. 원문은 log·DB·response에 남기지 않음.</td><td>password service/test/log redaction</td></tr>
+              <tr><th scope="row">password</th><td>Argon2id hash만 저장. 길이 8~128자. 원문은 log·DB·response에 남기지 않음. trim·복잡도 정규식 없음.</td><td>password service/test/log redaction</td></tr>
               <tr><th scope="row">tokens</th><td>jose HS256 access 15분, refresh opaque 30일. access는 JSON, refresh는 HttpOnly cookie.</td><td>JWT service/cookie contract</td></tr>
               <tr><th scope="row">refresh</th><td>token hash만 저장. rotation은 transaction으로 기존 row를 소비하고 신규 row를 만들며, 재사용은 사용자 활성 session 전체 revoke.</td><td>repository transaction/concurrency test</td></tr>
               <tr><th scope="row">role</th><td>보호 요청마다 DB current role 조회. signup은 USER만 생성. ADMIN은 운영자만 부여.</td><td>guard/role test/migration ops note</td></tr>
@@ -184,6 +186,26 @@
               <tr><th scope="row">schema</th><td>users에 email/password_hash/role을 두고 <code>kakao_id</code> 제거. refresh_sessions는 hash·만료·used·revoked 상태를 저장.</td><td>entity/migration/ERD</td></tr>
               <tr><th scope="row">Compose</th><td>운영 base schema 소유권은 바꾸지 않는다. fresh Compose에만 disposable base-schema fixture와 migration runner를 두어 onboarding·authentication delta migration을 순서대로 적용한다.</td><td>compose init SQL/migration service/fresh-volume E2E</td></tr>
               <tr><th scope="row">errors</th><td>입력 400, 인증 실패 401, role/CSRF 403, 중복 email 409, 기존 ProblemDetails shape 유지.</td><td>exception mapping/generated contract</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="design-delta">
+          <h2>G8-R1 설계 delta</h2>
+          <p>
+            기존 12~128자 기준선을 사용자 승인에 따라 8~128자로 완화했다. 비밀번호 hash 형식,
+            저장·로그 redaction, trim 금지, 복잡도 정규식 없음, 최대 길이 128자는 변경하지 않았다.
+          </p>
+          <table>
+            <caption>승인된 정책 변경과 영향 경계</caption>
+            <thead>
+              <tr><th scope="col">항목</th><th scope="col">기존</th><th scope="col">G8-R1</th><th scope="col">영향·복구</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">최소 길이</th><td>12자</td><td>8자</td><td>HTTP type·PasswordService·OpenAPI가 함께 변경된다. 기존 12자 이상 password hash는 재해시 없이 계속 유효하다.</td></tr>
+              <tr><th scope="row">최대 길이</th><td>128자</td><td>128자 유지</td><td>과도한 입력·KDF 비용 증가 경계를 유지한다.</td></tr>
+              <tr><th scope="row">복잡도·정규화</th><td>trim 금지·복잡도 정규식 없음</td><td>유지</td><td>공백 포함 문자열을 길이 기준으로만 판정한다.</td></tr>
+              <tr><th scope="row">저장·마이그레이션</th><td>Argon2id hash만 저장</td><td>유지</td><td>schema/data migration은 없다. 외부에서 이미 저장된 8~11자 hash가 있다면 새 정책부터 login verify 대상이 될 수 있으므로 운영 데이터 inventory는 별도 과제다.</td></tr>
             </tbody>
           </table>
         </section>
@@ -204,6 +226,7 @@
               <tr><th scope="row">6</th><td>gates/review</td><td class="done">완료 · local Compose DB 포함</td><td>format/lint/typecheck/test/build/smoke 결과와 no-write critical review 기록</td></tr>
               <tr><th scope="row">7</th><td>G14-A Compose bootstrap</td><td class="done">완료 · 운영 schema와 분리</td><td>fresh volume에서 base fixture → migration runner → signup/login/refresh/logout E2E 성공</td></tr>
               <tr><th scope="row">8</th><td>R1-A/R2-A/R3-A 구조 리팩터링</td><td class="done">완료 · fresh Compose 기동·auth smoke 포함</td><td>ORM CRUD 경계, use case 분리, Principal decorator, 기존 HTTP/JWT/cookie/refresh/role 동작 회귀 검증</td></tr>
+              <tr><th scope="row">9</th><td>G8-R1 password policy</td><td class="done">완료 · 계약·경계값 검증</td><td>8~128자 경계가 PasswordService·HTTP type·OpenAPI·unit/contract evidence에 일치</td></tr>
             </tbody>
           </table>
           <p><small>각 단계의 “완료”는 코드 존재만이 아니라 완료 조건과 검증 증거를 함께 충족했다는 뜻이다. 운영 DB 적용 대기 단계는 별도로 표시한다.</small></p>
@@ -314,6 +337,9 @@
               <tr><th scope="row">I-007</th><td>초기 Compose auth smoke가 현재 <code>/me/onboarding</code> 응답에 없는 <code>userId</code>를 기대했다.</td><td>검증 스크립트 false negative</td><td class="done">수정됨 — 실제 response contract(status/completedAt/ageGroup/regionCodes)에 맞춰 재실행 통과</td></tr>
               <tr><th scope="row">I-008</th><td>사용자 승인에 따라 인증 구현의 구조적 책임 경계를 개선한다(R1-A ORM, R2-A use case, R3-A Principal decorator).</td><td>repository·service·guard의 가독성, 의존성 방향, 테스트 대상 경계</td><td class="done">해결됨 — 기존 HTTP/JWT/cookie/refresh/role 동작과 public contract를 보존하며 실행 계약 완료</td></tr>
               <tr><th scope="row">I-009</th><td>첫 구조 리팩터링 Compose 기동에서 <code>JwtAuthGuard</code>의 새 <code>AccessPrincipalService</code> 의존성이 <code>OnboardingModule</code>에서 resolve되지 않았다.</td><td>런타임 module export·보호 route startup</td><td class="done">해결됨 — <code>AuthModule</code>이 <code>AccessPrincipalService</code>를 함께 export하고 fresh image·Compose smoke 재검증</td></tr>
+              <tr><th scope="row">I-010</th><td>기존 설계·구현 기준선은 password를 12~128자로 제한했으나, 사용자 승인으로 최소 길이를 8자로 완화한다.</td><td>auth HTTP 입력 계약·PasswordService·OpenAPI·경계값 테스트</td><td class="done">해결됨 — 8~128자 적용, max 128·Argon2id·trim 금지·복잡도 정규식 없음 유지</td></tr>
+              <tr><th scope="row">I-011</th><td><code>npm run test:contracts</code>가 <code>POST /api/auth/signup</code>의 실제 403 선언과 현재 변경 중인 기대값(400/409/500) 불일치로 실패했다.</td><td>전체 계약 게이트</td><td class="open">보류 — 비밀번호 변경과 무관한 기존 작업 트리 변경이며, Origin 정책 또는 계약 기대값을 별도 정렬해야 한다.</td></tr>
+              <tr><th scope="row">I-012</th><td><code>npm run test:smoke</code>가 <code>scripts/smoke.mjs:244</code>에서 feed 응답 503을 200으로 기대해 실패했다.</td><td>통합 smoke 환경·feed dependency</td><td class="open">보류 — auth password policy와 무관한 feed runtime/data 의존성이다.</td></tr>
             </tbody>
           </table>
         </section>
@@ -335,6 +361,9 @@
               <tr><th scope="row">contract</th><td><code>npm run contracts:all</code>, <code>npm run test:contracts</code>, <code>npm run typecheck:generated</code></td><td class="done">통과 · contract 1 suite / 4 tests</td><td>auth route와 실패 status/schema가 generated contract에 반영</td></tr>
               <tr><th scope="row">release gate</th><td><code>npm run test:unit</code>, <code>npm run test:integration</code>, <code>npm run build</code>, <code>npm run test:smoke</code></td><td class="done">통과 · integration 1 suite / 5 tests</td><td>기존 동작 회귀 없음, build/startup 가능</td></tr>
               <tr><th scope="row">refactor gate</th><td>R1-A ORM CRUD/rotation 경계, R2-A use case/application 경계, R3-A principal/decorator와 fresh Compose startup/smoke</td><td class="done">통과 — unit 20 suites / 111 tests, integration 2 suites / 11 tests, build, contracts, fresh Compose auth smoke</td><td>책임 경계가 실제 runtime wiring과 동작 불변식에 함께 반영</td></tr>
+              <tr><th scope="row">password policy</th><td>7/8/128/129자 경계, HTTP type, OpenAPI schema, signup/login 공통 적용</td><td class="done">통과 — auth unit 15 tests, generated typecheck, OpenAPI schema direct assertion</td><td>7·129 거부, 8·128 허용, 12자 기존 비밀번호도 계속 허용</td></tr>
+              <tr><th scope="row">G8-R1 local gate</th><td><code>npm run test:unit</code>, <code>npm run test:integration</code>, <code>npm run lint</code>, <code>npm run typecheck</code>, <code>npm run build</code>, <code>npm run format:check</code></td><td class="done">통과 — unit 54 suites / 334 tests, integration 2 passed·3 skipped / 11 passed·9 skipped, lint/typecheck/build/format 통과</td><td>비밀번호 변경으로 기존 auth·domain·build 회귀 없음</td></tr>
+              <tr><th scope="row">G8-R1 contract/smoke</th><td><code>npm run contracts:all</code>, <code>npm run typecheck:generated</code>, <code>npm run test:contracts</code>, <code>npm run test:smoke</code></td><td class="state">부분 통과 — generation·generated typecheck 통과; I-011 계약 기대값 불일치와 I-012 feed 503으로 전체 판정 보류</td><td>OpenAPI password schema는 8~128자로 확인됨. 보류 이슈를 해결하면 전체 gate 재실행</td></tr>
             </tbody>
           </table>
         </section>
@@ -345,6 +374,7 @@
             리뷰 유형은 자기 변경(self-change)이다. 승인된 설계 기준선, 실제 구현 흐름, 생성 계약과
             fresh gate 결과를 대조했다. 이전 REV-001은 수정·재검증되었고, G14-A 적용 후 Compose
             bootstrap blocker를 해소했다. 이번 구조 리팩터링도 동일한 기준선으로 no-write 재점검했다.
+            G8-R1은 password type·service·OpenAPI·경계값 테스트의 일관성을 no-write로 재점검했다.
             운영 base schema 호환성·정책 확인과 non-blocking risk는 별도 잔여 항목으로 남긴다.
           </p>
           <table>
@@ -395,9 +425,27 @@
                 <td>첫 fresh Compose에서 <code>JwtAuthGuard → AccessPrincipalService</code> 의존성을 <code>OnboardingModule</code>이 resolve하지 못했다.</td>
                 <td><code>AccessPrincipalService</code>를 <code>AuthModule</code> exports에 추가하고 image rebuild 후 API healthy 및 전체 auth smoke 통과</td>
               </tr>
+              <tr>
+                <th scope="row">REV-008</th>
+                <td class="done">fixed · G8-R1 password boundary</td>
+                <td><code>PasswordService</code>와 <code>AuthCredentialsRequest</code>가 서로 다른 최소 길이를 적용하면 signup/login의 입력·hash 경계가 갈라질 수 있다.</td>
+                <td><code>8~128</code> 상수·Typia type·OpenAPI schema·auth unit 15 tests를 대조했고, 7/8/128/129 경계 및 기존 12자 유효성을 확인했다.</td>
+              </tr>
+              <tr>
+                <th scope="row">REV-009</th>
+                <td class="open">non-blocking risk · open</td>
+                <td>전체 <code>test:contracts</code>는 이번 변경과 무관한 현재 작업 트리의 auth failure-status 기대값이 실제 <code>403</code> 선언과 달라 실패한다.</td>
+                <td>I-011로 분리했다. Origin 정책과 계약 기대값을 정렬한 뒤 전체 계약 게이트를 재실행한다.</td>
+              </tr>
+              <tr>
+                <th scope="row">REV-010</th>
+                <td class="open">non-blocking risk · open</td>
+                <td><code>test:smoke</code>는 password 경계와 무관한 feed 응답 <code>503</code>으로 실패했다.</td>
+                <td>I-012로 분리했다. feed runtime/data dependency를 복구한 뒤 smoke를 재실행한다.</td>
+              </tr>
             </tbody>
           </table>
-          <p><strong>리뷰 판단:</strong> 구조 리팩터링과 fresh Compose의 구현 blocker는 해결됨. 운영 base schema/data compatibility는 실제 운영 DB 적용 전 남은 검증 공백이며, REV-004는 G9 정책 확인 사항, REV-005는 non-blocking 운영 위험이다.</p>
+          <p><strong>리뷰 판단:</strong> G8-R1 구현 자체에 concrete blocker는 없다. 다만 전체 release gate는 REV-009·REV-010의 기존 작업 트리/환경 이슈로 아직 green이 아니며, 운영 base schema/data compatibility와 REV-004·REV-005는 별도 잔여 위험이다.</p>
         </section>
 
         <section id="risks">
@@ -416,15 +464,15 @@
           <h2>구현 제어 상태</h2>
           <dl>
             <dt>현재 상태</dt>
-            <dd><strong class="state">구조 리팩터링 완료 · 운영 제어 보류</strong></dd>
+            <dd><strong class="state">G8-R1 구현 완료 · 운영 제어 보류</strong></dd>
             <dt>설계 baseline</dt>
-            <dd><a href="authentication-authorization-design.html">authentication-authorization-design.html</a> · G1~G14-A 설계 승인됨 · 구현 승인됨</dd>
+            <dd><a href="authentication-authorization-design.html">authentication-authorization-design.html</a> · G1~G14-A / R1-A·R2-A·R3-A / G8-R1 설계 승인됨 · 구현 승인됨</dd>
             <dt>개발자 설계 이해</dt>
-            <dd>미실시 — 별도 design-control HTML의 DC1~DC14 self-check는 비차단 참고 자료이며 브라우저 결과는 미보고</dd>
+            <dd>미실시 — 별도 design-control HTML의 DC1~DC15 self-check는 비차단 참고 자료이며 브라우저 결과는 미보고</dd>
             <dt>변경 관리</dt>
             <dd>단일 write owner로 구현한다. 승인 범위를 바꾸는 발견은 이 문서의 issue register에 기록하고 설계 재승인 후 진행한다.</dd>
             <dt>다음 행동</dt>
-            <dd>구조 리팩터링 후 no-write critical review와 전체 게이트 결과를 유지한다. 운영 base schema/data compatibility, G9 Origin 적용 범위, refresh session retention은 기존 별도 확인 사항으로 유지한다.</dd>
+            <dd>I-011 계약 기대값과 I-012 feed smoke 의존성을 별도 정렬한 뒤 전체 contract/smoke gate를 재실행한다. 운영 base schema/data compatibility, G9 Origin 적용 범위, refresh session retention과 운영 password inventory는 기존 별도 확인 사항으로 유지한다.</dd>
           </dl>
           <table>
             <caption>구현 control coverage</caption>
@@ -433,10 +481,10 @@
             </thead>
             <tbody>
               <tr><th scope="row">prediction</th><td>auth 성공 응답, cookie, 보호 route, role demotion 예상</td><td>baseline/status/verification</td></tr>
-              <tr><th scope="row">invariant</th><td>hash-only, token rotation, DB role, 401/403, no credential logging</td><td>baseline/boundaries/risks</td></tr>
+              <tr><th scope="row">invariant</th><td>8~128자, hash-only, token rotation, DB role, 401/403, no credential logging</td><td>baseline/design-delta/boundaries/risks</td></tr>
               <tr><th scope="row">boundary</th><td>controller·guard·service·repository·migration의 책임 분리</td><td>boundaries/status</td></tr>
               <tr><th scope="row">failure recovery</th><td>invalid credential, duplicate, expired/reused refresh, CSRF, transaction rollback</td><td>baseline/verification/risks</td></tr>
-              <tr><th scope="row">verification</th><td>static, domain, session, route, migration, contract, release gate</td><td>verification ledger</td></tr>
+              <tr><th scope="row">verification</th><td>static, domain, session, route, migration, password boundary, contract, release gate</td><td>verification ledger·I-011·I-012</td></tr>
             </tbody>
           </table>
         </section>

@@ -207,7 +207,8 @@
         선택했다. 운영 base schema 소유권은 G12-A대로 유지하면서 Compose에만 disposable fixture와
         migration runner를 추가한다. 사용자의 후속 진행 지시 <code>r</code>(영문 자판의 ㄱ)을 이
         변경 범위에 대한 구현 승인으로 기록하며, 구현·migration·생성 계약은 연결된 구현 제어 문서에
-        기록한다.
+        기록한다. 2026-09-21 후속 승인으로 비밀번호 정책은 최소 8자·최대 128자로 조정하며,
+        Argon2id·password trim 금지·복잡도 정규식 없음은 유지한다.
       </p>
       <dl>
         <dt>목적</dt>
@@ -691,6 +692,8 @@
             <dd>G1 local identity → G7 가입 활성화·endpoint → G8 Argon2id/password schema → G12 users 확장 경계; G3 cookie → G9 same-site/CSRF; G4 role source → role guard·demotion; G5 reuse policy → user-wide revoke; G6 key/TTL → config·검증; G10 admin provisioning → role backfill; G11 logout → session revoke API; G12 → G13 auth response·cookie/error contract; G14 bootstrap boundary → Compose migration/E2E</dd>
             <dt>현재 가정</dt>
             <dd>단일 NestJS API가 access JWT를 발급·검증하고 PostgreSQL이 users와 refresh session을 소유한다. 이번 구현은 email/password만 사용하며 소셜 provider와 카카오 식별자는 사용하지 않는다. browser same-site 배포를 기본으로 하고, 가입 즉시 session을 발급하며 password/email verification은 범위 밖이다. 운영 base schema 소유권은 G12-A대로 기존 schema를 전제로 유지하고, G14-A에 따라 fresh Compose에만 disposable bootstrap을 둔다.</dd>
+            <dt>최근 승인 결정</dt>
+            <dd><strong>G8-R1:</strong> 사용자는 “최소 8자·최대 128자”로의 정책 완화를 승인했다. 7자는 거부하고 8자와 128자는 허용하며, 129자 이상은 거부한다. 비밀번호를 trim하거나 대문자·숫자·특수문자 조합을 강제하지 않는다.</dd>
             <dt>보류된 가지</dt>
             <dd>소셜 로그인·provider 계정 병합·password reset·email verification·cross-site SPA·rate limit은 이번 범위 밖이다. Argon2id 파라미터 benchmark와 실제 base schema DDL 확인은 구현 전 검증 항목이다. Compose bootstrap은 운영 schema를 대체하지 않는 disposable fixture로만 다룬다.</dd>
           </dl>
@@ -712,7 +715,7 @@
               <tr><th scope="row">G5</th><td>refresh 재사용 시 사용자 전체 session revoke</td><td>refresh transaction</td><td>해결됨 — A</td></tr>
               <tr><th scope="row">G6</th><td>jose + HS256, access 15분 / refresh 30일</td><td>config/verification</td><td>해결됨 — A</td></tr>
               <tr><th scope="row">G7</th><td>가입 즉시 활성화·중복 email은 409·signup 직후 session 발급</td><td>G1 → users/auth contract</td><td>해결됨 — A</td></tr>
-              <tr><th scope="row">G8</th><td>Argon2id·12~128자·canonical email, password trim 금지</td><td>G1 → password_hash/migration</td><td>해결됨 — C</td></tr>
+              <tr><th scope="row">G8</th><td>Argon2id·8~128자·canonical email, password trim 금지</td><td>G1 → password_hash/migration</td><td>해결됨 — C · G8-R1 후속 승인</td></tr>
               <tr><th scope="row">G9</th><td>same-site cookie·Origin 검증, cross-origin SPA 미지원</td><td>G3 → refresh controller/config</td><td>해결됨 — A</td></tr>
               <tr><th scope="row">G10</th><td>모든 가입자는 USER, ADMIN은 운영자만 부여</td><td>G4 → migration/operations</td><td>해결됨 — A</td></tr>
               <tr><th scope="row">G11</th><td>logout 시 현재 refresh session만 revoke</td><td>G3·G5 → logout API</td><td>해결됨 — A</td></tr>
@@ -787,7 +790,7 @@
           <h2>승인 후 검증 계획</h2>
           <p>아래 명령과 시나리오는 설계 승인 뒤 실제 파일·route·DB 계약에 맞게 고정한다.</p>
           <ol>
-            <li>auth domain unit: email canonicalization, password KDF·비교, users unique create, JWT claim·algorithm·issuer·audience·TTL 검증.</li>
+            <li>auth domain unit: email canonicalization, password KDF·비교, 7/8/128/129자 password boundary, users unique create, JWT claim·algorithm·issuer·audience·TTL 검증.</li>
             <li>session unit/integration: 원문 미저장, hash 비교, cookie 정책, 만료·used·revoked 거절, 동시 refresh 중 하나만 소비, 재사용 시 전체 revoke.</li>
             <li>guard/controller integration: public/auth/user/admin route matrix, 401과 403, body/query의 user id 위조 실패, role demotion 결과, CSRF 실패.</li>
             <li>database migration: 기존 users row backfill, unique/index/FK/check, migration up과 되돌릴 수 없는 데이터 영향 확인.</li>
@@ -804,12 +807,12 @@
         <section id="design-control-state">
           <h2>설계 이해·통제 점검 (design-control)</h2>
           <p>
-            상태: <strong>미실시</strong>. G14와 R1~R3 설계 delta가 반영되었다. 아래 질문은
+            상태: <strong>미실시</strong>. G14·R1~R3 설계 delta와 G8-R1 password policy delta가 반영되었다. 아래 질문은
             implementation 전 prediction·invariant·boundary·failure
             recovery·verification coverage를 다시 점검한다. 답변 결과는 브라우저 안에만 남으며 Codex에
             자동 전달된다고 가정하지 않는다.
           </p>
-          <p id="design-control-progress" class="control-progress" aria-live="polite">질문 1 / 14 · 답변 0 / 14</p>
+          <p id="design-control-progress" class="control-progress" aria-live="polite">질문 1 / 15 · 답변 0 / 15</p>
           <div id="design-control-questions">
             <section class="control-slide is-active" data-question-id="DC1" data-answer="b" data-explanation="개인 데이터의 소유권은 요청 body/query/path가 아니라 검증된 access JWT의 subject에서 시작해야 한다. controller와 service는 guard가 주입한 principal user id를 사용한다." data-next="principal 주입과 /me route guard의 테스트를 구현한다.">
               <fieldset>
@@ -923,12 +926,20 @@
                 <label><input type="radio" name="dc14" value="c" /> guard가 Principal을 주입하고 controller는 @CurrentUser()로 받는다.</label>
               </fieldset>
             </section>
+            <section class="control-slide" data-question-id="DC15" data-answer="b" data-explanation="비밀번호는 HTTP 입력 검증과 PasswordService 런타임 검증 모두에서 8~128자를 적용한다. 7자는 거부하고 8자와 128자는 허용하며 129자는 거부한다. 복잡도 정규식이나 trim은 추가하지 않는다." data-next="AuthCredentialsRequest·PasswordService·OpenAPI·경계값 테스트가 모두 8~128자로 일치하는지 확인한다.">
+              <fieldset>
+                <legend>DC15. G8-R1 이후 비밀번호 경계와 추가 규칙은 무엇인가?</legend>
+                <label><input type="radio" name="dc15" value="a" /> 최소 12자를 유지하고 클라이언트에서만 8자를 허용한다.</label>
+                <label><input type="radio" name="dc15" value="b" /> 8~128자를 허용하고 7자·129자는 거부하며, trim·복잡도 정규식은 추가하지 않는다.</label>
+                <label><input type="radio" name="dc15" value="c" /> 길이 제한을 없애고 대문자·숫자·특수문자 조합을 강제한다.</label>
+              </fieldset>
+            </section>
           </div>
           <div class="control-nav" aria-label="설계 통제 질문 탐색">
             <button type="button" data-prev-question>이전</button>
             <button type="button" data-next-question>다음</button>
             <button type="button" data-submit-question>현재 답변 제출</button>
-            <span class="control-progress" data-control-progress>질문 1 / 14 · 답변 0 / 14</span>
+            <span class="control-progress" data-control-progress>질문 1 / 15 · 답변 0 / 15</span>
           </div>
           <p><small>각 질문의 결과는 제출한 뒤 해당 카드에만 표시된다. 이 HTML self-check는 설계 이해를 돕는 기록이며 구현 승인이나 브라우저 결과 전송의 대체가 아니다.</small></p>
           <table>
@@ -938,12 +949,12 @@
             </thead>
             <tbody>
               <tr><th scope="row">목표·범위</th><td>G1·G2·G7·G12·G13·G14 및 R2-A 해결</td><td>DC1·DC2·DC10·DC11·DC13</td></tr>
-              <tr><th scope="row">결정·불변식</th><td>G3~G11 및 R1-A 해결, Argon2id 파라미터는 benchmark</td><td>DC3·DC4·DC6·DC7·DC12</td></tr>
+              <tr><th scope="row">결정·불변식</th><td>G3~G11 및 R1-A 해결, G8-R1 password boundary, Argon2id 파라미터는 benchmark</td><td>DC3·DC4·DC6·DC7·DC12·DC15</td></tr>
               <tr><th scope="row">경계·상태 전이</th><td>refresh row·principal 전이와 R1/R3 adapter 경계</td><td>DC1·DC4·DC5·DC6·DC12·DC14</td></tr>
               <tr><th scope="row">실패·복구</th><td>G5·G9·G11 해결</td><td>DC5·DC8·DC9</td></tr>
               <tr><th scope="row">권한·외부 효과</th><td>G4·G10 해결</td><td>DC6·DC7</td></tr>
               <tr><th scope="row">관찰성·운영</th><td>redaction 근거와 G6 해결, rate limit·secret rotation 미확정</td><td>DC3·DC5·DC7·잔여 위험</td></tr>
-              <tr><th scope="row">검증·잔여 위험</th><td>Argon2id benchmark·base schema DDL·fresh Compose E2E·ORM/rotation 회귀 검증 필요</td><td>DC3·DC5·DC10·DC11·DC12·DC13·DC14·구현 제어 문서</td></tr>
+              <tr><th scope="row">검증·잔여 위험</th><td>password 7/8/128/129 boundary·Argon2id benchmark·base schema DDL·fresh Compose E2E·ORM/rotation 회귀 검증 필요</td><td>DC3·DC5·DC10·DC11·DC12·DC13·DC14·DC15·구현 제어 문서</td></tr>
             </tbody>
           </table>
         </section>
@@ -952,13 +963,13 @@
           <h2>승인 상태</h2>
           <dl>
             <dt>현재 상태</dt>
-            <dd><strong class="done">설계 승인됨</strong> — R1-A / R2-A / R3-A</dd>
+            <dd><strong class="done">설계 승인됨</strong> — R1-A / R2-A / R3-A / G8-R1</dd>
             <dt>설계 control 상태</dt>
-            <dd>미실시 — G14-A와 R1~R3 설계 delta 및 DC1~DC14를 기록함. self-check 결과는 비차단</dd>
+            <dd>미실시 — G14-A·R1~R3·G8-R1 설계 delta 및 DC1~DC15를 기록함. self-check 결과는 비차단</dd>
             <dt>구현 승인</dt>
-            <dd>승인됨 — G1~G14-A 및 R1-A / R2-A / R3-A. 기존 API·상태 전이·보안 정책 유지</dd>
+            <dd>승인됨 — G1~G14-A 및 R1-A / R2-A / R3-A / G8-R1. 비밀번호만 8~128자로 완화하고 기존 API·상태 전이·Argon2id·보안 정책은 유지</dd>
             <dt>다음 단계</dt>
-            <dd>구조 리팩터링 구현 → auth 회귀·ORM/rotation 동시성·fresh Compose gate 검증</dd>
+            <dd>G8-R1 구현 → auth boundary·생성 계약·회귀 게이트 검증</dd>
           </dl>
         </section>
       </article>

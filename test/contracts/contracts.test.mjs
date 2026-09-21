@@ -162,6 +162,11 @@ test('generated OpenAPI describes RFC 9457 failure responses', async () => {
   const pipelineCreate = schemas?.PipelineRunCreateRequest;
   assert.deepEqual(Object.keys(pipelineCreate?.properties ?? {}), ['query']);
   assert.equal(schemas?.PipelineRunLimitsRequest, undefined);
+  assert.deepEqual(schemas?.AuthCredentialsRequest?.properties?.password, {
+    type: 'string',
+    minLength: 8,
+    maxLength: 128,
+  });
 
   for (const path of [
     '/auth/signup',
