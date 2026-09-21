@@ -2,7 +2,7 @@ import { tags } from 'typia';
 
 export interface AuthCredentialsRequest {
   email: string & tags.MinLength<1> & tags.MaxLength<254>;
-  password: string & tags.MinLength<12> & tags.MaxLength<128>;
+  password: string & tags.MinLength<8> & tags.MaxLength<128>;
 }
 
 export interface AuthSessionResponse {

@@ -44,6 +44,8 @@ const immediateTransactionManager = {
 };
 
 test('PasswordService가 Argon2id 해시를 사용하고 비밀번호 길이 경계를 거부한다', async () => {
+  assert.equal(PASSWORD_MIN_LENGTH, 8);
+  assert.equal(PASSWORD_MAX_LENGTH, 128);
   const service = new PasswordService();
   const password = 'correct horse battery staple';
   const passwordHash = await service.hash(password);
@@ -52,6 +54,7 @@ test('PasswordService가 Argon2id 해시를 사용하고 비밀번호 길이 경
   assert.equal(await service.verify(password, passwordHash), true);
   assert.equal(await service.verify(`${password}!`, passwordHash), false);
   await assert.rejects(service.hash('x'.repeat(PASSWORD_MIN_LENGTH - 1)), AuthException);
+  await assert.doesNotReject(service.hash('x'.repeat(PASSWORD_MIN_LENGTH)));
   await assert.rejects(service.hash('x'.repeat(PASSWORD_MAX_LENGTH + 1)), AuthException);
   await assert.doesNotReject(service.hash(' '.repeat(PASSWORD_MIN_LENGTH)));
 });
