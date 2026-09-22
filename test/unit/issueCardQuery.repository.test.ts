@@ -268,28 +268,44 @@ test('user context reads only positive onboarding preferences through ORM metada
   );
 });
 
-test('통합 회원 피드 입력은 사용자 기준 단일 raw 조회와 positional parameter를 사용한다', async () => {
+test('통합 회원 피드는 사용자 기준 단일 MikroORM QueryBuilder 조회를 사용한다', async () => {
   const userId = '00000000-0000-0000-0000-000000000041';
   const entityId = '00000000-0000-0000-0000-000000000042';
-  let queryText = '';
-  let queryParams: unknown[] = [];
+  const createdEntities: unknown[] = [];
+  let executeCalls = 0;
   const { entityManager, calls } = fakeEntityManager({
-    getConnection: () => ({
-      execute: async (query: string, params: unknown[]) => {
-        queryText = query;
-        queryParams = params;
-        return [
-          {
-            user_id: userId,
-            age_group: 'AGE_35_49',
-            selected_category_codes: '{"zeta","alpha","zeta"}',
-            selected_entity_ids: JSON.stringify([entityId, entityId]),
-            preferred_region_codes: ['SEOUL', 'BUSAN', 'SEOUL'],
-            acted_category_codes: '["policy","housing","policy"]',
-          },
-        ];
-      },
-    }),
+    createQueryBuilder: (entity) => {
+      createdEntities.push(entity);
+      const query: FakeQueryBuilder = {
+        __subquery: true,
+        select: () => query,
+        where: () => query,
+        andWhere: () => query,
+        distinct: () => query,
+        distinctOn: () => query,
+        orderBy: () => query,
+        innerJoin: () => query,
+        leftJoin: () => query,
+        as: () => query,
+        execute: async () => {
+          executeCalls += 1;
+          return entity === UserSchema
+            ? [
+                {
+                  user_id: userId,
+                  age_group: 'AGE_35_49',
+                  selected_category_codes: '{"zeta","alpha","zeta"}',
+                  selected_entity_ids: JSON.stringify([entityId, entityId]),
+                  preferred_region_codes: ['SEOUL', 'BUSAN', 'SEOUL'],
+                  acted_category_codes: '["policy","housing","policy"]',
+                },
+              ]
+            : [];
+        },
+        getResultList: async () => [],
+      };
+      return query;
+    },
   });
   const repository = new IssueCardQueryRepository(entityManager);
 
@@ -306,22 +322,21 @@ test('통합 회원 피드 입력은 사용자 기준 단일 raw 조회와 posit
     actedCategoryCodes: ['housing', 'policy'],
   });
   assert.equal(calls.length, 0);
-  assert.match(queryText, /from users u/i);
-  assert.match(queryText, /user_category_preferences/i);
-  assert.match(queryText, /user_entity_preferences/i);
-  assert.match(queryText, /user_region_preferences/i);
-  assert.match(queryText, /user_interaction_events/i);
-  assert.match(queryText, /where u\.id = \$1::uuid/i);
-  assert.match(queryText, /weight > 0/i);
-  assert.equal(queryText.includes(userId), false);
-  assert.deepEqual(queryParams, [userId]);
+  assert.equal(executeCalls, 1);
+  assert.deepEqual(createdEntities, [
+    UserCategoryPreferenceSchema,
+    UserEntityPreferenceSchema,
+    UserRegionPreferenceSchema,
+    IssueQueryInteractionEntity,
+    UserSchema,
+  ]);
 });
 
 test('통합 회원 피드는 사용자 부재와 빈 배열을 null·빈 목록으로 정규화한다', async () => {
   const userId = '00000000-0000-0000-0000-000000000043';
   const missingRepository = new IssueCardQueryRepository(
     fakeEntityManager({
-      getConnection: () => ({ execute: async () => [] }),
+      createQueryBuilder: (entity) => fakeMemberInputQuery(entity, []),
     }).entityManager,
   );
   assert.deepEqual(await missingRepository.findFeedMemberInputs(userId), {
@@ -331,8 +346,8 @@ test('통합 회원 피드는 사용자 부재와 빈 배열을 null·빈 목록
 
   const emptyRepository = new IssueCardQueryRepository(
     fakeEntityManager({
-      getConnection: () => ({
-        execute: async () => [
+      createQueryBuilder: (entity) =>
+        fakeMemberInputQuery(entity, [
           {
             user_id: userId,
             age_group: null,
@@ -341,8 +356,7 @@ test('통합 회원 피드는 사용자 부재와 빈 배열을 null·빈 목록
             preferred_region_codes: null,
             acted_category_codes: '[]',
           },
-        ],
-      }),
+        ]),
     }).entityManager,
   );
   assert.deepEqual(await emptyRepository.findFeedMemberInputs(userId), {
@@ -403,24 +417,27 @@ test('회원 행동 분류는 사용자 ID 서브쿼리와 최소 projection만 
   ]);
 });
 
-test('회원 후보 SQL은 interaction 목록 없이 모든 후보 slice에 NOT EXISTS를 적용한다', async () => {
+test('회원 후보는 interaction 목록 없이 사용자 ID subquery를 모든 후보 slice에 적용한다', async () => {
   const userId = '00000000-0000-7000-8000-000000000043';
-  const interactionPredicates: Array<{ sql: string; params: readonly unknown[] }> = [];
+  const candidateConditions: unknown[] = [];
+  const createdEntities: unknown[] = [];
   const { entityManager } = fakeEntityManager({
     getConnection: () => ({}),
     createQueryBuilder: (entity) => {
+      createdEntities.push(entity);
       const query: FakeQueryBuilder = {
         __subquery: true,
         select: () => query,
         where: () => query,
         andWhere: (condition) => {
-          if (isRawQueryFragment(condition)) {
-            interactionPredicates.push({ sql: condition.sql, params: condition.params });
-          }
+          candidateConditions.push(condition);
           return query;
         },
+        distinct: () => query,
         distinctOn: () => query,
         orderBy: () => query,
+        innerJoin: () => query,
+        leftJoin: () => query,
         limit: () => query,
         execute: async () => [],
         getResultList: async () => [],
@@ -443,23 +460,21 @@ test('회원 후보 SQL은 interaction 목록 없이 모든 후보 slice에 NOT 
   };
   await repository.findCandidates(new Set(), 2, scope);
 
-  const exclusionPredicates = interactionPredicates.filter((predicate) =>
-    /not exists/i.test(predicate.sql),
+  const exclusionPredicates = candidateConditions.filter(
+    (condition): condition is { id: { $nin: unknown } } =>
+      typeof condition === 'object' && condition !== null && 'id' in condition,
   );
   assert.ok(exclusionPredicates.length >= 3);
-  for (const predicate of exclusionPredicates) {
-    assert.match(predicate.sql, /not exists/i);
-    assert.match(predicate.sql, /user_interaction_events/i);
-    assert.deepEqual(predicate.params, [userId]);
-  }
+  assert.ok(exclusionPredicates.every((condition) => '$nin' in condition.id));
+  assert.ok(createdEntities.filter((entity) => entity === IssueQueryInteractionEntity).length >= 3);
 });
 
-test('연결 후보 여부는 후보를 선별한 같은 SQL projection에서 계산한다', async () => {
+test('연결 후보 여부는 후보를 선별한 같은 QueryBuilder projection에서 계산한다', async () => {
   const userId = '00000000-0000-7000-8000-000000000044';
   const targetId = '00000000-0000-7000-8000-000000000045';
   const target = issuePersistenceRow(targetId);
   const selectedProjections: unknown[] = [];
-  const selectedPredicates: Array<{ sql: string; params: readonly unknown[] }> = [];
+  const joinCalls: unknown[] = [];
   let candidateExecuteCalls = 0;
   const { entityManager } = fakeEntityManager({
     createQueryBuilder: () => {
@@ -471,17 +486,24 @@ test('연결 후보 여부는 후보를 선별한 같은 SQL projection에서 �
         },
         where: () => query,
         andWhere: (condition) => {
-          if (isRawQueryFragment(condition)) {
-            selectedPredicates.push({ sql: condition.sql, params: condition.params });
-          }
+          joinCalls.push(condition);
           return query;
         },
+        distinct: () => query,
         distinctOn: () => query,
         orderBy: () => query,
+        innerJoin: (...args) => {
+          joinCalls.push(args);
+          return query;
+        },
+        leftJoin: (...args) => {
+          joinCalls.push(args);
+          return query;
+        },
         limit: () => query,
         execute: async () => {
           candidateExecuteCalls += 1;
-          return candidateExecuteCalls === 1 ? [] : [{ id: targetId, connected: true }];
+          return candidateExecuteCalls === 1 ? [] : [{ id: targetId, connectedIssueId: targetId }];
         },
         getResultList: async () => [],
       };
@@ -504,50 +526,11 @@ test('연결 후보 여부는 후보를 선별한 같은 SQL projection에서 �
 
   assert.equal(candidates[0]?.connected, true);
   assert.equal(candidateExecuteCalls, 2);
-  const rawProjections = selectedProjections
+  const connectedProjections = selectedProjections
     .flatMap((fields) => (Array.isArray(fields) ? fields : []))
-    .filter(isRawQueryFragment);
-  const connectedProjection = rawProjections.find((projection) =>
-    /case when/i.test(projection.sql),
-  );
-  const connectedSliceProjection = rawProjections.find((projection) =>
-    /true as/i.test(projection.sql),
-  );
-  assert.ok(connectedProjection);
-  assert.ok(connectedSliceProjection);
-  assert.match(connectedProjection.sql, /case when/i);
-  assert.match(connectedProjection.sql, /user_interaction_events/i);
-  assert.match(connectedProjection.sql, /select distinct relation\.to_issue_id/i);
-  assert.match(connectedProjection.sql, /select distinct on \(interaction\.issue_id\)/i);
-  assert.match(
-    connectedProjection.sql,
-    /order by interaction\.issue_id, interaction\.accepted_order desc, interaction\.id desc/i,
-  );
-  assert.match(
-    connectedProjection.sql,
-    /join issue_relations relation\s+on relation\.from_issue_id = latest_interaction\.issue_id/i,
-  );
-  assert.match(connectedProjection.sql, /latest_interaction\.event_type = 'LIKE'/i);
-  assert.doesNotMatch(connectedProjection.sql, /relation\.to_issue_id\s*=\s*issue\.id/i);
-  const derivedSetEnd = connectedProjection.sql.indexOf(') latest_interaction');
-  const outerLikeFilter = connectedProjection.sql.indexOf("latest_interaction.event_type = 'LIKE'");
-  assert.ok(derivedSetEnd >= 0);
-  assert.ok(outerLikeFilter > derivedSetEnd);
-  assert.equal(
-    connectedProjection.sql.slice(0, derivedSetEnd).includes("event_type = 'LIKE'"),
-    false,
-  );
-  assert.equal(connectedProjection.params[0], userId);
-
-  const connectedPredicate = selectedPredicates.find((predicate) =>
-    /select distinct relation\.to_issue_id/i.test(predicate.sql),
-  );
-  assert.ok(connectedPredicate);
-  assert.deepEqual(connectedPredicate.params, [userId]);
-  const projectedPredicate = connectedProjection.sql
-    .replace(/^case when /i, '')
-    .replace(/ then true else false end(?: as .*)?$/i, '');
-  assert.equal(connectedPredicate.sql.replace(/\[::alias::\]/g, 'issue'), projectedPredicate);
+    .filter((projection) => projection === 'connectedIssue.connectedIssueId as connectedIssueId');
+  assert.ok(connectedProjections.length >= 2);
+  assert.ok(joinCalls.some((call) => Array.isArray(call) && call[1] === 'connectedIssue'));
 });
 
 test('scoped candidates use ORM projections, public filtering, exclusion, and bounded slices', async () => {
@@ -734,7 +717,7 @@ test('latest interactions are selected by PostgreSQL query builder and follow-up
     verifiedAt: new Date('2026-01-03T00:00:00.000Z'),
   };
   const queryCalls: {
-    select?: string | readonly string[];
+    select?: unknown;
     where?: unknown;
     distinctOn?: string;
     orderBy?: unknown;
@@ -823,11 +806,15 @@ interface FakeEntityManager {
 
 interface FakeQueryBuilder {
   readonly __subquery: true;
-  select: (field: string | readonly string[]) => FakeQueryBuilder;
+  select: (field: unknown) => FakeQueryBuilder;
   where: (where: unknown) => FakeQueryBuilder;
   andWhere: (where: unknown) => FakeQueryBuilder;
+  distinct?: () => FakeQueryBuilder;
   distinctOn: (fields: string) => FakeQueryBuilder;
   orderBy: (orderBy: unknown) => FakeQueryBuilder;
+  innerJoin?: (...args: unknown[]) => FakeQueryBuilder;
+  leftJoin?: (...args: unknown[]) => FakeQueryBuilder;
+  as?: (alias: string) => unknown;
   limit?: (limit: number) => FakeQueryBuilder;
   execute?: (...args: unknown[]) => Promise<unknown[]>;
   getResultList: () => Promise<unknown[]>;
@@ -862,8 +849,12 @@ function fakeEntityManager(options: FakeEntityManagerOptions = {}): {
           select: () => query,
           where: () => query,
           andWhere: () => query,
+          distinct: () => query,
           distinctOn: () => query,
           orderBy: () => query,
+          innerJoin: () => query,
+          leftJoin: () => query,
+          as: () => query,
           getResultList: async () => [],
         };
         void entity;
@@ -893,15 +884,22 @@ function fakeEntityManager(options: FakeEntityManagerOptions = {}): {
   };
 }
 
-function isRawQueryFragment(value: unknown): value is { sql: string; params: readonly unknown[] } {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'sql' in value &&
-    typeof value.sql === 'string' &&
-    'params' in value &&
-    Array.isArray(value.params)
-  );
+function fakeMemberInputQuery(entity: unknown, rows: unknown[]): FakeQueryBuilder {
+  const query: FakeQueryBuilder = {
+    __subquery: true,
+    select: () => query,
+    where: () => query,
+    andWhere: () => query,
+    distinct: () => query,
+    distinctOn: () => query,
+    orderBy: () => query,
+    innerJoin: () => query,
+    leftJoin: () => query,
+    as: () => query,
+    execute: async () => (entity === UserSchema ? rows : []),
+    getResultList: async () => [],
+  };
+  return query;
 }
 
 function isFindOptionsWithLimit(value: unknown): value is { limit: number } {

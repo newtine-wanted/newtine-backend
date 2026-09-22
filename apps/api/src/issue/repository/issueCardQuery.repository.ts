@@ -314,65 +314,46 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
   }
 
   async findFeedMemberInputs(userId: string): Promise<FeedMemberInputs> {
-    const rows = await executePostgresSql<FeedMemberInputsRow[]>(
-      this.currentEntityManager(),
-      `
-        SELECT
-          u.id::text AS user_id,
-          u.age_group::text AS age_group,
-          COALESCE(
-            (
-              SELECT array_agg(
-                DISTINCT preference.category_code
-                ORDER BY preference.category_code
-              )
-                FROM user_category_preferences preference
-               WHERE preference.user_id = u.id
-                 AND preference.weight > 0
-            ),
-            ARRAY[]::text[]
-          ) AS selected_category_codes,
-          COALESCE(
-            (
-              SELECT array_agg(
-                DISTINCT preference.entity_id::text
-                ORDER BY preference.entity_id::text
-              )
-                FROM user_entity_preferences preference
-               WHERE preference.user_id = u.id
-                 AND preference.weight > 0
-            ),
-            ARRAY[]::text[]
-          ) AS selected_entity_ids,
-          COALESCE(
-            (
-              SELECT array_agg(
-                DISTINCT preference.region_code
-                ORDER BY preference.region_code
-              )
-                FROM user_region_preferences preference
-               WHERE preference.user_id = u.id
-                 AND preference.weight > 0
-            ),
-            ARRAY[]::text[]
-          ) AS preferred_region_codes,
-          COALESCE(
-            (
-              SELECT array_agg(
-                DISTINCT issue.category_code
-                ORDER BY issue.category_code
-              )
-                FROM user_interaction_events event
-                JOIN issues issue ON issue.id = event.issue_id
-               WHERE event.user_id = u.id
-            ),
-            ARRAY[]::text[]
-          ) AS acted_category_codes
-        FROM users u
-        WHERE u.id = $1::uuid
-      `,
-      [userId],
-    );
+    const manager = this.currentSqlEntityManager();
+    const selectedCategoryCodes = manager
+      .createQueryBuilder(UserCategoryPreferenceSchema, 'preference')
+      .select(
+        sql`coalesce(array_agg(distinct ${sql.ref('preference.category_code')} order by ${sql.ref('preference.category_code')}), ARRAY[]::text[])`,
+      )
+      .where({ userId: sql.ref('user.id'), weight: { $gt: 0 } });
+    const selectedEntityIds = manager
+      .createQueryBuilder(UserEntityPreferenceSchema, 'preference')
+      .select(
+        sql`coalesce(array_agg(distinct ${sql.ref('preference.entity_id')}::text order by ${sql.ref('preference.entity_id')}::text), ARRAY[]::text[])`,
+      )
+      .where({ userId: sql.ref('user.id'), weight: { $gt: 0 } });
+    const preferredRegionCodes = manager
+      .createQueryBuilder(UserRegionPreferenceSchema, 'preference')
+      .select(
+        sql`coalesce(array_agg(distinct ${sql.ref('preference.region_code')} order by ${sql.ref('preference.region_code')}), ARRAY[]::text[])`,
+      )
+      .where({ userId: sql.ref('user.id'), weight: { $gt: 0 } });
+    const actedCategoryCodes = manager
+      .createQueryBuilder(IssueQueryInteractionEntity, 'event')
+      .select(
+        sql`coalesce(array_agg(distinct ${sql.ref('issue.category_code')} order by ${sql.ref('issue.category_code')}), ARRAY[]::text[])`,
+      )
+      .innerJoin(sql.ref('issues'), 'issue', {
+        'event.issueId': sql.ref('issue.id'),
+      })
+      .where({ userId: sql.ref('user.id') });
+    const rows = (await manager
+      .createQueryBuilder(UserSchema, 'user')
+      .select([
+        'user.id as user_id',
+        'user.ageGroup as age_group',
+        selectedCategoryCodes.as('selected_category_codes'),
+        selectedEntityIds.as('selected_entity_ids'),
+        preferredRegionCodes.as('preferred_region_codes'),
+        actedCategoryCodes.as('acted_category_codes'),
+      ] as never)
+      .where({ id: userId })
+      .execute('all', false)) as FeedMemberInputsRow[];
     const row = rows[0];
     const persistedUserId = nullableString(row?.user_id ?? row?.userId);
     if (persistedUserId === null) {
@@ -614,35 +595,25 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     connectedUserId?: string,
   ): Promise<CandidateIssueIdRow[]> {
     const query = manager.createQueryBuilder(IssueQueryIssueEntity, 'issue');
-    const connectedProjection =
-      connectedUserId !== undefined
-        ? raw('true').as('connected')
-        : memberUserId === undefined
-          ? undefined
-          : raw(`case when ${connectedCandidatePredicate('issue')} then true else false end`, [
-              memberUserId,
-            ]).as('connected');
-    if (connectedProjection === undefined) {
+    const connectionUserId = connectedUserId ?? memberUserId;
+    if (connectionUserId === undefined) {
       query.select('issue.id');
     } else {
-      query.select(['issue.id', connectedProjection] as never);
+      const connectedIssueIds = connectedIssueIdsQuery(manager, connectionUserId);
+      const join =
+        connectedUserId === undefined ? query.leftJoin.bind(query) : query.innerJoin.bind(query);
+      join(connectedIssueIds, 'connectedIssue', {
+        'issue.id': sql.ref('connectedIssue.connectedIssueId'),
+      });
+      query.select(['issue.id', 'connectedIssue.connectedIssueId as connectedIssueId'] as never);
     }
     query.where(where as unknown as QBFilterQuery<IssueQueryIssuePersistenceEntity, 'issue'>);
     if (memberUserId !== undefined) {
-      query.andWhere(
-        raw(
-          `not exists (
-             select 1
-               from user_interaction_events interaction
-              where interaction.user_id = ?::uuid
-                and interaction.issue_id = issue.id
-           )`,
-          [memberUserId],
-        ),
-      );
-    }
-    if (connectedUserId !== undefined) {
-      query.andWhere(raw((alias) => connectedCandidatePredicate(alias), [connectedUserId]));
+      const interactedIssueIds = manager
+        .createQueryBuilder(IssueQueryInteractionEntity, 'interaction')
+        .select('interaction.issueId')
+        .where({ userId: memberUserId });
+      query.andWhere({ id: { $nin: interactedIssueIds } });
     }
     query.orderBy(ISSUE_ORDER_BY);
     const maybeLimit = (query as unknown as { limit?: unknown }).limit;
@@ -683,9 +654,13 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       if (typeof id !== 'string') {
         throw new Error(`candidate id projection returned an invalid id at index ${index}`);
       }
+      const connectedId = row.connectedIssueId ?? row.connected_issue_id;
       return {
         id,
-        connected: booleanValue(row.connected),
+        connected:
+          row.connected === undefined
+            ? connectedId !== null && connectedId !== undefined
+            : booleanValue(row.connected),
       };
     });
   }
@@ -1101,38 +1076,48 @@ function candidateWhere(
 }
 
 /**
- * Matches an issue that is the target of a verified, later FOLLOW_UP relation
- * from an issue whose latest interaction for the member is LIKE.
+ * Builds the connected issue set as a MikroORM QueryBuilder subquery.
  *
- * The latest interaction set is derived before joining relations so PostgreSQL
- * can follow the existing from_issue_id-leading relation access path. The
- * outer IN keeps this predicate independent from a candidate-target probe,
- * while DISTINCT prevents multiple source relations from duplicating a target.
+ * The latest interaction is reduced before the relation joins so the
+ * source-first plan remains available without embedding a standalone SQL
+ * predicate in the candidate query.
  */
-function connectedCandidatePredicate(alias: string): string {
-  return `${alias}.id in (
-    select distinct relation.to_issue_id
-      from (
-        select distinct on (interaction.issue_id)
-               interaction.issue_id,
-               interaction.event_type
-          from user_interaction_events interaction
-         where interaction.user_id = ?::uuid
-         order by interaction.issue_id, interaction.accepted_order desc, interaction.id desc
-      ) latest_interaction
-      join issue_relations relation
-        on relation.from_issue_id = latest_interaction.issue_id
-      join issues source_issue
-        on source_issue.id = relation.from_issue_id
-      join issues target_issue
-        on target_issue.id = relation.to_issue_id
-     where latest_interaction.event_type = 'LIKE'
-       and relation.relation_type = 'FOLLOW_UP'
-       and relation.verified_at is not null
-       and source_issue.event_at is not null
-       and target_issue.event_at is not null
-       and target_issue.event_at > source_issue.event_at
-  )`;
+function connectedIssueIdsQuery(manager: PostgreSqlEntityManager, userId: string) {
+  const latestInteractions = manager
+    .createQueryBuilder(IssueQueryInteractionEntity, 'interaction')
+    .select([
+      'interaction.issueId as latestIssueId',
+      'interaction.eventType as latestEventType',
+    ] as never)
+    .where({ userId })
+    .distinctOn('interaction.issueId')
+    .orderBy({ issueId: QueryOrder.ASC, acceptedOrder: QueryOrder.DESC, id: QueryOrder.DESC });
+  return (
+    manager
+      .createQueryBuilder(IssueQueryRelationEntity, 'relation')
+      .select('relation.toIssueId as connectedIssueId' as never)
+      .distinct()
+      .innerJoin(latestInteractions, 'latestInteraction', {
+        'relation.fromIssueId': sql.ref('latestInteraction.latestIssueId'),
+      })
+      .innerJoin(sql.ref('issues'), 'sourceIssue', {
+        'relation.fromIssueId': sql.ref('sourceIssue.id'),
+      })
+      .innerJoin(sql.ref('issues'), 'targetIssue', {
+        'relation.toIssueId': sql.ref('targetIssue.id'),
+      })
+      .where({
+        'latestInteraction.latestEventType': 'LIKE',
+        'relation.relationType': 'FOLLOW_UP',
+        'relation.verifiedAt': { $ne: null },
+      } as never)
+      // Table-reference joins do not carry entity metadata into the outer
+      // filter, so use explicit snake_case identifiers while keeping the
+      // predicate inside the QueryBuilder.
+      .andWhere(sql`${sql.ref('sourceIssue.event_at')} is not null`)
+      .andWhere(sql`${sql.ref('targetIssue.event_at')} is not null`)
+      .andWhere(sql`${sql.ref('targetIssue.event_at')} > ${sql.ref('sourceIssue.event_at')}`)
+  );
 }
 
 function combineIssueFilters(...filters: (IssueFilter | undefined)[]): IssueFilter {
