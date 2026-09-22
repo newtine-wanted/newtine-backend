@@ -52,9 +52,9 @@
 
 - `loadIssueRecords(feed | detail)`로 명시. `findCandidates`, `findIssuesByIds`는 feed; `findIssue`는 detail.
 - IssueRecord 반환형 및 모든 기존 필드의 의미 유지. 후보 summary/impacts 등은 여전히 읽는다. 최종10개만 hydrate하는 DTO 재설계는 이번 범위 아님.
-- feed의 article links/full article/publisher 로딩을 매개변수화된 ORM query-builder grouped count로 대체한다. raw scalar 결과를 사용한다. AVAILABLE 기사만 링크 수를 세고 issue별0 기본값. 숫자 변환·중복 JOIN 방지.
+- feed의 article links/full article/publisher 로딩을 매개변수화된 ORM query-builder grouped count로 대체한다. scalar projection 결과를 사용한다. AVAILABLE 기사만 링크 수를 세고 issue별0 기본값. 숫자 변환·중복 JOIN 방지.
 - detail의 기사 순서·내용·publisher fallback은 그대로.
-- candidate slice에서 raw ID만 조회한다. partial managed entity를 identity map에 남기지 않는다. 기존 where/order/limit, slice 순서, seenIds, budget+1 sentinel, 후처리 public filter를 유지한다. 새 raw SQL 경계가 필요하면 자동 확장하지 말고 에스컬레이션.
+- candidate slice에서 QueryBuilder로 ID만 조회한다. partial managed entity를 identity map에 남기지 않는다. 기존 where/order/limit, slice 순서, seenIds, budget+1 sentinel, 후처리 public filter를 유지한다. 새 standalone raw SQL 경계가 필요하면 자동 확장하지 말고 에스컬레이션.
 - 저장 후 bulk 카드 재조회와 현재 공개 조건 검사는 유지한다. 후보 단계 객체를 캐시해서 바로 응답하지 않는다.
 
 ### D. 버전·활성화

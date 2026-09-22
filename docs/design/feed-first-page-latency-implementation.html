@@ -36,12 +36,12 @@
 </head>
 <body>
 <header>
-  <p><span class="state">승인 범위 구현 완료 · source-first plan 검증 완료 · 운영 검증 대기 · 배포 보류</span></p>
+  <p><span class="state">QueryBuilder 재작성 완료 · disposable PostgreSQL smoke/plan 통과 · 운영 p95 대기 · 배포 보류</span></p>
   <h1>첫 피드 조회 지연 개선 구현 제어</h1>
   <p>사용자별 사전 생성 없이 <code>/api/feed</code> 첫 조회의 계산·조회 비용을 bounded recommendation과 feed/detail projection 분리로 낮추는 구현 기록.</p>
   <dl>
     <dt>목적 지문</dt><dd>목적: 첫 피드 페이지 응답 개선 / 사용자: API·콘텐츠 파이프라인 개발자 / 문제: 첫 조회의 추천 계산과 불필요한 기사 hydrate / 핵심 흐름: 세션 snapshot → 후보 ID 조회 → feed projection → bounded 추천 → batch 저장·재사용</dd>
-    <dt>리뷰 유형</dt><dd>구현자 Codex의 게이트 검증 후 독립 no-write critical review를 완료했다.</dd>
+    <dt>리뷰 유형</dt><dd>구현자 Codex의 게이트 검증 후 이번 QueryBuilder delta까지 포함한 독립 no-write critical review를 완료했다.</dd>
     <dt>기준점</dt><dd><code>b6b90e2</code> · detached worktree · <code>/Users/hyunseok/.codex/worktrees/feed-first-page-latency/newtine-backend</code></dd>
     <dt>범위</dt><dd>새 첫 페이지 fast path, typed feed candidate/card projection, DB-side interaction/connection predicate, canonical batch 저장 결과, bounded stage diagnostics, v2 기본값 호환과 회귀 테스트. 실제 배포 실행과 운영 p95 판정은 제외.</dd>
   </dl>
@@ -100,12 +100,12 @@ getBatch / getFeed(cursor 있음)
   <table><caption>변경 경계와 보존 조건</caption><thead><tr><th>경로</th><th>변경</th><th>보존·불변식</th></tr></thead><tbody>
     <tr><th><code>issueRecommendation.ts</code></th><td>v1 분리, v2 seed/full greedy, shared bounded search, signature proof와 witness materialization, continuation 분류</td><td>최대 10, 중복 없음, 이전 run·null semantics·eligible type·determinism</td></tr>
     <tr><th><code>issueFeed.service.ts</code></th><td>새 session preloading, 독립 compact read 병렬화, sampled/slow stage 진단, canonical save 결과 사용</td><td>저장 batch fast path, transaction/save 경쟁 winner, API 응답 형태</td></tr>
-    <tr><th><code>issueCardQuery.repository.ts</code></th><td>recommendation/card/context projection의 실제 ORM field whitelist, grouped AVAILABLE article count, <code>findFeedMemberInputs(userId)</code>의 단일 parameterized raw read, 사용자 ID 기반 interaction <code>NOT EXISTS</code>, latest interaction → source-first relation → target set 기반 연결 predicate, 락 안 canonical batch 반환</td><td>public filter, sentinel, detail article ordering, publisher fallback, 회원/게스트 경계와 interaction 의미</td></tr>
+    <tr><th><code>issueCardQuery.repository.ts</code></th><td>recommendation/card/context projection의 실제 ORM field whitelist, grouped AVAILABLE article count, QueryBuilder 기반 <code>findFeedMemberInputs(userId)</code>, 사용자 ID subquery 기반 interaction 제외, latest interaction → source-first relation → target set 기반 연결 subquery join, 락 안 canonical batch 반환</td><td>public filter, sentinel, detail article ordering, publisher fallback, 회원/게스트 경계와 interaction 의미</td></tr>
     <tr><th><code>issueQuery.repository.ts</code></th><td>typed projection 및 save outcome port, <code>FeedMemberInputs</code> port 추가</td><td>controller/service API contract와 DB schema</td></tr>
     <tr><th>fixtures/tests</th><td>projection/save port, 첫 조회 재조회 제거, 저장 직후 재조회 제거, 통합 회원 입력의 positive/unique/sorted·missing-user·empty-array·SQL parameter 회귀 추가</td><td>기존 v1/v2 테스트 및 기존 API 계약</td></tr>
   </tbody></table>
   <h3>설계 delta</h3>
-  <p>사용자 결정으로 v2는 신규 session의 기본값이며, 기존 v1 session snapshot과 신규 v1 rollback은 유지한다. 첫 조회 경로는 생성한 session을 재사용하고, 추천·카드의 내부 repository projection과 canonical save outcome을 추가했다. 이 변경은 API 응답·cursor·DB schema·row lock·pool/infra 설정을 바꾸지 않는 내부 refactor다.</p>
+  <p>사용자 결정으로 v2는 신규 session의 기본값이며, 기존 v1 session snapshot과 신규 v1 rollback은 유지한다. 첫 조회 경로는 생성한 session을 재사용하고, 추천·카드의 내부 repository projection과 canonical save outcome을 추가했다. 이번 후속 delta에서는 추가된 standalone raw SQL을 MikroORM QueryBuilder로 재작성하되, API 응답·cursor·DB schema·row lock·pool/infra 설정과 단일 DB 왕복 목표는 유지한다.</p>
 </section>
 
 <section id="issues">
@@ -115,41 +115,43 @@ getBatch / getFeed(cursor 있음)
     <tr><th>IMP-02 · 해결됨</th><td>추천 후보와 카드 응답이 full IssueRecord hydration에 의존</td><td>recommendation/card projection port와 production/in-memory adapter 추가. detail 기사 데이터는 기존 경로 유지.</td><td>실제 PostgreSQL 실행 plan·identity-map 회귀는 별도 smoke 필요</td></tr>
     <tr><th>IMP-03 · 해결됨</th><td>저장 transaction 뒤 canonical batch를 다시 읽음</td><td>row lock을 유지한 save outcome이 SAVED/EXISTING canonical batch를 반환. 저장 후 findFeedBatch 추가 호출 0회 회귀 테스트.</td><td>실제 동시 요청·DB lock 대기 분포는 운영 유사 측정 필요</td></tr>
     <tr><th>REV-01 · 해결됨</th><td>projection 경로가 invalid score를 추천 후보로 통과시키거나 production query-builder 오류를 full hydrate로 숨길 가능성</td><td>recommendation projection에서 기존 score/public 판정을 재적용하고, entity fallback은 <code>NODE_ENV=test</code> lightweight double로 제한. typecheck·unit·build 재통과.</td><td>실제 PG SQL shape와 데이터 분포는 smoke에서 확인 필요</td></tr>
-    <tr><th>REV-02 · 해결됨</th><td>회원 interaction ID를 JS Set과 후보 <code>$nin</code>로 운반하고, connected/acted 보조 조회가 interaction cardinality에 따라 커졌다.</td><td>후보 query는 user ID parameterized <code>NOT EXISTS</code>로 모든 slice에 적용하고, acted category는 user ID subquery로 집계한다. connected는 각 후보 ID projection에서 latest accepted LIKE + verified later FOLLOW_UP을 같은 SQL statement로 계산해 flag를 함께 운반한다. 별도 connected hydration 왕복과 snapshot 불일치를 제거했고 cap/truncation은 도입하지 않았다.</td><td>실제 PG에서 <code>EXPLAIN (ANALYZE, BUFFERS)</code>와 큰 interaction cardinality의 p95를 확인해야 함</td></tr>
+    <tr><th>REV-02 · 해결됨</th><td>회원 interaction ID를 JS Set과 후보 bind 목록으로 운반하고, connected/acted 보조 조회가 interaction cardinality에 따라 커졌다.</td><td>후보 query는 user ID subquery를 <code>$nin</code>에 전달해 모든 slice에서 DB가 제외한다. <code>issue_id NOT NULL</code> 스키마 전제 아래 기존 <code>NOT EXISTS</code> 의미를 보존한다. acted category는 user ID correlated subquery로 집계하고, connected는 latest accepted LIKE + verified later FOLLOW_UP target을 같은 QueryBuilder statement의 joined projection으로 운반한다. 별도 connected hydration 왕복과 snapshot 불일치를 제거했고 cap/truncation은 도입하지 않았다.</td><td>실제 PG에서 <code>EXPLAIN (ANALYZE, BUFFERS)</code>와 큰 interaction cardinality의 p95를 확인해야 함</td></tr>
     <tr><th>REV-03 · 해결됨 · 운영 검증 열림</th><td>기존 target-correlated <code>EXISTS</code>가 일반 projection에서 후보마다 관계·latest interaction 판단을 반복할 수 있었다.</td><td>최신 상호작용을 먼저 <code>accepted_order DESC, id DESC</code>로 축약하고, outer <code>LIKE</code> 필터 뒤 <code>relation.from_issue_id</code>로 관계를 따라가 <code>DISTINCT relation.to_issue_id</code>를 만든 source-first <code>IN</code> predicate로 변경했다. 일반 projection과 connected slice WHERE는 동일 helper를 공유한다. <code>ANALYZE</code>한 PostgreSQL 18.6 fixture(2,000 source interaction/relation)에서 general 5.664ms·connected 2.983ms였고, old target-correlated general은 26.905ms였다. 새 general plan은 latest set을 한 번 계산하는 Hash Join/Seq Scan 형태로 candidate-target SubPlan을 제거했다.</td><td>connected slice의 old plan은 이미 semi-join으로 decorrelate되어 2.047ms였으므로 새 SQL이 모든 slice의 절대시간을 줄인다고 주장하지 않는다. production cardinality에서 p95·pool wait를 별도로 측정해야 함</td></tr>
     <tr><th>REV-04 · 열림 · 비차단</th><td>production adapter의 <code>EXISTING</code> canonical save 결과와 실제 동시 lock loser 경로는 unit/in-memory 중심으로만 검증됐다.</td><td>session row lock 뒤 기존 batch/item을 읽어 canonical 결과를 반환하는 의미는 코드상 맞지만, 실제 PostgreSQL commit 가시성과 lock 대기 중 결과를 확인하지 않았다.</td><td>동일 session/batch의 disposable PostgreSQL concurrent smoke와 production adapter <code>EXISTING</code> 회귀를 추가</td></tr>
-    <tr><th>REV-05 · 열림 · 비차단</th><td>회원 입력 raw array aggregation, non-empty projection/card/count, identity-map 병합은 실제 PostgreSQL 데이터로 검증되지 않았다.</td><td>unit double과 빈 데이터 projection <code>EXPLAIN</code>은 통과했지만, positive preference·latest LIKE→SKIP·연결 관계·AVAILABLE article의 실제 driver mapping은 미확인이다.</td><td>seeded PostgreSQL feed/card smoke를 추가하고 결과 parity·기사 수·회원 신호를 확인</td></tr>
-    <tr><th>IMP-04 · 해결됨</th><td>첫 member feed가 context와 acted category를 별도 repository read로 요청했다.</td><td><code>users</code> 1행 기준 correlated aggregation으로 두 결과를 <code>findFeedMemberInputs</code> 한 번에 반환하고, 기존 개별 메서드는 detail·호환 경로를 위해 보존했다.</td><td>실제 PostgreSQL 실행 plan과 round-trip 수는 smoke에서 확인 필요</td></tr>
+    <tr><th>REV-05 · 해결됨</th><td>회원 입력 array aggregation, non-empty projection/card/count, identity-map 병합은 실제 PostgreSQL 데이터로 검증되지 않았다.</td><td>positive category/age preference, latest LIKE→SKIP, LIKE→verified later FOLLOW_UP, AVAILABLE article을 포함한 disposable PostgreSQL feed smoke가 QueryBuilder driver mapping과 API 결과를 통과했다.</td><td>synthetic smoke는 production data distribution·pool wait·HTTP p95를 대체하지 않음</td></tr>
+    <tr><th>IMP-04 · 해결됨</th><td>첫 member feed가 context와 acted category를 별도 repository read로 요청했다.</td><td><code>users</code> 1행 기준 QueryBuilder correlated aggregation으로 두 결과를 <code>findFeedMemberInputs</code> 한 번에 반환하고, existing detail·호환 경로는 보존했다. 실제 API log에서 해당 projection이 1개 SELECT로 실행됐다.</td><td>synthetic smoke는 production p95를 대체하지 않음</td></tr>
     <tr><th>OBS-01 · 열림 · 비차단</th><td>첫 HTTP p95와 Cloud Run cold/warm·DB RTT·pool acquire wait</td><td>low-cardinality stage diagnostics를 slow/sample 조건에서만 기록. HTTP/PG/pool wait 자체는 아직 측정하지 않음.</td><td>이 구현만으로 500ms나 pool 병목 해소를 주장할 수 없음</td></tr>
     <tr><th>TEST-01 · 열림 · 비차단</th><td>실제 PostgreSQL projection/count/lock 동시성 경로</td><td>disposable PostgreSQL feed smoke와 source-first non-empty <code>EXPLAIN ANALYZE</code>는 통과했지만, concurrent lock과 Cloud Run HTTP p95는 실행하지 않음.</td><td>배포 전 실제 ORM SQL·row lock·count equivalence·HTTP tail latency를 확인해야 함</td></tr>
+    <tr><th>QB-01 · 해결됨</th><td>추가된 full raw member-input query와 connected predicate가 QueryBuilder로 같은 결과·왕복·실행계획을 유지하는지 미확인</td><td>member input은 1개 사용자 projection SELECT, connected는 latest interaction subquery와 source/target 직접 join을 포함한 후보 SELECT로 재작성했다. generated SQL log, positive feed smoke, QueryBuilder-equivalent SQL의 <code>EXPLAIN (ANALYZE, BUFFERS)</code>를 확인했다.</td><td>실제 production p95·pool wait는 여전히 운영 측정 대상</td></tr>
+    <tr><th>QB-02 · 해결됨</th><td>첫 QueryBuilder smoke에서 joined issue subquery의 <code>eventAt</code>가 outer predicate에서 camelCase identifier로 잘못 생성되어 503이 발생했다.</td><td>source/target을 직접 table join으로 단순화하고 event timestamp 비교는 <code>sql.ref</code> identifier를 사용했다. 재빌드 후 positive connected fixture를 포함한 disposable PostgreSQL smoke가 통과했고 generated SQL은 <code>event_at</code>를 사용한다.</td><td>ORM QueryBuilder metadata가 없는 table join에는 snake_case identifier 회귀 테스트를 유지해야 함</td></tr>
   </tbody></table>
 </section>
 
 <section id="verification">
   <h2>5. 검증 증거와 공백</h2>
   <table><caption>실행 명령과 결과</caption><thead><tr><th>명령/방법</th><th>결과</th><th>의미·한계</th></tr></thead><tbody>
-    <tr><td>focused feed/repository suites</td><td class="ok">2 suites / 38 tests 통과</td><td>첫 조회 fast path·canonical save·통합 member inputs raw SQL/parameterization·missing/empty 정규화·service 호출 경계·source-first interaction predicate·latest LIKE 의미·v1/v2 경계 확인; 실제 PG 대체는 아님</td></tr>
+    <tr><td>focused feed/repository suites</td><td class="ok">2 suites / 38 tests 통과</td><td>첫 조회 fast path·canonical save·통합 member inputs QueryBuilder 경계·missing/empty 정규화·service 호출 경계·source-first interaction predicate·latest LIKE 의미·v1/v2 경계 확인; 실제 PG 대체는 아님</td></tr>
     <tr><td><code>npm run test:unit</code></td><td class="ok">55 suites / 356 tests 통과</td><td>기존 unit 회귀 통과; 실제 HTTP/PG 전체 경로의 대체는 아님</td></tr>
     <tr><td><code>npm test</code></td><td class="warn">unit 통과 · integration 2 suites 통과 / 3 suites skipped</td><td>skipped suites는 <code>REPORT_TEST_DATABASE_URL</code> 미설정으로 실제 PostgreSQL report smoke를 실행하지 않음</td></tr>
     <tr><td><code>npm run typecheck -- --incremental false</code>, <code>npm run lint</code>, <code>npm run format:check</code></td><td class="ok">통과</td><td>정적·스타일 게이트; worktree 외부 tsbuildinfo 쓰기 없이 typecheck 실행</td></tr>
     <tr><td><code>npm run build:api</code></td><td class="ok">통과</td><td>worktree dist 쓰기 권한 승인 후 API build 실행</td></tr>
     <tr><td><code>git diff --check</code></td><td class="ok">통과</td><td>공백·patch 형식 확인</td></tr>
     <tr><td><code>npm run contracts:check</code></td><td class="ok">SDK/E2E/Swagger 생성, contract 6 tests, generated typecheck 통과</td><td>검증 후 생성물은 원래 작업 상태로 되돌렸고 <code>node scripts/check-generated.mjs</code>도 통과</td></tr>
-    <tr><td>disposable PostgreSQL populated <code>EXPLAIN (ANALYZE, BUFFERS)</code></td><td class="ok">general 5.664ms / connected 2.983ms; candidate-independent source-first set 확인</td><td><code>ANALYZE</code>한 2,000 source interaction/relation fixture에서 새 general plan은 latest set을 한 번 계산하고 relation을 hash join했다. old target-correlated general은 26.905ms, connected old plan은 이미 semi-join으로 2.047ms였다. synthetic fixture 비교이므로 production p95의 대체는 아님</td></tr>
-    <tr><td>disposable PostgreSQL feed smoke</td><td class="ok">통과</td><td>격리된 Compose PostgreSQL/API에서 회원·게스트 cursor, replay/owner binding, public detail, expiry를 검증. concurrent lock·pool wait·Cloud Run p95는 측정하지 않음</td></tr>
+    <tr><td>disposable PostgreSQL QueryBuilder-equivalent <code>EXPLAIN (ANALYZE, BUFFERS)</code></td><td class="ok">2,000 source interaction/relation fixture에서 4.519ms; source-first hash join 확인</td><td>latest interaction set을 먼저 2,000행으로 축약한 뒤 relation과 hash join하고 source/target은 PK index lookup했다. QueryBuilder generated SQL과 동일한 join/condition shape를 사용했으며, synthetic fixture이므로 production p95·pool wait의 대체는 아님</td></tr>
+    <tr><td>disposable PostgreSQL feed smoke</td><td class="ok">통과</td><td>격리된 Compose PostgreSQL/API에서 positive preference, latest LIKE→SKIP, LIKE→verified later FOLLOW_UP, AVAILABLE article, 회원·게스트 cursor, replay/owner binding, public detail, expiry를 검증. concurrent lock·pool wait·Cloud Run p95는 측정하지 않음</td></tr>
   </tbody></table>
   <p>검증 과정에서 generated 산출물은 변경 범위에 남기지 않았다. 현재 worktree에는 구현·테스트 변경과 이 구현 제어 기록이 남아 있다.</p>
 </section>
 
 <section id="review">
   <h2>6. 독립 리뷰 결과</h2>
-  <p>승인 범위 구현 게이트와 별도 no-write critical review를 완료했다. connected 후보 선별과 최종 connected 표시를 같은 SQL projection 결과로 운반하도록 보정했고, 이전 고위험 snapshot 불일치 finding은 해결됐다. source-first SQL은 populated disposable PostgreSQL plan으로 확인했으며, 실제 PostgreSQL 동시 lock·pool wait·HTTP tail latency는 별도 운영 검증으로 남아 있다.</p>
+  <p>승인 범위 구현 게이트와 별도 no-write critical review를 완료했다. standalone raw member-input query와 connected predicate를 QueryBuilder projection/subquery로 옮겼고, connected 후보 선별과 최종 표시를 같은 statement 결과로 운반한다. 최초 smoke에서 발견한 joined-column alias 오류는 direct source/target join과 explicit snake_case identifier로 해결했다. source-first SQL은 populated disposable PostgreSQL plan으로 확인했으며, 실제 PostgreSQL 동시 lock·pool wait·HTTP tail latency는 별도 운영 검증으로 남아 있다.</p>
   <dl>
     <dt>최종 판단</dt><dd><strong>코드 개선 및 synthetic PG plan 검증 완료 · 운영 검증/배포 보류</strong></dd>
     <dt>리뷰 대상</dt><dd>첫 조회 재조회 제거, feed/detail typed projection, lock winner canonicalization, stage diagnostics와 API/DB 계약 불변</dd>
-    <dt>해결 사항</dt><dd><strong>fixed:</strong> 일반 slice는 <code>CASE WHEN connectedCandidatePredicate(...) THEN true ELSE false END AS connected</code>를 후보 ID와 함께 반환하고, connected slice는 동일 statement의 predicate와 <code>true AS connected</code>를 사용한다. 이후 별도 connected hydration SQL은 실행하지 않는다. 또한 predicate를 최신 interaction → source-first relation → distinct target set 순서로 변경했다.</dd>
+    <dt>해결 사항</dt><dd><strong>fixed:</strong> member input은 users 기준 단일 QueryBuilder projection으로 context·preference·acted category를 반환하고, candidate slice는 interaction user-ID subquery와 connected target subquery를 같은 QueryBuilder statement에 결합한다. 일반 slice는 joined target ID의 존재로 connected를 판정하고 connected slice는 inner join을 사용한다. 이후 별도 connected hydration SQL은 실행하지 않는다. 기존 회원 존재 확인의 <code>FOR KEY SHARE</code> raw query와 summary validation function expression은 이번 delta에서 변경하지 않았다.</dd>
     <dt>검증 보류</dt><dd><strong>REV-03 후속:</strong> source-first 구조와 candidate-target SubPlan 제거는 2,000-row synthetic PostgreSQL plan으로 확인했지만, 이 수치는 production p95 개선을 보장하지 않는다.</dd>
-    <dt>리뷰 한계</dt><dd>preference/interaction/card driver의 non-empty 반환 parity, 해당 동시 interaction race, 첫 HTTP p95·pool acquire wait·full PG feed/detail·concurrent lock 회귀는 미검증. 따라서 배포 가능성이나 500ms 달성은 아직 판정하지 않는다.</dd>
+    <dt>리뷰 한계</dt><dd>동시 interaction race, 첫 HTTP p95·pool acquire wait·concurrent lock 회귀는 미검증. disposable PostgreSQL positive feed/card smoke와 2,000-row source-first plan은 통과했지만, 이를 production tail latency나 500ms 달성으로 확대 해석하지 않는다.</dd>
   </dl>
 </section>
 
@@ -157,7 +159,7 @@ getBatch / getFeed(cursor 있음)
   <h2>7. 잔여 운영 위험과 다음 행동</h2>
   <ol>
     <li>배포 전 disposable PostgreSQL에서 candidate/card projection → feed/detail count equivalence → same EntityManager detail reload를 자동 smoke로 추가한다.</li>
-    <li>행동 이력 cardinality가 큰 회원을 별도 fixture로 두고, 구현된 DB-side interaction/connected predicate에 대해 SQL plan·bind 수·추천 결과 parity를 disposable PG에서 검증한다.</li>
+    <li>2,000-row disposable source-first plan과 positive connected smoke는 통과했다. 다음 운영 유사 단계에서는 실제 interaction cardinality별 SQL plan·bind 수·추천 결과 parity·pool wait를 측정한다.</li>
     <li>v2 기본값으로 배포하기 전과 직후에 새 세션 기준 cold/warm, 회원/게스트, 이력 규모, 동시성별 첫 HTTP p50/p95/p99를 직접 측정한다. 500ms 목표 미달이면 이 구현을 성공으로 포장하지 않는다.</li>
     <li>v2 세션 TTL 동안 v2 코드를 유지하고, 운영 rollback은 신규 생성 버전만 v1로 바꾼다. 실제 설정·배포는 별도 승인이다.</li>
   </ol>
@@ -183,7 +185,7 @@ getBatch / getFeed(cursor 있음)
   <form class="quiz" data-answer="b" data-explanation="코드와 단위 게이트는 통과했지만 HTTP p95와 full smoke는 아직 측정되지 않았다." data-next="운영 유사 환경에서 첫 요청 p95를 직접 측정한다.">
     <fieldset><legend>Q5. 현재 구현만으로 첫 HTTP p95 500ms 달성을 주장할 수 있나?</legend><label><input type="radio" name="q5" value="a">가능하다</label><label><input type="radio" name="q5" value="b">아니다. 전체 HTTP 측정이 필요하다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div>
   </form>
-  <form class="quiz" data-answer="a" data-explanation="회원 interaction ID를 JS로 운반하지 않고 user ID 기반 NOT EXISTS와 DB-side latest LIKE predicate로 후보를 판정한다." data-next="disposable PostgreSQL에서 EXPLAIN ANALYZE와 큰 interaction cardinality를 확인한다.">
+  <form class="quiz" data-answer="a" data-explanation="회원 interaction ID를 JS로 운반하지 않고 user ID 기반 QueryBuilder subquery와 DB-side latest LIKE predicate로 후보를 판정한다." data-next="운영 유사 PostgreSQL에서 cardinality별 EXPLAIN과 pool wait를 확인한다.">
     <fieldset><legend>Q6. interaction cardinality가 커질 때 후보 제외의 기준은?</legend><label><input type="radio" name="q6" value="a">사용자 ID 기반 DB predicate로 판정하고 interaction ID 목록은 서비스로 올리지 않는다</label><label><input type="radio" name="q6" value="b">전체 interaction ID를 JS Set과 $nin bind 목록으로 계속 전달한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div>
   </form>
   <div id="quiz-navigation" hidden><button id="previous" type="button">이전</button><button id="next" type="button">다음</button></div>
