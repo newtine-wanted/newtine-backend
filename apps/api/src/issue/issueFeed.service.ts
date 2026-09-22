@@ -1,19 +1,18 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import {
   ISSUE_QUERY_REPOSITORY,
   IssueException,
   IssueExceptionCode,
   TRANSACTION_MANAGER,
+  type FeedCardProjection,
   type FeedBatchRecord,
   type FeedOwner,
   type FeedSessionRecord,
   type IssueCandidateScope,
-  type IssueRecord,
   type IssueQueryRepository,
   type TransactionManager,
   type UserRecommendationContext,
-  type UserInteractionRecord,
 } from '@newtine/core';
 
 import {
@@ -35,6 +34,7 @@ const DEFAULT_LIMIT = DEFAULT_CANDIDATE_BUDGET;
 
 @Injectable()
 export class IssueFeedService {
+  private readonly logger = new Logger(IssueFeedService.name);
   private readonly candidateBudget = readBoundedInteger(
     process.env.RECOMMENDATION_CANDIDATE_BUDGET,
     DEFAULT_LIMIT,
@@ -67,19 +67,49 @@ export class IssueFeedService {
   }
 
   async getBatch(input: FeedBatchInput): Promise<FeedBatchResult> {
-    const page = await this.getBatchPage(input);
-    return page.batch;
+    const owner = normalizeOwner(input.owner);
+    const trace = new FeedStageTrace(this.logger, owner.kind, 'cursor');
+    try {
+      const page = await this.getBatchPage(input, undefined, trace);
+      trace.finish({ outcome: 'success', itemCount: page.batch.items.length });
+      return page.batch;
+    } catch (error) {
+      trace.finish({ outcome: 'error', itemCount: 0 });
+      throw error;
+    }
   }
 
   async getFeed(ownerInput: FeedOwnerInput, cursor?: FeedCursorPosition): Promise<FeedPageResult> {
     const owner = normalizeOwner(ownerInput);
-    const position = cursor ?? (await this.createFeedSession(owner));
-    const page = await this.getBatchPage({
-      owner,
-      sessionId: 'sessionId' in position ? position.sessionId : position.id,
-      batchNo: 'sessionId' in position ? position.batchNo : 0,
-    });
-    return { ...page.batch, expiresAt: page.expiresAt };
+    const trace = new FeedStageTrace(
+      this.logger,
+      owner.kind,
+      cursor === undefined ? 'new' : 'cursor',
+    );
+    try {
+      const createdSession =
+        cursor === undefined
+          ? await trace.stage('session.create', () => this.createFeedSession(owner))
+          : undefined;
+      const position = cursor ?? {
+        sessionId: createdSession!.id,
+        batchNo: 0,
+      };
+      const page = await this.getBatchPage(
+        {
+          owner,
+          sessionId: position.sessionId,
+          batchNo: position.batchNo,
+        },
+        createdSession,
+        trace,
+      );
+      trace.finish({ outcome: 'success', itemCount: page.batch.items.length });
+      return { ...page.batch, expiresAt: page.expiresAt };
+    } catch (error) {
+      trace.finish({ outcome: 'error', itemCount: 0 });
+      throw error;
+    }
   }
 
   private createFeedSession(owner: FeedOwner): Promise<FeedSessionRecord> {
@@ -94,16 +124,24 @@ export class IssueFeedService {
 
   private async getBatchPage(
     input: FeedBatchInput,
+    preloadedSession: FeedSessionRecord | undefined,
+    trace: FeedStageTrace,
   ): Promise<{ batch: FeedBatchResult; expiresAt: Date }> {
-    return this.getBatchUnlocked(input);
+    return this.getBatchUnlocked(input, preloadedSession, trace);
   }
 
   private async getBatchUnlocked(
     input: FeedBatchInput,
+    preloadedSession: FeedSessionRecord | undefined,
+    trace: FeedStageTrace,
   ): Promise<{ batch: FeedBatchResult; expiresAt: Date }> {
     const owner = normalizeOwner(input.owner);
     const now = new Date();
-    const session = await this.repository.findFeedSession(input.sessionId, owner, now);
+    const session =
+      preloadedSession ??
+      (await trace.stage('session.read', () =>
+        this.repository.findFeedSession(input.sessionId, owner, now),
+      ));
     if (session === null) {
       throw new IssueException(
         IssueExceptionCode.FeedSessionNotFound,
@@ -117,9 +155,17 @@ export class IssueFeedService {
       );
     }
 
-    const storedBatch = await this.repository.findFeedBatch(session.id, input.batchNo);
+    const storedBatch =
+      preloadedSession !== undefined && input.batchNo === 0
+        ? null
+        : await trace.stage('batch.read', () =>
+            this.repository.findFeedBatch(session.id, input.batchNo),
+          );
     if (storedBatch !== null) {
-      return { batch: await this.toBatchResult(storedBatch), expiresAt: session.expiresAt };
+      return {
+        batch: await trace.stage('cards.read', () => this.toBatchResult(storedBatch)),
+        expiresAt: session.expiresAt,
+      };
     }
     if (session.status === 'COMPLETED') {
       throw new IssueException(
@@ -127,7 +173,10 @@ export class IssueFeedService {
         '완료된 탐색 세션에는 새 묶음을 요청할 수 없습니다.',
       );
     }
-    const previousBatches = await this.repository.findFeedBatches(session.id);
+    const previousBatches =
+      preloadedSession !== undefined && input.batchNo === 0
+        ? []
+        : await trace.stage('batches.read', () => this.repository.findFeedBatches(session.id));
     const lastBatch = previousBatches[previousBatches.length - 1];
     if (lastBatch !== undefined && lastBatch.continuation !== 'CONTINUE') {
       throw new IssueException(
@@ -151,35 +200,39 @@ export class IssueFeedService {
     const excludedIssueIds = new Set(
       previousBatches.flatMap((batch) => batch.items.map((item) => item.issueId)),
     );
-    const latestInteractions =
-      session.owner.kind === 'MEMBER'
-        ? await this.repository.findLatestInteractions(session.owner.userId)
-        : [];
-    for (const interaction of latestInteractions) excludedIssueIds.add(interaction.issueId);
-
-    const actedCategoryCodes = await this.findActedCategoryCodes(latestInteractions);
-    const context =
-      session.owner.kind === 'MEMBER'
-        ? await this.repository.findUserContext(session.owner.userId)
-        : null;
-    const connectedIssueIds = await this.findConnectedIssueIds(latestInteractions);
-    const issues = await this.repository.findCandidates(
-      excludedIssueIds,
-      session.candidateBudget + 1,
-      toCandidateScope(context, actedCategoryCodes, connectedIssueIds, session.highScoreThreshold),
+    const memberUserId = session.owner.kind === 'MEMBER' ? session.owner.userId : undefined;
+    let actedCategoryCodes = new Set<string>();
+    let context: UserRecommendationContext | null = null;
+    if (memberUserId !== undefined) {
+      const memberInputs = await trace.stage('member-inputs.read', () =>
+        this.repository.findFeedMemberInputs(memberUserId),
+      );
+      actedCategoryCodes = new Set(memberInputs.actedCategoryCodes);
+      context = memberInputs.context;
+    }
+    const scope = toCandidateScope(
+      context,
+      actedCategoryCodes,
+      session.highScoreThreshold,
+      memberUserId,
     );
-    const recommendation = recommendFeed(
-      {
-        issues,
-        context,
-        latestInteractions,
-        actedCategoryCodes,
-        connectedIssueIds,
-        previousSession: session,
-        highScoreThreshold: session.highScoreThreshold,
-        candidateBudget: session.candidateBudget,
-      },
-      session.algorithmVersion,
+    const issues = await trace.stage('candidates.read', () =>
+      this.repository.findFeedCandidates(excludedIssueIds, session.candidateBudget + 1, scope),
+    );
+    const recommendation = await trace.stage('recommendation.compute', () =>
+      Promise.resolve(
+        recommendFeed(
+          {
+            issues,
+            context,
+            actedCategoryCodes,
+            previousSession: session,
+            highScoreThreshold: session.highScoreThreshold,
+            candidateBudget: session.candidateBudget,
+          },
+          session.algorithmVersion,
+        ),
+      ),
     );
     const batch: FeedBatchRecord = {
       sessionId: session.id,
@@ -197,64 +250,17 @@ export class IssueFeedService {
       topicRun: recommendation.topicRun,
       entityRun: recommendation.entityRun,
     };
-    const saveResult = await this.transactionManager.execute(() =>
-      this.repository.saveFeedBatch(nextSession, batch),
+    const saveResult = await trace.stage('batch.save', () =>
+      this.transactionManager.execute(() => this.repository.saveFeedBatch(nextSession, batch)),
     );
-    const committedBatch = await this.repository.findFeedBatch(session.id, input.batchNo);
-    if (committedBatch === null && saveResult === 'EXISTING') {
-      throw new IssueException(
-        IssueExceptionCode.FeedBatchConflict,
-        '저장된 탐색 묶음을 다시 읽을 수 없습니다.',
-      );
-    }
     return {
-      batch: await this.toBatchResult(committedBatch ?? batch),
+      batch: await trace.stage('cards.read', () => this.toBatchResult(saveResult.batch)),
       expiresAt: session.expiresAt,
     };
   }
-
-  private async findActedCategoryCodes(
-    interactions: UserInteractionRecord[],
-  ): Promise<Set<string>> {
-    const categories = new Set<string>();
-    const issues = await this.findIssuesByIds(new Set(interactions.map((item) => item.issueId)));
-    for (const issue of issues) {
-      categories.add(issue.categoryCode);
-    }
-    return categories;
-  }
-
-  private async findConnectedIssueIds(interactions: UserInteractionRecord[]): Promise<Set<string>> {
-    const likeInteractions = interactions.filter((interaction) => interaction.eventType === 'LIKE');
-    const seedIds = new Set(likeInteractions.map((interaction) => interaction.issueId));
-    if (seedIds.size === 0) return new Set();
-    const relations = await this.repository.findFollowUps(seedIds);
-    const candidateIds = new Set<string>();
-    const relationIssueIds = new Set(
-      relations.flatMap((relation) => [relation.fromIssueId, relation.toIssueId]),
-    );
-    const issuesById = new Map(
-      (await this.findIssuesByIds(relationIssueIds)).map((issue) => [issue.id, issue]),
-    );
-    for (const relation of relations) {
-      const source = issuesById.get(relation.fromIssueId);
-      const target = issuesById.get(relation.toIssueId);
-      if (
-        source?.eventAt !== null &&
-        source?.eventAt !== undefined &&
-        target?.eventAt !== null &&
-        target?.eventAt !== undefined &&
-        target.eventAt.getTime() > source.eventAt.getTime()
-      ) {
-        candidateIds.add(relation.toIssueId);
-      }
-    }
-    return candidateIds;
-  }
-
   private async toBatchResult(batch: FeedBatchRecord): Promise<FeedBatchResult> {
     const issuesById = new Map(
-      (await this.findIssuesByIds(new Set(batch.items.map((item) => item.issueId)))).map(
+      (await this.repository.findFeedCards(new Set(batch.items.map((item) => item.issueId)))).map(
         (issue) => [issue.id, issue],
       ),
     );
@@ -273,15 +279,6 @@ export class IssueFeedService {
       continuation: batch.continuation,
     };
   }
-
-  private async findIssuesByIds(ids: ReadonlySet<string>): Promise<IssueRecord[]> {
-    if (ids.size === 0) return [];
-    if (this.repository.findIssuesByIds !== undefined) {
-      return this.repository.findIssuesByIds(ids);
-    }
-    const issues = await Promise.all([...ids].map((id) => this.repository.findIssue(id)));
-    return issues.filter((issue): issue is IssueRecord => issue !== null);
-  }
 }
 
 export function normalizeOwner(owner: FeedOwnerInput): FeedOwner {
@@ -290,7 +287,7 @@ export function normalizeOwner(owner: FeedOwnerInput): FeedOwner {
     : { kind: 'GUEST', guestTokenHash: owner.guestTokenHash.toLowerCase() };
 }
 
-function isUsableCard(issue: IssueRecord): boolean {
+function isUsableCard(issue: FeedCardProjection): boolean {
   return (
     issue.publicationStatus === 'PUBLISHED' &&
     issue.integratedSummary !== null &&
@@ -306,7 +303,7 @@ function isUsableCard(issue: IssueRecord): boolean {
 }
 
 function toCardResult(
-  issue: IssueRecord,
+  issue: FeedCardProjection,
   selectionType: FeedCardResult['selectionType'],
   reasonCodes: string[],
 ): FeedCardResult {
@@ -335,17 +332,18 @@ function normalizeCount(value: number): number {
 function toCandidateScope(
   context: UserRecommendationContext | null,
   actedCategoryCodes: ReadonlySet<string>,
-  connectedIssueIds: ReadonlySet<string>,
   highScoreThreshold: number,
+  memberUserId?: string,
 ): IssueCandidateScope {
   return {
+    memberUserId,
     highScoreThreshold,
     selectedCategoryCodes: context?.selectedCategoryCodes ?? [],
     selectedEntityIds: context?.selectedEntityIds ?? [],
     preferredRegionCodes: context?.preferredRegionCodes ?? [],
     ageGroup: context?.ageGroup ?? null,
     actedCategoryCodes: [...actedCategoryCodes],
-    connectedIssueIds: [...connectedIssueIds],
+    connectedIssueIds: [],
   };
 }
 
@@ -378,4 +376,72 @@ function readAlgorithmVersion(raw: string | undefined): string {
     throw new Error(`unsupported recommendation algorithm version: ${value}`);
   }
   return value;
+}
+
+type FeedTraceOutcome = 'success' | 'error';
+type FeedTracePageKind = 'new' | 'cursor';
+type FeedTraceOwnerKind = 'MEMBER' | 'GUEST';
+
+/**
+ * Emits one low-cardinality record only for sampled or slow feed requests.
+ * It deliberately contains stage names and bounded counts, never SQL,
+ * session/user identifiers, tokens, or response content.
+ */
+class FeedStageTrace {
+  private readonly startedAt = process.hrtime.bigint();
+  private readonly stages = new Map<string, number>();
+  private readonly slowThresholdMs = readPositiveIntegerEnv('FEED_STAGE_SLOW_THRESHOLD_MS', 500);
+  private readonly sampleRate = readRateEnv('FEED_STAGE_SAMPLE_RATE', 0);
+
+  constructor(
+    private readonly logger: Logger,
+    private readonly ownerKind: FeedTraceOwnerKind,
+    private readonly pageKind: FeedTracePageKind,
+  ) {}
+
+  async stage<T>(name: string, work: () => Promise<T>): Promise<T> {
+    const startedAt = process.hrtime.bigint();
+    try {
+      return await work();
+    } finally {
+      this.stages.set(name, elapsedMilliseconds(startedAt));
+    }
+  }
+
+  finish(input: { outcome: FeedTraceOutcome; itemCount: number }): void {
+    const totalMs = elapsedMilliseconds(this.startedAt);
+    if (totalMs < this.slowThresholdMs && !shouldSample(this.sampleRate)) {
+      return;
+    }
+    this.logger.log(
+      JSON.stringify({
+        event: 'feed.stage',
+        ownerKind: this.ownerKind,
+        pageKind: this.pageKind,
+        outcome: input.outcome,
+        totalMs,
+        itemCount: Math.max(0, Math.min(10, input.itemCount)),
+        stages: Object.fromEntries(this.stages),
+      }),
+      'FeedStageDiagnostics',
+    );
+  }
+}
+
+function elapsedMilliseconds(startedAt: bigint): number {
+  return Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+}
+
+function readPositiveIntegerEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+function readRateEnv(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback;
+}
+
+function shouldSample(rate: number): boolean {
+  return rate > 0 && Math.random() < rate;
 }

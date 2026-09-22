@@ -126,14 +126,85 @@ test('issue card projection uses EntityManager metadata and available article po
   ]);
 });
 
+test('feed card projection은 상세 기사 payload 없이 카드 계약 필드를 유지한다', async () => {
+  const issueRow = issuePersistenceRow(ISSUE_ID, {
+    title: '카드 제목',
+    categoryCode: 'housing',
+    freshnessScore: 0.7,
+    importanceScore: 0.9,
+  });
+  const detail: IssueQueryDetailPersistenceEntity = {
+    id: '00000000-0000-7000-8000-000000000022',
+    issueId: ISSUE_ID,
+    integratedSummary: '통합 요약',
+    summaryLines: ['첫째', '둘째', '셋째'],
+    viewpoints: [{ statement: '관점', articleIds: [] }],
+    glossary: [{ term: '용어', definition: '설명', articleIds: [] }],
+  };
+  const fieldsByEntity = new Map<unknown, unknown>();
+  const { entityManager } = fakeEntityManager({
+    find: async (entity, _where, options) => {
+      fieldsByEntity.set(entity, options);
+      if (entity === IssueQueryIssueEntity) return [issueRow];
+      if (entity === IssueCategorySchema) return [{ code: 'housing', displayName: '주거' }];
+      if (entity === IssueQueryDetailEntity) return [detail];
+      return [];
+    },
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const cards = await repository.findFeedCards(new Set([ISSUE_ID]));
+
+  assert.deepEqual(cards, [
+    {
+      id: ISSUE_ID,
+      title: '카드 제목',
+      categoryCode: 'housing',
+      categoryName: '주거',
+      eventAt: issueRow.eventAt,
+      publishedAt: issueRow.publishedAt,
+      integratedSummary: '통합 요약',
+      summaryLines: ['첫째', '둘째', '셋째'],
+      publicationStatus: 'PUBLISHED',
+      freshnessScore: 0.7,
+      importanceScore: 0.9,
+      articleCount: 0,
+    },
+  ]);
+  assert.deepEqual((fieldsByEntity.get(IssueQueryIssueEntity) as { fields: string[] }).fields, [
+    'id',
+    'title',
+    'categoryCode',
+    'eventAt',
+    'publishedAt',
+    'publicationStatus',
+    'freshnessScore',
+    'importanceScore',
+  ]);
+  assert.deepEqual((fieldsByEntity.get(IssueCategorySchema) as { fields: string[] }).fields, [
+    'code',
+    'displayName',
+  ]);
+  assert.deepEqual((fieldsByEntity.get(IssueQueryDetailEntity) as { fields: string[] }).fields, [
+    'id',
+    'issueId',
+    'integratedSummary',
+    'summaryLines',
+  ]);
+});
+
 test('user context reads only positive onboarding preferences through ORM metadata', async () => {
   const userId = '00000000-0000-7000-8000-000000000001';
   const whereByEntity = new Map<unknown, unknown>();
+  const fieldsByEntity = new Map<unknown, unknown>();
   const { entityManager } = fakeEntityManager({
-    findOne: async (entity) =>
-      entity === UserSchema ? { id: userId, ageGroup: 'AGE_35_49' } : null,
-    find: async (entity, where) => {
+    findOne: async (entity, _where, options) => {
+      fieldsByEntity.set(entity, options);
+      return entity === UserSchema ? { id: userId, ageGroup: 'AGE_35_49' } : null;
+    },
+    find: async (entity, where, options) => {
       whereByEntity.set(entity, where);
+      fieldsByEntity.set(entity, options);
       if (entity === UserCategoryPreferenceSchema) {
         return [
           { categoryCode: 'politics', weight: 0 },
@@ -179,6 +250,304 @@ test('user context reads only positive onboarding preferences through ORM metada
     userId,
     weight: { $gt: 0 },
   });
+  assert.deepEqual((fieldsByEntity.get(UserSchema) as { fields: string[] }).fields, [
+    'id',
+    'ageGroup',
+  ]);
+  assert.deepEqual(
+    (fieldsByEntity.get(UserCategoryPreferenceSchema) as { fields: string[] }).fields,
+    ['userCategoryPreferencesId', 'userId', 'categoryCode', 'weight'],
+  );
+  assert.deepEqual(
+    (fieldsByEntity.get(UserEntityPreferenceSchema) as { fields: string[] }).fields,
+    ['userEntityPreferenceId', 'userId', 'entityId', 'weight'],
+  );
+  assert.deepEqual(
+    (fieldsByEntity.get(UserRegionPreferenceSchema) as { fields: string[] }).fields,
+    ['id', 'userId', 'regionCode', 'weight'],
+  );
+});
+
+test('통합 회원 피드 입력은 사용자 기준 단일 raw 조회와 positional parameter를 사용한다', async () => {
+  const userId = '00000000-0000-0000-0000-000000000041';
+  const entityId = '00000000-0000-0000-0000-000000000042';
+  let queryText = '';
+  let queryParams: unknown[] = [];
+  const { entityManager, calls } = fakeEntityManager({
+    getConnection: () => ({
+      execute: async (query: string, params: unknown[]) => {
+        queryText = query;
+        queryParams = params;
+        return [
+          {
+            user_id: userId,
+            age_group: 'AGE_35_49',
+            selected_category_codes: '{"zeta","alpha","zeta"}',
+            selected_entity_ids: JSON.stringify([entityId, entityId]),
+            preferred_region_codes: ['SEOUL', 'BUSAN', 'SEOUL'],
+            acted_category_codes: '["policy","housing","policy"]',
+          },
+        ];
+      },
+    }),
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const inputs = await repository.findFeedMemberInputs(userId);
+
+  assert.deepEqual(inputs, {
+    context: {
+      userId,
+      selectedCategoryCodes: ['alpha', 'zeta'],
+      selectedEntityIds: [entityId],
+      preferredRegionCodes: ['BUSAN', 'SEOUL'],
+      ageGroup: 'AGE_35_49',
+    },
+    actedCategoryCodes: ['housing', 'policy'],
+  });
+  assert.equal(calls.length, 0);
+  assert.match(queryText, /from users u/i);
+  assert.match(queryText, /user_category_preferences/i);
+  assert.match(queryText, /user_entity_preferences/i);
+  assert.match(queryText, /user_region_preferences/i);
+  assert.match(queryText, /user_interaction_events/i);
+  assert.match(queryText, /where u\.id = \$1::uuid/i);
+  assert.match(queryText, /weight > 0/i);
+  assert.equal(queryText.includes(userId), false);
+  assert.deepEqual(queryParams, [userId]);
+});
+
+test('통합 회원 피드는 사용자 부재와 빈 배열을 null·빈 목록으로 정규화한다', async () => {
+  const userId = '00000000-0000-0000-0000-000000000043';
+  const missingRepository = new IssueCardQueryRepository(
+    fakeEntityManager({
+      getConnection: () => ({ execute: async () => [] }),
+    }).entityManager,
+  );
+  assert.deepEqual(await missingRepository.findFeedMemberInputs(userId), {
+    context: null,
+    actedCategoryCodes: [],
+  });
+
+  const emptyRepository = new IssueCardQueryRepository(
+    fakeEntityManager({
+      getConnection: () => ({
+        execute: async () => [
+          {
+            user_id: userId,
+            age_group: null,
+            selected_category_codes: '{}',
+            selected_entity_ids: '{}',
+            preferred_region_codes: null,
+            acted_category_codes: '[]',
+          },
+        ],
+      }),
+    }).entityManager,
+  );
+  assert.deepEqual(await emptyRepository.findFeedMemberInputs(userId), {
+    context: {
+      userId,
+      selectedCategoryCodes: [],
+      selectedEntityIds: [],
+      preferredRegionCodes: [],
+      ageGroup: null,
+    },
+    actedCategoryCodes: [],
+  });
+});
+
+test('회원 행동 분류는 사용자 ID 서브쿼리와 최소 projection만 사용한다', async () => {
+  const userId = '00000000-0000-7000-8000-000000000041';
+  const queryCalls: { select?: unknown; where?: unknown } = {};
+  const fieldsByEntity = new Map<unknown, unknown>();
+  const interactionQuery: FakeQueryBuilder = {
+    __subquery: true,
+    select: (fields) => {
+      queryCalls.select = fields;
+      return interactionQuery;
+    },
+    where: (where) => {
+      queryCalls.where = where;
+      return interactionQuery;
+    },
+    andWhere: () => interactionQuery,
+    distinctOn: () => interactionQuery,
+    orderBy: () => interactionQuery,
+    getResultList: async () => [],
+  };
+  const { entityManager } = fakeEntityManager({
+    createQueryBuilder: (entity, alias) => {
+      assert.equal(entity, IssueQueryInteractionEntity);
+      assert.equal(alias, 'event');
+      return interactionQuery;
+    },
+    find: async (entity, where, options) => {
+      fieldsByEntity.set(entity, options);
+      assert.equal(entity, IssueQueryIssueEntity);
+      assert.deepEqual(where, { id: { $in: interactionQuery } });
+      return [
+        { id: ISSUE_ID, categoryCode: 'housing' },
+        { id: '00000000-0000-7000-8000-000000000042', categoryCode: 'policy' },
+      ];
+    },
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  assert.deepEqual(await repository.findActedCategoryCodes(userId), ['housing', 'policy']);
+  assert.equal(queryCalls.select, 'event.issueId');
+  assert.deepEqual(queryCalls.where, { userId });
+  assert.deepEqual((fieldsByEntity.get(IssueQueryIssueEntity) as { fields: string[] }).fields, [
+    'id',
+    'categoryCode',
+  ]);
+});
+
+test('회원 후보 SQL은 interaction 목록 없이 모든 후보 slice에 NOT EXISTS를 적용한다', async () => {
+  const userId = '00000000-0000-7000-8000-000000000043';
+  const interactionPredicates: Array<{ sql: string; params: readonly unknown[] }> = [];
+  const { entityManager } = fakeEntityManager({
+    getConnection: () => ({}),
+    createQueryBuilder: (entity) => {
+      const query: FakeQueryBuilder = {
+        __subquery: true,
+        select: () => query,
+        where: () => query,
+        andWhere: (condition) => {
+          if (isRawQueryFragment(condition)) {
+            interactionPredicates.push({ sql: condition.sql, params: condition.params });
+          }
+          return query;
+        },
+        distinctOn: () => query,
+        orderBy: () => query,
+        limit: () => query,
+        execute: async () => [],
+        getResultList: async () => [],
+      };
+      void entity;
+      return query;
+    },
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const scope: IssueCandidateScope = {
+    memberUserId: userId,
+    highScoreThreshold: 0.8,
+    selectedCategoryCodes: [],
+    selectedEntityIds: [],
+    preferredRegionCodes: [],
+    ageGroup: null,
+    actedCategoryCodes: [],
+    connectedIssueIds: [],
+  };
+  await repository.findCandidates(new Set(), 2, scope);
+
+  const exclusionPredicates = interactionPredicates.filter((predicate) =>
+    /not exists/i.test(predicate.sql),
+  );
+  assert.ok(exclusionPredicates.length >= 3);
+  for (const predicate of exclusionPredicates) {
+    assert.match(predicate.sql, /not exists/i);
+    assert.match(predicate.sql, /user_interaction_events/i);
+    assert.deepEqual(predicate.params, [userId]);
+  }
+});
+
+test('연결 후보 여부는 후보를 선별한 같은 SQL projection에서 계산한다', async () => {
+  const userId = '00000000-0000-7000-8000-000000000044';
+  const targetId = '00000000-0000-7000-8000-000000000045';
+  const target = issuePersistenceRow(targetId);
+  const selectedProjections: unknown[] = [];
+  const selectedPredicates: Array<{ sql: string; params: readonly unknown[] }> = [];
+  let candidateExecuteCalls = 0;
+  const { entityManager } = fakeEntityManager({
+    createQueryBuilder: () => {
+      const query: FakeQueryBuilder = {
+        __subquery: true,
+        select: (fields) => {
+          selectedProjections.push(fields);
+          return query;
+        },
+        where: () => query,
+        andWhere: (condition) => {
+          if (isRawQueryFragment(condition)) {
+            selectedPredicates.push({ sql: condition.sql, params: condition.params });
+          }
+          return query;
+        },
+        distinctOn: () => query,
+        orderBy: () => query,
+        limit: () => query,
+        execute: async () => {
+          candidateExecuteCalls += 1;
+          return candidateExecuteCalls === 1 ? [] : [{ id: targetId, connected: true }];
+        },
+        getResultList: async () => [],
+      };
+      return query;
+    },
+    find: async (entity) => (entity === IssueQueryIssueEntity ? [target] : []),
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const candidates = await repository.findFeedCandidates(new Set(), 1, {
+    memberUserId: userId,
+    highScoreThreshold: 0.8,
+    selectedCategoryCodes: [],
+    selectedEntityIds: [],
+    preferredRegionCodes: [],
+    ageGroup: null,
+    actedCategoryCodes: [],
+    connectedIssueIds: [],
+  });
+
+  assert.equal(candidates[0]?.connected, true);
+  assert.equal(candidateExecuteCalls, 2);
+  const rawProjections = selectedProjections
+    .flatMap((fields) => (Array.isArray(fields) ? fields : []))
+    .filter(isRawQueryFragment);
+  const connectedProjection = rawProjections.find((projection) =>
+    /case when/i.test(projection.sql),
+  );
+  const connectedSliceProjection = rawProjections.find((projection) =>
+    /true as/i.test(projection.sql),
+  );
+  assert.ok(connectedProjection);
+  assert.ok(connectedSliceProjection);
+  assert.match(connectedProjection.sql, /case when/i);
+  assert.match(connectedProjection.sql, /user_interaction_events/i);
+  assert.match(connectedProjection.sql, /select distinct relation\.to_issue_id/i);
+  assert.match(connectedProjection.sql, /select distinct on \(interaction\.issue_id\)/i);
+  assert.match(
+    connectedProjection.sql,
+    /order by interaction\.issue_id, interaction\.accepted_order desc, interaction\.id desc/i,
+  );
+  assert.match(
+    connectedProjection.sql,
+    /join issue_relations relation\s+on relation\.from_issue_id = latest_interaction\.issue_id/i,
+  );
+  assert.match(connectedProjection.sql, /latest_interaction\.event_type = 'LIKE'/i);
+  assert.doesNotMatch(connectedProjection.sql, /relation\.to_issue_id\s*=\s*issue\.id/i);
+  const derivedSetEnd = connectedProjection.sql.indexOf(') latest_interaction');
+  const outerLikeFilter = connectedProjection.sql.indexOf("latest_interaction.event_type = 'LIKE'");
+  assert.ok(derivedSetEnd >= 0);
+  assert.ok(outerLikeFilter > derivedSetEnd);
+  assert.equal(
+    connectedProjection.sql.slice(0, derivedSetEnd).includes("event_type = 'LIKE'"),
+    false,
+  );
+  assert.equal(connectedProjection.params[0], userId);
+
+  const connectedPredicate = selectedPredicates.find((predicate) =>
+    /select distinct relation\.to_issue_id/i.test(predicate.sql),
+  );
+  assert.ok(connectedPredicate);
+  assert.deepEqual(connectedPredicate.params, [userId]);
+  const projectedPredicate = connectedProjection.sql
+    .replace(/^case when /i, '')
+    .replace(/ then true else false end(?: as .*)?$/i, '');
+  assert.equal(connectedPredicate.sql.replace(/\[::alias::\]/g, 'issue'), projectedPredicate);
 });
 
 test('scoped candidates use ORM projections, public filtering, exclusion, and bounded slices', async () => {
@@ -441,6 +810,7 @@ test('latest interactions are selected by PostgreSQL query builder and follow-up
 
 interface FakeEntityManager {
   getContext: (useContext?: boolean) => FakeEntityManager;
+  getConnection?: () => unknown;
   createQueryBuilder: (entity: unknown, alias?: string) => FakeQueryBuilder;
   isInTransaction: () => boolean;
   count: (entity: unknown, where: unknown) => Promise<number>;
@@ -458,10 +828,13 @@ interface FakeQueryBuilder {
   andWhere: (where: unknown) => FakeQueryBuilder;
   distinctOn: (fields: string) => FakeQueryBuilder;
   orderBy: (orderBy: unknown) => FakeQueryBuilder;
+  limit?: (limit: number) => FakeQueryBuilder;
+  execute?: (...args: unknown[]) => Promise<unknown[]>;
   getResultList: () => Promise<unknown[]>;
 }
 
 interface FakeEntityManagerOptions {
+  getConnection?: FakeEntityManager['getConnection'];
   createQueryBuilder?: FakeEntityManager['createQueryBuilder'];
   isInTransaction?: () => boolean;
   count?: (entity: unknown, where: unknown) => number | Promise<number>;
@@ -480,6 +853,7 @@ function fakeEntityManager(options: FakeEntityManagerOptions = {}): {
   let flushed = 0;
   const manager: FakeEntityManager = {
     getContext: () => manager,
+    getConnection: options.getConnection,
     createQueryBuilder:
       options.createQueryBuilder ??
       ((entity, alias) => {
@@ -517,6 +891,17 @@ function fakeEntityManager(options: FakeEntityManagerOptions = {}): {
     calls,
     flushCount: () => flushed,
   };
+}
+
+function isRawQueryFragment(value: unknown): value is { sql: string; params: readonly unknown[] } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'sql' in value &&
+    typeof value.sql === 'string' &&
+    'params' in value &&
+    Array.isArray(value.params)
+  );
 }
 
 function isFindOptionsWithLimit(value: unknown): value is { limit: number } {

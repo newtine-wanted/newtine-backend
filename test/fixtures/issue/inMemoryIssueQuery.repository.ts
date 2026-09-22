@@ -3,9 +3,12 @@ import {
   IssueException,
   IssueExceptionCode,
   type FeedBatchRecord,
-  type FeedBatchSaveResult,
+  type FeedBatchSaveOutcome,
+  type FeedCardProjection,
   type FeedAlgorithmSnapshot,
+  type FeedMemberInputs,
   type FeedOwner,
+  type FeedRecommendationIssue,
   type FeedSessionRecord,
   type IssueCandidateScope,
   type IssueQueryRepository,
@@ -103,9 +106,10 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
   async saveFeedBatch(
     session: FeedSessionRecord,
     batch: FeedBatchRecord,
-  ): Promise<FeedBatchSaveResult> {
+  ): Promise<FeedBatchSaveOutcome> {
     const key = batchKey(batch.sessionId, batch.batchNo);
-    if (this.batches.has(key)) return 'EXISTING';
+    const existing = this.batches.get(key);
+    if (existing !== undefined) return { status: 'EXISTING', batch: cloneBatch(existing) };
     const currentSession = this.sessions.get(session.id);
     const previousBatches = [...this.batches.values()]
       .filter((storedBatch) => storedBatch.sessionId === session.id)
@@ -124,7 +128,7 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     }
     this.batches.set(key, cloneBatch(batch));
     this.sessions.set(session.id, cloneSession(session));
-    return 'SAVED';
+    return { status: 'SAVED', batch: cloneBatch(batch) };
   }
 
   async findCandidates(
@@ -135,18 +139,23 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     const candidateLimit = limit === undefined ? undefined : normalizeLimit(limit);
     if (candidateLimit === 0) return [];
 
+    const effectiveScope = await this.resolveCandidateScope(scope);
+    const effectiveExcludedIssueIds = new Set(excludedIssueIds);
+    for (const issueId of this.interactionIssueIds(scope?.memberUserId)) {
+      effectiveExcludedIssueIds.add(issueId);
+    }
     const publicIssues = this.issues.filter(isPublicIssue);
-    if (scope === undefined || candidateLimit === undefined) {
+    if (effectiveScope === undefined || candidateLimit === undefined) {
       const rows = publicIssues
-        .filter((issue) => !excludedIssueIds.has(issue.id))
+        .filter((issue) => !effectiveExcludedIssueIds.has(issue.id))
         .sort(compareIssue);
       return (candidateLimit === undefined ? rows : rows.slice(0, candidateLimit)).map(cloneIssue);
     }
 
     const rows: IssueRecord[] = [];
-    const seenIds = new Set(excludedIssueIds);
+    const seenIds = new Set(effectiveExcludedIssueIds);
     let remainingRows = candidateLimit;
-    for (const slice of buildCandidateSlices(scope)) {
+    for (const slice of buildCandidateSlices(effectiveScope)) {
       if (remainingRows === 0) break;
       const sliceLimit = Math.min(
         remainingRows,
@@ -184,6 +193,53 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
     return [...unique.values()].slice(0, candidateLimit).map(cloneIssue);
   }
 
+  async findFeedCandidates(
+    excludedIssueIds: ReadonlySet<string>,
+    limit: number,
+    scope?: IssueCandidateScope,
+  ): Promise<FeedRecommendationIssue[]> {
+    const effectiveScope = await this.resolveCandidateScope(scope);
+    const effectiveExcludedIssueIds = new Set(excludedIssueIds);
+    for (const issueId of this.interactionIssueIds(scope?.memberUserId)) {
+      effectiveExcludedIssueIds.add(issueId);
+    }
+    const issues = await this.findCandidates(effectiveExcludedIssueIds, limit, effectiveScope);
+    const connectedIssueIds = new Set(effectiveScope?.connectedIssueIds ?? []);
+    return issues.map((issue) => ({
+      id: issue.id,
+      categoryCode: issue.categoryCode,
+      mainTopic: issue.mainTopic,
+      representativeEntityId: issue.representativeEntityId,
+      entityIds: [...issue.entityIds],
+      regionCodes: [...issue.regionCodes],
+      ageGroups: [...issue.ageGroups],
+      eventAt: cloneDate(issue.eventAt),
+      publicationStatus: issue.publicationStatus,
+      freshnessScore: issue.freshnessScore,
+      importanceScore: issue.importanceScore,
+      connected: connectedIssueIds.has(issue.id),
+    }));
+  }
+
+  async findFeedCards(ids: ReadonlySet<string>): Promise<FeedCardProjection[]> {
+    return this.issues
+      .filter((issue) => ids.has(issue.id))
+      .map((issue) => ({
+        id: issue.id,
+        title: issue.title,
+        categoryCode: issue.categoryCode,
+        categoryName: issue.categoryName,
+        eventAt: cloneDate(issue.eventAt),
+        publishedAt: cloneDate(issue.publishedAt),
+        integratedSummary: issue.integratedSummary,
+        summaryLines: [...issue.summaryLines],
+        publicationStatus: issue.publicationStatus,
+        freshnessScore: issue.freshnessScore,
+        importanceScore: issue.importanceScore,
+        articleCount: issue.articleCount,
+      }));
+  }
+
   async findIssue(id: string): Promise<IssueRecord | null> {
     const issue = this.issues.find((candidate) => candidate.id === id);
     return issue === undefined ? null : cloneIssue(issue);
@@ -196,6 +252,40 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
   async findUserContext(userId: string): Promise<UserRecommendationContext | null> {
     const context = this.contexts.get(userId);
     return context === undefined ? null : cloneContext(context);
+  }
+
+  async findFeedMemberInputs(userId: string): Promise<FeedMemberInputs> {
+    return {
+      context: await this.findUserContext(userId),
+      actedCategoryCodes: await this.findActedCategoryCodes(userId),
+    };
+  }
+
+  private async resolveCandidateScope(
+    scope: IssueCandidateScope | undefined,
+  ): Promise<IssueCandidateScope | undefined> {
+    if (scope?.memberUserId === undefined) return scope;
+    const latestInteractions = await this.findLatestInteractions(scope.memberUserId);
+    const likedIssueIds = new Set(
+      latestInteractions
+        .filter((interaction) => interaction.eventType === 'LIKE')
+        .map((interaction) => interaction.issueId),
+    );
+    const connectedIssueIds = await this.findConnectedIssueIds(likedIssueIds);
+    return {
+      ...scope,
+      memberUserId: undefined,
+      connectedIssueIds: uniqueStrings([...scope.connectedIssueIds, ...connectedIssueIds]),
+    };
+  }
+
+  private interactionIssueIds(userId: string | undefined): ReadonlySet<string> {
+    if (userId === undefined) return new Set();
+    return new Set(
+      this.interactions
+        .filter((interaction) => interaction.userId === userId)
+        .map((interaction) => interaction.issueId),
+    );
   }
 
   async findLatestInteractions(userId: string): Promise<UserInteractionRecord[]> {
@@ -221,6 +311,40 @@ export class InMemoryIssueQueryRepository implements IssueQueryRepository {
           issueIds.has(relation.fromIssueId),
       )
       .map(cloneRelation);
+  }
+
+  async findActedCategoryCodes(userId: string): Promise<string[]> {
+    const interactedIssueIds = this.interactionIssueIds(userId);
+    return uniqueStrings(
+      this.issues
+        .filter((issue) => interactedIssueIds.has(issue.id))
+        .map((issue) => issue.categoryCode),
+    ).sort((left, right) => left.localeCompare(right));
+  }
+
+  async findConnectedIssueIds(seedIssueIds: ReadonlySet<string>): Promise<string[]> {
+    const issueById = new Map(this.issues.map((issue) => [issue.id, issue]));
+    return uniqueStrings(
+      this.relations
+        .filter(
+          (relation) =>
+            relation.relationType === 'FOLLOW_UP' &&
+            Number.isFinite(relation.verifiedAt.getTime()) &&
+            seedIssueIds.has(relation.fromIssueId),
+        )
+        .filter((relation) => {
+          const source = issueById.get(relation.fromIssueId);
+          const target = issueById.get(relation.toIssueId);
+          return (
+            source?.eventAt !== null &&
+            source?.eventAt !== undefined &&
+            target?.eventAt !== null &&
+            target?.eventAt !== undefined &&
+            target.eventAt.getTime() > source.eventAt.getTime()
+          );
+        })
+        .map((relation) => relation.toIssueId),
+    );
   }
 
   /** Test/fixture helper. Production callers depend on the repository port only. */
@@ -257,7 +381,13 @@ function compareInteraction(
   left: InMemoryIssueInteractionSeed,
   right: InMemoryIssueInteractionSeed,
 ): number {
-  if (left.acceptedOrder !== undefined || right.acceptedOrder !== undefined) {
+  if (left.acceptedOrder !== undefined && right.acceptedOrder !== undefined) {
+    if (left.acceptedOrder !== right.acceptedOrder) {
+      return left.acceptedOrder - right.acceptedOrder;
+    }
+    const byId = left.id.localeCompare(right.id);
+    if (byId !== 0) return byId;
+  } else if (left.acceptedOrder !== undefined || right.acceptedOrder !== undefined) {
     const leftOrder = left.acceptedOrder ?? Number.NEGATIVE_INFINITY;
     const rightOrder = right.acceptedOrder ?? Number.NEGATIVE_INFINITY;
     if (leftOrder !== rightOrder) return leftOrder - rightOrder;
