@@ -25,7 +25,7 @@
 </head>
 <body>
 <header>
-  <p>설계 기준 · 설계 승인됨 · v2 기본 활성화 승인됨 · 구현 제어는 별도 문서 · 강도: Standard</p>
+  <p>설계 기준 · robust 설계 리뷰 완료 · 설계 승인 및 후속 delta 반영 완료 · v2 기본 활성화 승인됨 · 구현 제어는 별도 문서 · 강도: High</p>
   <h1>첫 화면을 기다리게 하는 계산을 제한한다</h1>
   <p>요청 시 추천은 유지하되, 최적 순열을 끝까지 찾지 않는다. 사용자별 사전 생성·캐시는 만들지 않는다.</p>
   <dl>
@@ -34,12 +34,12 @@
     <dt>problem · 문제</dt><dd>저장된 배치가 없는 요청의 조합 탐색과 불필요한 기사 데이터 로딩.</dd>
     <dt>core-flow · 핵심 흐름</dt><dd>새 세션 → 후보 조회 → 유한 추천 탐색 → 짧은 canonical 저장 → 카드 응답.</dd>
   </dl>
-  <p>작성·갱신: <time datetime="2026-09-20">2026-09-20</time> · 승인·구현 시작: <time datetime="2026-09-20">2026-09-20</time> · 조사 기준: <code>main@092eec8</code><br>
+  <p>작성·갱신: <time datetime="2026-09-21">2026-09-21</time> · 승인·구현 시작: <time datetime="2026-09-21">2026-09-21</time> · 조사 기준: <code>b6b90e2</code><br>
   추적: 현재 첫 조회 개선 대화. 작업 ID는 산출물 식별 기준이 아니다.</p>
   <p><a href="feed-first-page-latency-luna-handoff.md">Luna 실행 계약</a> · <a href="feed-concurrency-transaction-boundary-design.html">별도 목적: 기존 동시성·트랜잭션 설계</a><br>
   <a href="feed-first-page-latency-implementation.html">구현 제어 문서</a>에서 as-built·검증·리뷰를 별도로 관리하며, 이 문서에는 구현 완료 사실을 덧붙이지 않는다.</p>
 </header>
-<nav aria-label="설계 목차"><a href="#goal">목표·근거</a><a href="#change-model">변경 흐름</a><a href="#decisions">알고리즘</a><a href="#repository">조회 경량화</a><a href="#failure-recovery">호환·복구</a><a href="#verification-plan">검증</a><a href="#design-control-state">셀프 체크</a></nav>
+<nav aria-label="설계 목차"><a href="#goal">목표·근거</a><a href="#change-model">변경 흐름</a><a href="#decisions">알고리즘</a><a href="#repository">조회 경량화</a><a href="#reapproval-delta">재승인 delta</a><a href="#failure-recovery">호환·복구</a><a href="#verification-plan">검증</a><a href="#design-control-state">셀프 체크</a></nav>
 <main><article>
 <section id="goal">
   <h2>1. 목표와 확인된 사실</h2>
@@ -56,8 +56,21 @@
 <section id="non-goals">
   <h2>2. 범위와 제외</h2>
   <p>범위: 추천 계산 상한, 피드용 기사 개수 집계, 후보 ID 조회 경량화, 알고리즘 세션 버전, 회귀·성능 검증 설계.</p>
-  <p>제외: 사용자별 사전 계산, 공유 피드 캐시, Redis, worker thread, 응답 후 비내구성 백그라운드 계산, 커넥션 풀 확대, 인스턴스 증설, DB 스키마 변경, 운영 상세 SQL 로그, API 응답 형식·cursor 변경, 프런트엔드 변경.</p>
-  <p>후보 전체를 별도 DTO로 재설계하거나 이력/후속 이슈 조회를 새 API로 분리하는 작업도 이번 최소 변경안에서 제외한다. 목표 미달이면 측정 근거로 별도 설계한다. 따라서 이번 안을 “후보 100개 중 최종 10개만 모든 데이터를 로딩”이라고 설명하지 않는다.</p>
+  <p>제외: 사용자별 사전 계산, 공유 피드 캐시, Redis, worker thread, 응답 후 비내구성 백그라운드 계산, 커넥션 풀 확대, 인스턴스 증설, DB 스키마 변경, 운영 상세 SQL 로그, API 응답 형식·cursor 변경, 프런트엔드 변경, region 이동.</p>
+  <p>후보·카드 내부 typed projection과 compact interaction/context read는 범위에 포함한다. 다만 후보 전체를 무조건 최종 10개로 줄이는 새 SQL/CTE는 이번 기준에 넣지 않는다. 목표 미달이면 단계별 측정으로 cross-region RTT·pool acquire·DB 실행·CPU를 구분한 뒤 별도 설계한다.</p>
+  <p><strong>2026-09-22 승인·반영된 후속 delta:</strong> interaction cardinality에 비례하는 JS ID 목록과 후보 <code>$nin</code> bind를 제거하기 위해 user ID 기반 <code>NOT EXISTS</code>, acted category subquery, latest LIKE·verified later FOLLOW_UP 연결 predicate를 후보 DB 경계에 적용했다. 행동 제외 의미는 cap 없이 보존하고, connected flag는 후보를 선별한 같은 SELECT에서 계산해 별도 hydration 왕복을 제거했다. 이 delta는 API·cursor·schema·pool·transaction 경계를 변경하지 않는다.</p>
+</section>
+<section id="reapproval-delta">
+  <h2>2-A. 독립 리뷰 후 재승인 대상 delta</h2>
+  <p class="note"><strong>상태: 설계 승인 및 구현 반영 완료.</strong> 기존 구현은 API·cursor 계약을 유지하며, interaction cardinality와 역방향 relation 탐색의 불필요한 fanout을 줄인다. 아래 변경은 DB schema·migration 없이 기존 인덱스 방향을 활용해 같은 목적을 보강한다.</p>
+  <table><caption>열린 결정과 권고</caption><thead><tr><th>ID</th><th>결정</th><th>권고</th><th>포기·잔여 위험</th></tr></thead><tbody>
+    <tr><th>R5-A</th><td>acted category 반환 경계</td><td>ORM entity 조회를 제거하고 parameterized raw scalar <code>SELECT DISTINCT issue.category_code</code>로 카테고리 문자열만 반환한다.</td><td>기존 interaction 의미는 유지한다. DB별 raw 결과 alias와 empty result를 실제 PostgreSQL에서 검증한다.</td></tr>
+    <tr><th>R5-B</th><td>connected 역방향 탐색과 snapshot 일관성</td><td>schema 변경 없이 최신 사용자 interaction을 DB에서 판정하고, <code>relation.from_issue_id</code> 기반 predicate와 <code>connected</code> flag를 같은 후보 SELECT 결과로 반환한다. 별도 connected hydration 조회는 실행하지 않는다.</td><td>candidate target 수만으로 relation 작업량을 완전히 보장하지 못한다. 대신 interaction ID fanout과 후보 선별/분류 사이의 snapshot 불일치를 피하고 migration 위험을 유지하지 않는다.</td></tr>
+    <tr><th>R5-C</th><td>500ms 목표 관측</td><td>저카디널리티 stage 로그의 기본 threshold를 500ms로 낮추고 sample rate 기본값 0은 유지한다. SQL·식별자·본문은 계속 기록하지 않는다.</td><td>500ms 이상 요청 로그량이 늘어난다. 실제 로그량을 배포 전후 확인하고 과다하면 환경변수로 threshold를 상향한다.</td></tr>
+    <tr><th>R5-D</th><td>네트워크 roundtrip 범위</td><td>첫 조회 fast path로 session·빈 batch·batch 목록 재조회 3개를 제거하고, connected 별도 hydration 왕복 1개를 제거한다. 후보 projection은 기존 slice 경계 안에서 <code>connected</code>를 함께 반환한다.</td><td>실제 전체 SQL 호출 수·pool 대기·카드 projection 비용은 운영 유사 환경에서 측정해야 한다.</td></tr>
+    <tr><th>R5-E</th><td>회원 입력 통합 조회</td><td><code>users</code> 기준 correlated aggregation으로 context와 acted category를 <code>findFeedMemberInputs</code> 한 번에 반환한다. positive weight·unique·정렬·사용자 없음/빈 배열 의미를 보존한다.</td><td>실제 PostgreSQL non-empty 배열 반환과 p95는 smoke에서 확인한다. API·schema·migration은 변경하지 않는다.</td></tr>
+  </tbody></table>
+  <p><strong>불변식:</strong> 회원 행동 이슈 전체 제외, 최신 LIKE·verified later FOLLOW_UP·엄격한 eventAt 관계, guest 분기, API 응답·cursor·세션 snapshot·락 범위·DB schema는 유지한다. 검증은 scalar 결과·source-first 실행계획·stage 로그 경계·요청별 SQL 왕복 측정까지 포함한다.</p>
 </section>
 <section id="change-model">
   <h2>3. 변경 모델</h2>
@@ -89,14 +102,15 @@
 </section>
 <section id="repository">
   <h2>5. 조회 경량화: 계약은 유지하고 불필요한 로딩 제거</h2>
-  <p><code>loadIssueRecords</code>를 명시적인 <code>feed | detail</code> 모드로 나눈다. <code>findCandidates</code>와 <code>findIssuesByIds</code>는 feed, 상세 <code>findIssue</code>는 detail이다. 반환형 <code>IssueRecord[]</code>와 공개 판정·정규화는 그대로 유지한다.</p>
+  <p>새 세션 첫 페이지는 생성 결과를 내부 batch 경로에 전달해 session·빈 batch 재조회를 건너뛴다. 후보 추천과 저장 batch 카드 응답은 각각 typed projection port를 사용하고, 상세 <code>findIssue</code>의 public/detail 결과는 그대로 둔다. 이것은 외부 API 응답을 바꾸지 않는 내부 repository contract 변경이다.</p>
   <ul>
+    <li>추천 projection은 issue score·topic·representative entity·entity/impact 신호와 public 상태만 읽고 기사·언론사·상세 payload를 hydrate하지 않는다. 응답 card projection은 title·category·summary·score·event/publication과 article count만 읽는다.</li>
     <li>feed에서는 기사 링크·기사 본문·언론사 entity를 hydrate하지 않는다. 선택된 issue IDs에 대해 링크와 AVAILABLE 기사만 JOIN하여 issue별 개수를 한 번에 집계한다. 누락 그룹은 0, PostgreSQL count 문자열은 안전한 숫자로 변환한다.</li>
     <li><code>(issue_id, article_id)</code> 유일 키 기준으로 현재 availableArticles 길이와 동일한 링크 수를 센다. REMOVED/UNAVAILABLE 기사는 제외한다. impact/entity JOIN으로 개수를 증폭시키지 않는다.</li>
     <li>집계는 ORM query builder의 매개변수화된 raw 결과를 우선 사용한다. 승인된 repository ORM 경계를 유지한다. raw SQL helper로의 전환은 자동으로 범위를 넓히지 말고 근거와 함께 상위 판단으로 돌린다.</li>
     <li>최초 후보 slice는 ID만 읽는 raw projection으로 변경한다. 기존 slice 순서, 정렬, seenIds, budget+1 sentinel 및 slice 후 공개 검사를 보존한다. 서로 의존하는 slice들을 무작정 병렬화하지 않는다.</li>
     <li>부분 entity가 identity map에 남아 이후 full load를 오염시키지 않아야 한다. generated SQL과 동일 EntityManager 내 연속 조회 회귀로 입증한다.</li>
-    <li>기존 후보의 summary·impact 등은 이번에도 읽는다. 반환형을 빈 값으로 채워서 경량 DTO인 척하지 않는다. 저장 후 카드 재조회도 제거하지 않는다.</li>
+    <li>추천 projection에는 알고리즘에 필요한 impact/entity 배열을 유지하고, 카드 projection에는 public/card 판정에 필요한 summary와 score를 유지한다. 반환형을 빈 값으로 채워서 경량 DTO인 척하지 않는다. 저장 후에는 락 안에서 결정된 canonical batch를 사용하고 별도 batch 재조회는 하지 않는다.</li>
   </ul>
 </section>
 <section id="invariants">
@@ -123,12 +137,17 @@
 </section>
 <section id="grilling-state">
   <h2>8. 의사결정 기록과 남는 불확실성</h2>
-  <p>진행 상태: <strong>설계 결정 완료 — v2 기본 활성화까지 승인</strong>. 사용자가 v2를 opt-in이 아닌 기본값으로 적용하도록 명시했다. 기존 v1 세션 호환·v1 rollback 경계는 유지한다. 아래 세부안과 Luna 실행 계약이 현재 구현 기준선이다.</p>
+  <p>진행 상태: <strong>설계 결정·재승인·구현 반영 완료</strong>. 2026-09-21 승인 범위의 첫 조회 fast path·typed projection·canonical save·v2 기본값은 유지한다. 2026-09-22 독립 리뷰에서 acted category ORM hydration, 역방향 relation 인덱스 부재, 500~999ms 관측 공백이 확인되어 R5-A~E를 추가했고, 사용자의 schema 변경 금지 조건에 따라 source-first query·단일 회원 입력 read·500ms threshold를 구현했다.</p>
   <p>의존 트리: 첫 응답 목표 → 사전 생성 금지·최적성 완화 → 계산 상한/조회 모드 → 세션 호환 → 성능·품질 검증 → 활성화.</p>
   <dl>
     <dt>대화에서 정해진 방향</dt><dd>첫 조회를 빠르게, 사용자별 사전 생성 제외, 충분히 좋은 추천 우선, 500ms를 검증 목표로 삼음.</dd>
-    <dt>기술 권고</dt><dd>결정적 bounded search + 최소 feed/detail 분리. cache나 큰 DTO 변경보다 변경 범위가 작고 독립 검증 가능.</dd>
+    <dt>기술 권고</dt><dd>결정적 bounded search + 첫 조회 fast path + typed recommendation/card projection + canonical save outcome. cache나 topology 변경보다 단계별 검증이 가능하며 API 계약은 유지.</dd>
+    <dt>R1-A 관측성</dt><dd>고정 stage 이름·owner/page kind·bounded count만 slow/sample 조건에서 기록한다. SQL·사용자 ID·토큰·본문은 기록하지 않는다. pool acquire wait는 DB/driver 관측으로 별도 확인한다.</dd>
+    <dt>R2-A 조회 전략</dt><dd>projection을 우선 적용한다. cross-region RTT나 pool acquire가 지배적이라는 측정이 있을 때만 후보 CTE/UNION 또는 topology 검토를 별도 설계한다.</dd>
+    <dt>R3-A 저장 경계</dt><dd>session row <code>PESSIMISTIC_WRITE</code>는 유지하고, lock 안에서 기존/신규 canonical batch를 반환해 저장 직후 재조회 왕복을 제거한다.</dd>
+    <dt>R4-A 운영 범위</dt><dd>region·pool·infra 설정은 이번 구현에서 바꾸지 않는다. API 응답·cursor·schema도 그대로다.</dd>
     <dt>추가 결정</dt><dd>새 세션의 기본 알고리즘은 v2로 한다. `RECOMMENDATION_ALGORITHM_VERSION=issue-card-query-v1`로 신규 세션만 v1 rollback할 수 있으며, 기존 session snapshot은 변경하지 않는다.</dd>
+    <dt>R5-A~E 구현</dt><dd>category는 DB scalar DISTINCT로 축약하고, connected predicate는 최신 사용자 LIKE에서 relation.from_issue_id로 시작하는 source-first 형태로 재작성해 같은 SELECT에서 flag를 반환하며, context·acted 입력은 단일 raw read로 합치고, 기본 stage threshold는 500ms로 맞춘다. DB schema·migration은 변경하지 않는다.</dd>
     <dt>검증 필요</dt><dd>10,000/24 예산으로 기존 품질 fixture 유지 가능 여부, 실제 서버 p95, 회원 이력 규모와 DB 왕복의 영향. 대화만으로 확정 불가.</dd>
   </dl>
   <div id="rejected-alternatives"><h3>채택하지 않은 대안</h3><p>사용자별 미리 계산은 사용자 거절. 캐시·worker 이동은 계산 자체의 상한을 해결하지 않으며 별도 상태/실패 경계를 만든다. 후보를 무조건 적게 읽으면 희소 유형·뒤쪽 대안을 잃는다. 완전 최적 순열 유지에는 지연 상한이 부족하다. 전체 DTO 재설계는 이 안 실패 시 근거를 갖고 재검토한다.</p></div>
@@ -151,7 +170,7 @@
   <h2>10. 설계 이해 셀프 체크 · 미실시</h2>
   <p>비차단·선택 사항이다. 아래 결과는 이 브라우저에만 표시되며 Codex에 전달되지 않는다. 구현 승인이 아니다. 답변 방식: 각 문항에서 하나를 고르고 “확인”을 누른다.</p>
   <table><caption>범위 기반 점검 연결</caption><thead><tr><th>축</th><th>문항·이유</th></tr></thead><tbody>
-    <tr><td>목표/검증/잔여 위험</td><td>Q1: 추천 시간과 첫 HTTP 전체 시간의 차이</td></tr><tr><td>선택/불변식/실패</td><td>Q2: 탐색 한계에서 연속 제한과 종료 상태 보존</td></tr><tr><td>상태 경계/운영/복구</td><td>Q3: 혼합 세션 버전과 rollback</td></tr><tr><td>조회 경계</td><td>Q4: 카드 개수 집계와 상세 응답 분리</td></tr><tr><td>권한/외부 효과</td><td>Q5: 설계 전달은 구현·배포 승인과 다름</td></tr>
+    <tr><td>목표/검증/잔여 위험</td><td>Q1: 추천 시간과 첫 HTTP 전체 시간의 차이</td></tr><tr><td>선택/불변식/실패</td><td>Q2: 탐색 한계에서 연속 제한과 종료 상태 보존</td></tr><tr><td>상태 경계/운영/복구</td><td>Q3: 혼합 세션 버전과 rollback</td></tr><tr><td>조회 경계</td><td>Q4: 카드 개수 집계와 상세 응답 분리</td></tr><tr><td>권한/외부 효과</td><td>Q5: 설계 전달은 구현·배포 승인과 다름</td></tr><tr><td>R5-A cardinality</td><td>Q6: acted category가 JS에 전달하는 데이터의 단위</td></tr><tr><td>R5-B schema·plan</td><td>Q7: candidate bound와 역방향 인덱스의 관계</td></tr><tr><td>R5-C 관측성</td><td>Q8: 500ms 목표와 stage log threshold</td></tr>
   </tbody></table>
   <output id="progress" aria-live="polite">5문항 · 확인 0개</output>
   <form class="quiz" data-answer="b" data-explanation="추천 CPU는 HTTP의 일부다. 실제 새 세션 요청 전체를 재야 한다." data-next="검증 계획의 HTTP 측정 조건을 확인한다."><fieldset><legend>Q1. 추천 함수가 30ms면 첫 응답 500ms 목표를 달성했나?</legend><label><input type="radio" name="q1" value="a">달성했다</label><label><input type="radio" name="q1" value="b">DB·인증·저장 등을 포함한 전체 요청 측정이 필요하다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
@@ -159,10 +178,13 @@
   <form class="quiz" data-answer="b" data-explanation="설정 rollback은 새 세션에만 적용된다. v2 세션이 남아 있으면 v2 실행 코드를 유지해야 한다." data-next="TTL과 진행 요청을 확인하는 배포 절차를 따른다."><fieldset><legend>Q3. v2 사용 중 문제가 생겨 신규 세션 설정을 v1로 돌렸다.</legend><label><input type="radio" name="q3" value="a">즉시 v2를 모르는 과거 바이너리로 내려도 된다</label><label><input type="radio" name="q3" value="b">기존 v2 세션은 v2로 처리하며 호환 코드를 유지한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
   <form class="quiz" data-answer="a" data-explanation="feed는 AVAILABLE 링크만 집계한다. detail의 기사·언론사 응답은 유지한다." data-next="실제 PostgreSQL 집계 및 상세 회귀를 확인한다."><fieldset><legend>Q4. feed에서 기사 전체 로딩을 없앤다는 의미는?</legend><label><input type="radio" name="q4" value="a">개수는 동일하게 집계하고 상세 API의 기사 정보는 유지한다</label><label><input type="radio" name="q4" value="b">상세에서도 기사 정보를 제거하고 모든 링크를 개수로 센다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
   <form class="quiz" data-answer="b" data-explanation="설계 문서와 셀프 체크는 구현 승인·운영 활성화 승인과 별개다." data-next="구현 범위와 운영 활성화 승인 범위를 별도로 기록한다."><fieldset><legend>Q5. 이 문서를 받거나 셀프 체크를 완료하면?</legend><label><input type="radio" name="q5" value="a">구현·운영 배포가 자동 승인된다</label><label><input type="radio" name="q5" value="b">설계 전달일 뿐, 구현과 배포 권한은 자동으로 생기지 않는다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
+  <form class="quiz" data-answer="b" data-explanation="entity를 부분 hydrate하면 행동한 이슈 수가 JS·identity map에 남는다. DB에서 DISTINCT category_code scalar만 반환해야 한다." data-next="구현된 raw scalar query와 high-cardinality fixture를 실제 PostgreSQL에서 추가 검증한다."><fieldset><legend>Q6. 행동 이력이 커질 때 acted category 조회는?</legend><label><input type="radio" name="q6" value="a">이슈 id와 categoryCode를 entity로 읽고 JS에서 중복 제거한다</label><label><input type="radio" name="q6" value="b">DB에서 DISTINCT category code만 scalar로 반환한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
+  <form class="quiz" data-answer="a" data-explanation="schema를 바꾸지 않으므로 최신 사용자 LIKE를 DB에서 축약한 뒤 relation.from_issue_id와 기존 인덱스를 활용하고 target 후보로 필터링한다. candidate bound만으로 전체 relation 작업량을 보장한다고 과장하지 않는다." data-next="실제 PostgreSQL EXPLAIN에서 source-first join과 결과 parity를 확인한다."><fieldset><legend>Q7. schema 변경 없이 connected candidate를 개선하려면?</legend><label><input type="radio" name="q7" value="a">최신 사용자 LIKE → relation.from_issue_id → candidate target 필터 순서로 조회한다</label><label><input type="radio" name="q7" value="b">to_issue_id partial index migration을 추가한다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
+  <form class="quiz" data-answer="a" data-explanation="500ms 목표를 진단하려면 기본 threshold도 500ms로 맞춰야 한다. 로그에는 SQL·식별자·본문을 넣지 않는다." data-next="배포 전후 low-cardinality 로그량을 확인하고 필요하면 env로 threshold를 조정한다."><fieldset><legend>Q8. stage diagnostics 기본 threshold는?</legend><label><input type="radio" name="q8" value="a">500ms로 두고 sample rate 0을 유지한다</label><label><input type="radio" name="q8" value="b">1,000ms를 유지하면 500ms 목표 미달도 충분히 진단된다</label></fieldset><button type="submit">확인</button><div class="result" hidden><p>상태: <strong class="status"></strong></p><p>설명: <span class="explanation"></span></p><p>다음 행동: <span class="next-action"></span></p></div></form>
   <div id="quiz-navigation" hidden><button id="previous" type="button">이전</button><button id="next" type="button">다음</button></div>
   <noscript><p>JavaScript가 꺼져 있으면 모든 문항을 읽을 수 있지만 자동 결과 표시는 사용할 수 없다.</p></noscript>
 </section>
-<section id="approval-state"><h2>11. 승인·인계 상태</h2><p>현재 승인 범위: <strong>이 설계의 구현과 새 세션 v2 기본 활성화</strong>. 사용자가 v2를 기본값으로 적용하도록 명시했다. 사용자 이해 상태: 미실시(비차단). 코드 구현과 검증의 실제 상태는 별도 구현 제어 문서에 기록하며, 실제 배포 실행과 운영 p95 판정은 별도 운영 절차로 둔다.</p><p>알고리즘 상한을 늘리거나 제약·상태·호환 절차를 바꾸어야 하면 구현을 멈추고 설계를 갱신·재승인받는다. 구현 제어 문서에는 실제 diff, 검증 결과, 미검증을 별도로 기록한다.</p></section>
+<section id="approval-state"><h2>11. 승인·인계 상태</h2><p>현재 승인 범위: <strong>기존 robust first-feed 구현, 새 세션 v2 기본 활성화, R5-A~E 후속 delta</strong>. R5-A~E는 schema·migration 없이 구현·focused/unit 검증까지 반영됐다. 사용자 이해 상태: 미실시(비차단). 코드 구현과 검증의 실제 상태는 별도 구현 제어 문서에 기록한다.</p><p>운영 활성화와 실제 PostgreSQL·HTTP p95 측정은 별도 승인·검증 대상이며, 구현 승인을 다시 기다리는 상태는 아니다.</p></section>
 </article></main>
 <footer>설계 근거: issueRecommendation.ts · issueFeed.service.ts · issueCardQuery.repository.ts · issueQuery.repository.ts · 기존 unit/fixture tests. 이 문서는 개선 완료 보고서가 아니다.</footer>
 <script>
