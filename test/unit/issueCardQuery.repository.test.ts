@@ -126,14 +126,85 @@ test('issue card projection uses EntityManager metadata and available article po
   ]);
 });
 
+test('feed card projection은 상세 기사 payload 없이 카드 계약 필드를 유지한다', async () => {
+  const issueRow = issuePersistenceRow(ISSUE_ID, {
+    title: '카드 제목',
+    categoryCode: 'housing',
+    freshnessScore: 0.7,
+    importanceScore: 0.9,
+  });
+  const detail: IssueQueryDetailPersistenceEntity = {
+    id: '00000000-0000-7000-8000-000000000022',
+    issueId: ISSUE_ID,
+    integratedSummary: '통합 요약',
+    summaryLines: ['첫째', '둘째', '셋째'],
+    viewpoints: [{ statement: '관점', articleIds: [] }],
+    glossary: [{ term: '용어', definition: '설명', articleIds: [] }],
+  };
+  const fieldsByEntity = new Map<unknown, unknown>();
+  const { entityManager } = fakeEntityManager({
+    find: async (entity, _where, options) => {
+      fieldsByEntity.set(entity, options);
+      if (entity === IssueQueryIssueEntity) return [issueRow];
+      if (entity === IssueCategorySchema) return [{ code: 'housing', displayName: '주거' }];
+      if (entity === IssueQueryDetailEntity) return [detail];
+      return [];
+    },
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const cards = await repository.findFeedCards(new Set([ISSUE_ID]));
+
+  assert.deepEqual(cards, [
+    {
+      id: ISSUE_ID,
+      title: '카드 제목',
+      categoryCode: 'housing',
+      categoryName: '주거',
+      eventAt: issueRow.eventAt,
+      publishedAt: issueRow.publishedAt,
+      integratedSummary: '통합 요약',
+      summaryLines: ['첫째', '둘째', '셋째'],
+      publicationStatus: 'PUBLISHED',
+      freshnessScore: 0.7,
+      importanceScore: 0.9,
+      articleCount: 0,
+    },
+  ]);
+  assert.deepEqual((fieldsByEntity.get(IssueQueryIssueEntity) as { fields: string[] }).fields, [
+    'id',
+    'title',
+    'categoryCode',
+    'eventAt',
+    'publishedAt',
+    'publicationStatus',
+    'freshnessScore',
+    'importanceScore',
+  ]);
+  assert.deepEqual((fieldsByEntity.get(IssueCategorySchema) as { fields: string[] }).fields, [
+    'code',
+    'displayName',
+  ]);
+  assert.deepEqual((fieldsByEntity.get(IssueQueryDetailEntity) as { fields: string[] }).fields, [
+    'id',
+    'issueId',
+    'integratedSummary',
+    'summaryLines',
+  ]);
+});
+
 test('user context reads only positive onboarding preferences through ORM metadata', async () => {
   const userId = '00000000-0000-7000-8000-000000000001';
   const whereByEntity = new Map<unknown, unknown>();
+  const fieldsByEntity = new Map<unknown, unknown>();
   const { entityManager } = fakeEntityManager({
-    findOne: async (entity) =>
-      entity === UserSchema ? { id: userId, ageGroup: 'AGE_35_49' } : null,
-    find: async (entity, where) => {
+    findOne: async (entity, _where, options) => {
+      fieldsByEntity.set(entity, options);
+      return entity === UserSchema ? { id: userId, ageGroup: 'AGE_35_49' } : null;
+    },
+    find: async (entity, where, options) => {
       whereByEntity.set(entity, where);
+      fieldsByEntity.set(entity, options);
       if (entity === UserCategoryPreferenceSchema) {
         return [
           { categoryCode: 'politics', weight: 0 },
@@ -179,6 +250,287 @@ test('user context reads only positive onboarding preferences through ORM metada
     userId,
     weight: { $gt: 0 },
   });
+  assert.deepEqual((fieldsByEntity.get(UserSchema) as { fields: string[] }).fields, [
+    'id',
+    'ageGroup',
+  ]);
+  assert.deepEqual(
+    (fieldsByEntity.get(UserCategoryPreferenceSchema) as { fields: string[] }).fields,
+    ['userCategoryPreferencesId', 'userId', 'categoryCode', 'weight'],
+  );
+  assert.deepEqual(
+    (fieldsByEntity.get(UserEntityPreferenceSchema) as { fields: string[] }).fields,
+    ['userEntityPreferenceId', 'userId', 'entityId', 'weight'],
+  );
+  assert.deepEqual(
+    (fieldsByEntity.get(UserRegionPreferenceSchema) as { fields: string[] }).fields,
+    ['id', 'userId', 'regionCode', 'weight'],
+  );
+});
+
+test('통합 회원 피드는 사용자 기준 단일 MikroORM QueryBuilder 조회를 사용한다', async () => {
+  const userId = '00000000-0000-0000-0000-000000000041';
+  const entityId = '00000000-0000-0000-0000-000000000042';
+  const createdEntities: unknown[] = [];
+  let executeCalls = 0;
+  const { entityManager, calls } = fakeEntityManager({
+    createQueryBuilder: (entity) => {
+      createdEntities.push(entity);
+      const query: FakeQueryBuilder = {
+        __subquery: true,
+        select: () => query,
+        where: () => query,
+        andWhere: () => query,
+        distinct: () => query,
+        distinctOn: () => query,
+        orderBy: () => query,
+        innerJoin: () => query,
+        leftJoin: () => query,
+        as: () => query,
+        execute: async () => {
+          executeCalls += 1;
+          return entity === UserSchema
+            ? [
+                {
+                  user_id: userId,
+                  age_group: 'AGE_35_49',
+                  selected_category_codes: '{"zeta","alpha","zeta"}',
+                  selected_entity_ids: JSON.stringify([entityId, entityId]),
+                  preferred_region_codes: ['SEOUL', 'BUSAN', 'SEOUL'],
+                  acted_category_codes: '["policy","housing","policy"]',
+                },
+              ]
+            : [];
+        },
+        getResultList: async () => [],
+      };
+      return query;
+    },
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const inputs = await repository.findFeedMemberInputs(userId);
+
+  assert.deepEqual(inputs, {
+    context: {
+      userId,
+      selectedCategoryCodes: ['alpha', 'zeta'],
+      selectedEntityIds: [entityId],
+      preferredRegionCodes: ['BUSAN', 'SEOUL'],
+      ageGroup: 'AGE_35_49',
+    },
+    actedCategoryCodes: ['housing', 'policy'],
+  });
+  assert.equal(calls.length, 0);
+  assert.equal(executeCalls, 1);
+  assert.deepEqual(createdEntities, [
+    UserCategoryPreferenceSchema,
+    UserEntityPreferenceSchema,
+    UserRegionPreferenceSchema,
+    IssueQueryInteractionEntity,
+    UserSchema,
+  ]);
+});
+
+test('통합 회원 피드는 사용자 부재와 빈 배열을 null·빈 목록으로 정규화한다', async () => {
+  const userId = '00000000-0000-0000-0000-000000000043';
+  const missingRepository = new IssueCardQueryRepository(
+    fakeEntityManager({
+      createQueryBuilder: (entity) => fakeMemberInputQuery(entity, []),
+    }).entityManager,
+  );
+  assert.deepEqual(await missingRepository.findFeedMemberInputs(userId), {
+    context: null,
+    actedCategoryCodes: [],
+  });
+
+  const emptyRepository = new IssueCardQueryRepository(
+    fakeEntityManager({
+      createQueryBuilder: (entity) =>
+        fakeMemberInputQuery(entity, [
+          {
+            user_id: userId,
+            age_group: null,
+            selected_category_codes: '{}',
+            selected_entity_ids: '{}',
+            preferred_region_codes: null,
+            acted_category_codes: '[]',
+          },
+        ]),
+    }).entityManager,
+  );
+  assert.deepEqual(await emptyRepository.findFeedMemberInputs(userId), {
+    context: {
+      userId,
+      selectedCategoryCodes: [],
+      selectedEntityIds: [],
+      preferredRegionCodes: [],
+      ageGroup: null,
+    },
+    actedCategoryCodes: [],
+  });
+});
+
+test('회원 행동 분류는 사용자 ID 서브쿼리와 최소 projection만 사용한다', async () => {
+  const userId = '00000000-0000-7000-8000-000000000041';
+  const queryCalls: { select?: unknown; where?: unknown } = {};
+  const fieldsByEntity = new Map<unknown, unknown>();
+  const interactionQuery: FakeQueryBuilder = {
+    __subquery: true,
+    select: (fields) => {
+      queryCalls.select = fields;
+      return interactionQuery;
+    },
+    where: (where) => {
+      queryCalls.where = where;
+      return interactionQuery;
+    },
+    andWhere: () => interactionQuery,
+    distinctOn: () => interactionQuery,
+    orderBy: () => interactionQuery,
+    getResultList: async () => [],
+  };
+  const { entityManager } = fakeEntityManager({
+    createQueryBuilder: (entity, alias) => {
+      assert.equal(entity, IssueQueryInteractionEntity);
+      assert.equal(alias, 'event');
+      return interactionQuery;
+    },
+    find: async (entity, where, options) => {
+      fieldsByEntity.set(entity, options);
+      assert.equal(entity, IssueQueryIssueEntity);
+      assert.deepEqual(where, { id: { $in: interactionQuery } });
+      return [
+        { id: ISSUE_ID, categoryCode: 'housing' },
+        { id: '00000000-0000-7000-8000-000000000042', categoryCode: 'policy' },
+      ];
+    },
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  assert.deepEqual(await repository.findActedCategoryCodes(userId), ['housing', 'policy']);
+  assert.equal(queryCalls.select, 'event.issueId');
+  assert.deepEqual(queryCalls.where, { userId });
+  assert.deepEqual((fieldsByEntity.get(IssueQueryIssueEntity) as { fields: string[] }).fields, [
+    'id',
+    'categoryCode',
+  ]);
+});
+
+test('회원 후보는 interaction 목록 없이 사용자 ID subquery를 모든 후보 slice에 적용한다', async () => {
+  const userId = '00000000-0000-7000-8000-000000000043';
+  const candidateConditions: unknown[] = [];
+  const createdEntities: unknown[] = [];
+  const { entityManager } = fakeEntityManager({
+    getConnection: () => ({}),
+    createQueryBuilder: (entity) => {
+      createdEntities.push(entity);
+      const query: FakeQueryBuilder = {
+        __subquery: true,
+        select: () => query,
+        where: () => query,
+        andWhere: (condition) => {
+          candidateConditions.push(condition);
+          return query;
+        },
+        distinct: () => query,
+        distinctOn: () => query,
+        orderBy: () => query,
+        innerJoin: () => query,
+        leftJoin: () => query,
+        limit: () => query,
+        execute: async () => [],
+        getResultList: async () => [],
+      };
+      void entity;
+      return query;
+    },
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const scope: IssueCandidateScope = {
+    memberUserId: userId,
+    highScoreThreshold: 0.8,
+    selectedCategoryCodes: [],
+    selectedEntityIds: [],
+    preferredRegionCodes: [],
+    ageGroup: null,
+    actedCategoryCodes: [],
+    connectedIssueIds: [],
+  };
+  await repository.findCandidates(new Set(), 2, scope);
+
+  const exclusionPredicates = candidateConditions.filter(
+    (condition): condition is { id: { $nin: unknown } } =>
+      typeof condition === 'object' && condition !== null && 'id' in condition,
+  );
+  assert.ok(exclusionPredicates.length >= 3);
+  assert.ok(exclusionPredicates.every((condition) => '$nin' in condition.id));
+  assert.ok(createdEntities.filter((entity) => entity === IssueQueryInteractionEntity).length >= 3);
+});
+
+test('연결 후보 여부는 후보를 선별한 같은 QueryBuilder projection에서 계산한다', async () => {
+  const userId = '00000000-0000-7000-8000-000000000044';
+  const targetId = '00000000-0000-7000-8000-000000000045';
+  const target = issuePersistenceRow(targetId);
+  const selectedProjections: unknown[] = [];
+  const joinCalls: unknown[] = [];
+  let candidateExecuteCalls = 0;
+  const { entityManager } = fakeEntityManager({
+    createQueryBuilder: () => {
+      const query: FakeQueryBuilder = {
+        __subquery: true,
+        select: (fields) => {
+          selectedProjections.push(fields);
+          return query;
+        },
+        where: () => query,
+        andWhere: (condition) => {
+          joinCalls.push(condition);
+          return query;
+        },
+        distinct: () => query,
+        distinctOn: () => query,
+        orderBy: () => query,
+        innerJoin: (...args) => {
+          joinCalls.push(args);
+          return query;
+        },
+        leftJoin: (...args) => {
+          joinCalls.push(args);
+          return query;
+        },
+        limit: () => query,
+        execute: async () => {
+          candidateExecuteCalls += 1;
+          return candidateExecuteCalls === 1 ? [] : [{ id: targetId, connectedIssueId: targetId }];
+        },
+        getResultList: async () => [],
+      };
+      return query;
+    },
+    find: async (entity) => (entity === IssueQueryIssueEntity ? [target] : []),
+  });
+  const repository = new IssueCardQueryRepository(entityManager);
+
+  const candidates = await repository.findFeedCandidates(new Set(), 1, {
+    memberUserId: userId,
+    highScoreThreshold: 0.8,
+    selectedCategoryCodes: [],
+    selectedEntityIds: [],
+    preferredRegionCodes: [],
+    ageGroup: null,
+    actedCategoryCodes: [],
+    connectedIssueIds: [],
+  });
+
+  assert.equal(candidates[0]?.connected, true);
+  assert.equal(candidateExecuteCalls, 2);
+  const connectedProjections = selectedProjections
+    .flatMap((fields) => (Array.isArray(fields) ? fields : []))
+    .filter((projection) => projection === 'connectedIssue.connectedIssueId as connectedIssueId');
+  assert.ok(connectedProjections.length >= 2);
+  assert.ok(joinCalls.some((call) => Array.isArray(call) && call[1] === 'connectedIssue'));
 });
 
 test('scoped candidates use ORM projections, public filtering, exclusion, and bounded slices', async () => {
@@ -365,7 +717,7 @@ test('latest interactions are selected by PostgreSQL query builder and follow-up
     verifiedAt: new Date('2026-01-03T00:00:00.000Z'),
   };
   const queryCalls: {
-    select?: string | readonly string[];
+    select?: unknown;
     where?: unknown;
     distinctOn?: string;
     orderBy?: unknown;
@@ -441,6 +793,7 @@ test('latest interactions are selected by PostgreSQL query builder and follow-up
 
 interface FakeEntityManager {
   getContext: (useContext?: boolean) => FakeEntityManager;
+  getConnection?: () => unknown;
   createQueryBuilder: (entity: unknown, alias?: string) => FakeQueryBuilder;
   isInTransaction: () => boolean;
   count: (entity: unknown, where: unknown) => Promise<number>;
@@ -453,15 +806,22 @@ interface FakeEntityManager {
 
 interface FakeQueryBuilder {
   readonly __subquery: true;
-  select: (field: string | readonly string[]) => FakeQueryBuilder;
+  select: (field: unknown) => FakeQueryBuilder;
   where: (where: unknown) => FakeQueryBuilder;
   andWhere: (where: unknown) => FakeQueryBuilder;
+  distinct?: () => FakeQueryBuilder;
   distinctOn: (fields: string) => FakeQueryBuilder;
   orderBy: (orderBy: unknown) => FakeQueryBuilder;
+  innerJoin?: (...args: unknown[]) => FakeQueryBuilder;
+  leftJoin?: (...args: unknown[]) => FakeQueryBuilder;
+  as?: (alias: string) => unknown;
+  limit?: (limit: number) => FakeQueryBuilder;
+  execute?: (...args: unknown[]) => Promise<unknown[]>;
   getResultList: () => Promise<unknown[]>;
 }
 
 interface FakeEntityManagerOptions {
+  getConnection?: FakeEntityManager['getConnection'];
   createQueryBuilder?: FakeEntityManager['createQueryBuilder'];
   isInTransaction?: () => boolean;
   count?: (entity: unknown, where: unknown) => number | Promise<number>;
@@ -480,6 +840,7 @@ function fakeEntityManager(options: FakeEntityManagerOptions = {}): {
   let flushed = 0;
   const manager: FakeEntityManager = {
     getContext: () => manager,
+    getConnection: options.getConnection,
     createQueryBuilder:
       options.createQueryBuilder ??
       ((entity, alias) => {
@@ -488,8 +849,12 @@ function fakeEntityManager(options: FakeEntityManagerOptions = {}): {
           select: () => query,
           where: () => query,
           andWhere: () => query,
+          distinct: () => query,
           distinctOn: () => query,
           orderBy: () => query,
+          innerJoin: () => query,
+          leftJoin: () => query,
+          as: () => query,
           getResultList: async () => [],
         };
         void entity;
@@ -517,6 +882,24 @@ function fakeEntityManager(options: FakeEntityManagerOptions = {}): {
     calls,
     flushCount: () => flushed,
   };
+}
+
+function fakeMemberInputQuery(entity: unknown, rows: unknown[]): FakeQueryBuilder {
+  const query: FakeQueryBuilder = {
+    __subquery: true,
+    select: () => query,
+    where: () => query,
+    andWhere: () => query,
+    distinct: () => query,
+    distinctOn: () => query,
+    orderBy: () => query,
+    innerJoin: () => query,
+    leftJoin: () => query,
+    as: () => query,
+    execute: async () => (entity === UserSchema ? rows : []),
+    getResultList: async () => [],
+  };
+  return query;
 }
 
 function isFindOptionsWithLimit(value: unknown): value is { limit: number } {

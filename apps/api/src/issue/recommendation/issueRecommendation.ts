@@ -2,8 +2,8 @@ import type {
   IssueAgeGroup,
   FeedBatchItemRecord,
   FeedContinuation,
+  FeedRecommendationIssue,
   FeedSessionRecord,
-  IssueRecord,
   IssueSelectionType,
   UserInteractionRecord,
   UserRecommendationContext,
@@ -32,18 +32,20 @@ export const SELECTION_TARGETS: ReadonlyArray<readonly [IssueSelectionType, numb
 ];
 
 export interface RecommendationCandidate {
-  issue: IssueRecord;
+  issue: FeedRecommendationIssue;
   score: number;
   eligibleTypes: IssueSelectionType[];
   reasonCodes: string[];
 }
 
 export interface RecommendationInput {
-  issues: IssueRecord[];
+  issues: FeedRecommendationIssue[];
   context: UserRecommendationContext | null;
-  latestInteractions: UserInteractionRecord[];
+  /** Kept optional for v1/v2 callers that still construct the legacy input. */
+  latestInteractions?: UserInteractionRecord[];
   actedCategoryCodes: ReadonlySet<string>;
-  connectedIssueIds: ReadonlySet<string>;
+  /** Legacy fallback; production candidates carry `connected` on each row. */
+  connectedIssueIds?: ReadonlySet<string>;
   previousSession: Pick<
     FeedSessionRecord,
     'lastTopic' | 'lastRepresentativeEntityId' | 'topicRun' | 'entityRun'
@@ -646,7 +648,7 @@ interface SearchResult {
 }
 
 function scoreCandidate(
-  issue: IssueRecord,
+  issue: FeedRecommendationIssue,
   input: RecommendationInput,
   threshold: number,
 ): RecommendationCandidate | null {
@@ -661,7 +663,7 @@ function scoreCandidate(
     context?.ageGroup !== null && context?.ageGroup !== undefined
       ? issue.ageGroups.includes(context.ageGroup)
       : false;
-  const connected = input.connectedIssueIds.has(issue.id);
+  const connected = issue.connected ?? input.connectedIssueIds?.has(issue.id) ?? false;
   const knownMismatch = hasKnownMismatch(issue, context);
   const highImportance = scoreAtLeast(issue.importanceScore, threshold);
   const highFreshness = scoreAtLeast(issue.freshnessScore, threshold);
@@ -1068,7 +1070,7 @@ function stripSearchState(state: SearchState): RunState {
   };
 }
 
-function canAppend(issue: IssueRecord, state: RunState): boolean {
+function canAppend(issue: FeedRecommendationIssue, state: RunState): boolean {
   return canAppendSignature(
     {
       mainTopic: issue.mainTopic,
@@ -1086,7 +1088,7 @@ function canAppendSignature(signature: RunSignature, state: RunState): boolean {
   return !(sameTopic && state.topicRun >= 2) && !(sameEntity && state.entityRun >= 2);
 }
 
-function advanceRunState(issue: IssueRecord, previous: RunState): RunState {
+function advanceRunState(issue: FeedRecommendationIssue, previous: RunState): RunState {
   return advanceRunStateSignature(
     {
       mainTopic: issue.mainTopic,
@@ -1136,7 +1138,10 @@ function resolveContinuation(input: {
   return 'CONTINUE';
 }
 
-function hasKnownMismatch(issue: IssueRecord, context: UserRecommendationContext | null): boolean {
+function hasKnownMismatch(
+  issue: FeedRecommendationIssue,
+  context: UserRecommendationContext | null,
+): boolean {
   if (context === null) return false;
   const categoryKnown = context.selectedCategoryCodes.length > 0;
   const entityKnown = context.selectedEntityIds.length > 0;

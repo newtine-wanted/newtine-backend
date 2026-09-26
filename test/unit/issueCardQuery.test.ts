@@ -8,11 +8,15 @@ import {
   ISSUE_RECOMMENDATION_ALGORITHM_VERSION_V2,
   recommendFeed,
 } from '@newtine/api/issue/recommendation/issueRecommendation.js';
-import { InMemoryIssueQueryRepository } from '../fixtures/issue/inMemoryIssueQuery.repository.js';
+import {
+  InMemoryIssueQueryRepository,
+  type InMemoryIssueInteractionSeed,
+} from '../fixtures/issue/inMemoryIssueQuery.repository.js';
 import { testTransactionManager } from '../fixtures/transactionManager.js';
 import { toIssueDetailResponse } from '@newtine/api/issue/type/issueDetail.mapper.js';
 import type {
   IssueRecord,
+  IssueCandidateScope,
   IssueRelationRecord,
   TransactionManager,
   UserInteractionRecord,
@@ -85,6 +89,57 @@ test('single feed collection starts an internal session and advances by an opaqu
   assert.equal(new Set([...first.items, ...second.items].map((item) => item.issueId)).size, 12);
 });
 
+test('새 피드 첫 페이지는 생성한 세션과 빈 배치를 다시 읽지 않는다', async () => {
+  const repository = new InMemoryIssueQueryRepository({
+    issues: Array.from({ length: 12 }, (_, index) => issue(index + 1)),
+  });
+  let sessionReads = 0;
+  let batchReads = 0;
+  let batchListReads = 0;
+  const originalSessionRead = repository.findFeedSession.bind(repository);
+  const originalBatchRead = repository.findFeedBatch.bind(repository);
+  const originalBatchListRead = repository.findFeedBatches.bind(repository);
+  repository.findFeedSession = async (...args) => {
+    sessionReads += 1;
+    return originalSessionRead(...args);
+  };
+  repository.findFeedBatch = async (...args) => {
+    batchReads += 1;
+    return originalBatchRead(...args);
+  };
+  repository.findFeedBatches = async (...args) => {
+    batchListReads += 1;
+    return originalBatchListRead(...args);
+  };
+
+  const service = new IssueFeedService(repository, testTransactionManager);
+  await service.getFeed({ kind: 'MEMBER', userId: USER_ID });
+
+  assert.equal(sessionReads, 0);
+  assert.equal(batchReads, 0);
+  assert.equal(batchListReads, 0);
+});
+
+test('배치 저장 후에는 canonical 결과를 사용하고 저장 직후 재조회하지 않는다', async () => {
+  const repository = new InMemoryIssueQueryRepository({ issues: [issue(1)] });
+  let batchReads = 0;
+  const originalBatchRead = repository.findFeedBatch.bind(repository);
+  repository.findFeedBatch = async (...args) => {
+    batchReads += 1;
+    return originalBatchRead(...args);
+  };
+
+  const service = new IssueFeedService(repository, testTransactionManager);
+  const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
+  await service.getBatch({
+    owner: { kind: 'MEMBER', userId: USER_ID },
+    sessionId: session.sessionId,
+    batchNo: 0,
+  });
+
+  assert.equal(batchReads, 1);
+});
+
 test('feed batch generation is owned by the supplied transaction manager', async () => {
   const repository = new InMemoryIssueQueryRepository({ issues: [issue(1)] });
   let transactionCalls = 0;
@@ -109,8 +164,8 @@ test('feed batch generation is owned by the supplied transaction manager', async
 test('feed preparation stays outside the transaction and only the save is transactional', async () => {
   const repository = new InMemoryIssueQueryRepository({ issues: [issue(1)] });
   let transactionDepth = 0;
-  const originalFindCandidates = repository.findCandidates.bind(repository);
-  repository.findCandidates = async (excludedIssueIds, limit, scope) => {
+  const originalFindCandidates = repository.findFeedCandidates.bind(repository);
+  repository.findFeedCandidates = async (excludedIssueIds, limit, scope) => {
     assert.equal(transactionDepth, 0);
     return originalFindCandidates(excludedIssueIds, limit, scope);
   };
@@ -181,6 +236,47 @@ test('guest feed uses an anonymous owner and skips member context reads', async 
     }),
     /탐색 세션을 찾을 수 없습니다/,
   );
+});
+
+test('회원 피드는 통합 회원 입력 조회만 호출하고 개별 조회 결과를 사용한다', async () => {
+  const repository = new InMemoryIssueQueryRepository({ issues: [issue(1)] });
+  let feedMemberInputsCalls = 0;
+  let contextCalls = 0;
+  let actedCategoryCalls = 0;
+  let capturedScope: IssueCandidateScope | undefined;
+  const originalFindFeedCandidates = repository.findFeedCandidates.bind(repository);
+  repository.findFeedMemberInputs = async (userId) => {
+    feedMemberInputsCalls += 1;
+    assert.equal(userId, USER_ID);
+    return { context: context(), actedCategoryCodes: ['acted-category'] };
+  };
+  repository.findUserContext = async () => {
+    contextCalls += 1;
+    throw new Error('개별 context 조회가 호출되었다');
+  };
+  repository.findActedCategoryCodes = async () => {
+    actedCategoryCalls += 1;
+    throw new Error('개별 acted 조회가 호출되었다');
+  };
+  repository.findFeedCandidates = async (excludedIssueIds, limit, scope) => {
+    capturedScope = scope;
+    return originalFindFeedCandidates(excludedIssueIds, limit, scope);
+  };
+
+  const service = new IssueFeedService(repository, testTransactionManager);
+  const session = await service.createSession({ kind: 'MEMBER', userId: USER_ID });
+  const result = await service.getBatch({
+    owner: { kind: 'MEMBER', userId: USER_ID },
+    sessionId: session.sessionId,
+    batchNo: 0,
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(feedMemberInputsCalls, 1);
+  assert.equal(contextCalls, 0);
+  assert.equal(actedCategoryCalls, 0);
+  assert.deepEqual(capturedScope?.selectedCategoryCodes, ['housing']);
+  assert.deepEqual(capturedScope?.actedCategoryCodes, ['acted-category']);
 });
 
 test('새 피드 세션이 설정된 추천 알고리즘 버전을 스냅샷한다', async () => {
@@ -262,6 +358,127 @@ test('connected cards require a verified later FOLLOW_UP event', async () => {
   assert.equal(
     result.items.some((item) => item.issueId === source.id),
     false,
+  );
+});
+
+test('회원 피드는 모든 행동 이슈를 제외하고 사용자 ID로 acted 분류를 계산한다', async () => {
+  const acted = issue(1, { categoryCode: 'acted-category' });
+  const untouched = issue(2, { categoryCode: 'untouched-category' });
+  const repository = new InMemoryIssueQueryRepository({
+    issues: [acted, untouched],
+    interactions: [
+      {
+        id: '00000000-0000-7000-8000-100000000002',
+        userId: USER_ID,
+        issueId: acted.id,
+        eventType: 'SKIP',
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      },
+    ],
+  });
+
+  const candidates = await repository.findFeedCandidates(new Set(), 10, {
+    memberUserId: USER_ID,
+    highScoreThreshold: 0.8,
+    selectedCategoryCodes: [],
+    selectedEntityIds: [],
+    preferredRegionCodes: [],
+    ageGroup: null,
+    actedCategoryCodes: [],
+    connectedIssueIds: [],
+  });
+
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.id),
+    [untouched.id],
+  );
+  assert.deepEqual(await repository.findActedCategoryCodes(USER_ID), ['acted-category']);
+});
+
+test('최신 상호작용이 LIKE가 아니면 FOLLOW_UP을 연결 카드로 표시하지 않는다', async () => {
+  const source = issue(1, { eventAt: new Date('2026-01-01T00:00:00.000Z') });
+  const target = issue(2, { eventAt: new Date('2026-01-02T00:00:00.000Z') });
+  const interactions: InMemoryIssueInteractionSeed[] = [
+    {
+      id: '00000000-0000-7000-8000-100000000003',
+      userId: USER_ID,
+      issueId: source.id,
+      eventType: 'LIKE',
+      acceptedOrder: 1,
+      createdAt: new Date('2026-01-01T01:00:00.000Z'),
+    },
+    {
+      id: '00000000-0000-7000-8000-100000000004',
+      userId: USER_ID,
+      issueId: source.id,
+      eventType: 'SKIP',
+      acceptedOrder: 2,
+      createdAt: new Date('2026-01-01T02:00:00.000Z'),
+    },
+  ];
+  const repository = new InMemoryIssueQueryRepository({
+    issues: [source, target],
+    interactions,
+    relations: [relation(source.id, target.id)],
+  });
+
+  const candidates = await repository.findFeedCandidates(new Set(), 10, {
+    memberUserId: USER_ID,
+    highScoreThreshold: 0.8,
+    selectedCategoryCodes: [],
+    selectedEntityIds: [],
+    preferredRegionCodes: [],
+    ageGroup: null,
+    actedCategoryCodes: [],
+    connectedIssueIds: [],
+  });
+
+  assert.deepEqual(
+    candidates.map((candidate) => ({ id: candidate.id, connected: candidate.connected })),
+    [{ id: target.id, connected: false }],
+  );
+});
+
+test('동일 acceptedOrder에서는 id DESC로 최신 PASS를 선택한다', async () => {
+  const source = issue(1, { eventAt: new Date('2026-01-01T00:00:00.000Z') });
+  const target = issue(2, { eventAt: new Date('2026-01-02T00:00:00.000Z') });
+  const repository = new InMemoryIssueQueryRepository({
+    issues: [source, target],
+    interactions: [
+      {
+        id: '00000000-0000-0000-0000-100000000005',
+        userId: USER_ID,
+        issueId: source.id,
+        eventType: 'LIKE',
+        acceptedOrder: 3,
+        createdAt: new Date('2026-01-03T00:00:00.000Z'),
+      },
+      {
+        id: '00000000-0000-0000-0000-100000000006',
+        userId: USER_ID,
+        issueId: source.id,
+        eventType: 'PASS',
+        acceptedOrder: 3,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ],
+    relations: [relation(source.id, target.id)],
+  });
+
+  const candidates = await repository.findFeedCandidates(new Set(), 10, {
+    memberUserId: USER_ID,
+    highScoreThreshold: 0.8,
+    selectedCategoryCodes: [],
+    selectedEntityIds: [],
+    preferredRegionCodes: [],
+    ageGroup: null,
+    actedCategoryCodes: [],
+    connectedIssueIds: [],
+  });
+
+  assert.deepEqual(
+    candidates.map((candidate) => ({ id: candidate.id, connected: candidate.connected })),
+    [{ id: target.id, connected: false }],
   );
 });
 

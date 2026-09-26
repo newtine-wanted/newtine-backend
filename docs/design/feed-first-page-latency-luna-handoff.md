@@ -1,10 +1,14 @@
 # 첫 피드 조회 개선 — 실행 계약
 
+# 이전 실행 계약 안내
+
+2026-09-21부터 이 문서는 최초 설계의 보조 실행 계약으로 보관한다. 현재 구현 기준은 [robust 설계](feed-first-page-latency-design.html)와 [구현 제어 문서](feed-first-page-latency-implementation.html)다. 특히 새 세션 fast path, typed recommendation/card projection, canonical save outcome, low-cardinality stage diagnostics 범위가 추가되었으므로 이 파일의 이전 scope·검증 상태를 현재 구현 지시로 사용하지 않는다.
+
 ## 상태와 시작 조건
 
 - 이 파일은 설계 승인 당시 확정한 **구현 실행 계약**이다. 실제 as-built·검증·리뷰 상태는 [구현 제어 문서](feed-first-page-latency-implementation.html)에 기록한다.
-- [설계 기준](feed-first-page-latency-design.html): `main@092eec8`, 2026-09-20. 구현 승인됨.
-- 구현 worktree: `/Users/hyunseok/.codex/worktrees/feed-first-page-latency/newtine-backend`, 브랜치 `codex/feed-first-page-latency`. 원본 main의 무관한 변경은 가져오거나 수정하지 않았다.
+- [설계 기준](feed-first-page-latency-design.html): `b6b90e2`, 2026-09-21. 구현 승인됨.
+- 구현 worktree: `/Users/hyunseok/.codex/worktrees/feed-first-page-latency/newtine-backend`, 현재 detached worktree. 원본 main의 무관한 변경은 가져오거나 수정하지 않았다.
 - 사용자가 설계를 승인하고 구현을 요청했으며, 이 계약에 따라 구현했다. 커밋·push·배포는 별도 범위다.
 - 역할: Luna max, 단일 write owner. 새 판단이 필요한 경우 구현을 중단하고 상위 설계 판단으로 돌린다. 구현 후 별도 no-write critical review를 수행한다.
 - 승인 후 `feed-first-page-latency-implementation.html`에 승인 범위·실제 변경·검증·미검증을 기록했다. 설계 문서를 구현 완료 기록으로 바꾸지 않는다.
@@ -48,9 +52,9 @@
 
 - `loadIssueRecords(feed | detail)`로 명시. `findCandidates`, `findIssuesByIds`는 feed; `findIssue`는 detail.
 - IssueRecord 반환형 및 모든 기존 필드의 의미 유지. 후보 summary/impacts 등은 여전히 읽는다. 최종10개만 hydrate하는 DTO 재설계는 이번 범위 아님.
-- feed의 article links/full article/publisher 로딩을 매개변수화된 ORM query-builder grouped count로 대체한다. raw scalar 결과를 사용한다. AVAILABLE 기사만 링크 수를 세고 issue별0 기본값. 숫자 변환·중복 JOIN 방지.
+- feed의 article links/full article/publisher 로딩을 매개변수화된 ORM query-builder grouped count로 대체한다. scalar projection 결과를 사용한다. AVAILABLE 기사만 링크 수를 세고 issue별0 기본값. 숫자 변환·중복 JOIN 방지.
 - detail의 기사 순서·내용·publisher fallback은 그대로.
-- candidate slice에서 raw ID만 조회한다. partial managed entity를 identity map에 남기지 않는다. 기존 where/order/limit, slice 순서, seenIds, budget+1 sentinel, 후처리 public filter를 유지한다. 새 raw SQL 경계가 필요하면 자동 확장하지 말고 에스컬레이션.
+- candidate slice에서 QueryBuilder로 ID만 조회한다. partial managed entity를 identity map에 남기지 않는다. 기존 where/order/limit, slice 순서, seenIds, budget+1 sentinel, 후처리 public filter를 유지한다. 새 standalone raw SQL 경계가 필요하면 자동 확장하지 말고 에스컬레이션.
 - 저장 후 bulk 카드 재조회와 현재 공개 조건 검사는 유지한다. 후보 단계 객체를 캐시해서 바로 응답하지 않는다.
 
 ### D. 버전·활성화

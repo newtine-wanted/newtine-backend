@@ -18,8 +18,11 @@ import {
   IssueException,
   IssueExceptionCode,
   type FeedBatchRecord,
-  type FeedBatchSaveResult,
+  type FeedBatchSaveOutcome,
   type FeedAlgorithmSnapshot,
+  type FeedCardProjection,
+  type FeedMemberInputs,
+  type FeedRecommendationIssue,
   type FeedOwner,
   type FeedSessionRecord,
   type IssueCandidateScope,
@@ -165,7 +168,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
   async saveFeedBatch(
     session: FeedSessionRecord,
     batch: FeedBatchRecord,
-  ): Promise<FeedBatchSaveResult> {
+  ): Promise<FeedBatchSaveOutcome> {
     const manager = this.currentEntityManager();
     if (!manager.isInTransaction()) {
       throw new Error('feed batch transaction context is unavailable');
@@ -197,7 +200,16 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       feedSessionId: batch.sessionId,
       batchNo: batch.batchNo,
     });
-    if (existing !== null) return 'EXISTING';
+    if (existing !== null) {
+      const canonicalBatch = (await this.loadBatches([existing]))[0];
+      if (canonicalBatch === undefined) {
+        throw new IssueException(
+          IssueExceptionCode.FeedBatchConflict,
+          '저장된 탐색 묶음을 다시 읽을 수 없습니다.',
+        );
+      }
+      return { status: 'EXISTING', batch: canonicalBatch };
+    }
 
     const latest = await manager.findOne(
       FeedBatchEntity,
@@ -248,7 +260,7 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     currentSession.entityRun = session.entityRun;
     manager.persist(currentSession);
     await manager.flush();
-    return 'SAVED';
+    return { status: 'SAVED', batch };
   }
 
   async findCandidates(
@@ -256,56 +268,172 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
     limit?: number,
     scope?: IssueCandidateScope,
   ): Promise<IssueRecord[]> {
-    const candidateLimit = limit === undefined ? undefined : normalizeLimit(limit);
-    if (candidateLimit === 0) return [];
-
     const manager = this.currentSqlEntityManager();
-    const publicIssueIds = publicIssueDetailIds(manager);
-    const baseWhere = candidateWhere(publicIssueIds, excludedIssueIds);
-    if (scope === undefined || candidateLimit === undefined) {
-      const orderedIssueIds = await this.findCandidateIds(manager, baseWhere, candidateLimit);
-      const issues = await this.loadIssueRecords(new Set(orderedIssueIds), 'feed', orderedIssueIds);
-      return issues.filter(isPublicIssue).slice(0, candidateLimit);
+    const candidateSelection = await this.findCandidateIssueIds(
+      manager,
+      excludedIssueIds,
+      limit,
+      scope,
+    );
+    const issues = await this.loadIssueRecords(
+      new Set(candidateSelection.issueIds),
+      'feed',
+      candidateSelection.issueIds,
+    );
+    const candidateLimit = limit === undefined ? undefined : normalizeLimit(limit);
+    return issues.filter(isPublicIssue).slice(0, candidateLimit);
+  }
+
+  async findFeedCandidates(
+    excludedIssueIds: ReadonlySet<string>,
+    limit: number,
+    scope?: IssueCandidateScope,
+  ): Promise<FeedRecommendationIssue[]> {
+    const candidateLimit = normalizeLimit(limit);
+    if (candidateLimit === 0) return [];
+    const manager = this.currentSqlEntityManager();
+    const candidateSelection = await this.findCandidateIssueIds(
+      manager,
+      excludedIssueIds,
+      candidateLimit,
+      scope,
+    );
+    const connectedIssueIds =
+      scope?.memberUserId === undefined
+        ? new Set(scope?.connectedIssueIds ?? [])
+        : candidateSelection.connectedIssueIds;
+    return this.loadFeedRecommendationIssues(
+      new Set(candidateSelection.issueIds),
+      candidateSelection.issueIds,
+      connectedIssueIds,
+    );
+  }
+
+  async findFeedCards(ids: ReadonlySet<string>): Promise<FeedCardProjection[]> {
+    return this.loadFeedCardProjections(ids);
+  }
+
+  async findFeedMemberInputs(userId: string): Promise<FeedMemberInputs> {
+    const manager = this.currentSqlEntityManager();
+    const selectedCategoryCodes = manager
+      .createQueryBuilder(UserCategoryPreferenceSchema, 'preference')
+      .select(
+        sql`coalesce(array_agg(distinct ${sql.ref('preference.category_code')} order by ${sql.ref('preference.category_code')}), ARRAY[]::text[])`,
+      )
+      .where({ userId: sql.ref('user.id'), weight: { $gt: 0 } });
+    const selectedEntityIds = manager
+      .createQueryBuilder(UserEntityPreferenceSchema, 'preference')
+      .select(
+        sql`coalesce(array_agg(distinct ${sql.ref('preference.entity_id')}::text order by ${sql.ref('preference.entity_id')}::text), ARRAY[]::text[])`,
+      )
+      .where({ userId: sql.ref('user.id'), weight: { $gt: 0 } });
+    const preferredRegionCodes = manager
+      .createQueryBuilder(UserRegionPreferenceSchema, 'preference')
+      .select(
+        sql`coalesce(array_agg(distinct ${sql.ref('preference.region_code')} order by ${sql.ref('preference.region_code')}), ARRAY[]::text[])`,
+      )
+      .where({ userId: sql.ref('user.id'), weight: { $gt: 0 } });
+    const actedCategoryCodes = manager
+      .createQueryBuilder(IssueQueryInteractionEntity, 'event')
+      .select(
+        sql`coalesce(array_agg(distinct ${sql.ref('issue.category_code')} order by ${sql.ref('issue.category_code')}), ARRAY[]::text[])`,
+      )
+      .innerJoin(sql.ref('issues'), 'issue', {
+        'event.issueId': sql.ref('issue.id'),
+      })
+      .where({ userId: sql.ref('user.id') });
+    const rows = (await manager
+      .createQueryBuilder(UserSchema, 'user')
+      .select([
+        'user.id as user_id',
+        'user.ageGroup as age_group',
+        selectedCategoryCodes.as('selected_category_codes'),
+        selectedEntityIds.as('selected_entity_ids'),
+        preferredRegionCodes.as('preferred_region_codes'),
+        actedCategoryCodes.as('acted_category_codes'),
+      ] as never)
+      .where({ id: userId })
+      .execute('all', false)) as FeedMemberInputsRow[];
+    const row = rows[0];
+    const persistedUserId = nullableString(row?.user_id ?? row?.userId);
+    if (persistedUserId === null) {
+      return { context: null, actedCategoryCodes: [] };
     }
 
-    const issueIds: string[] = [];
-    const seenIds = new Set(excludedIssueIds);
-    let remainingRows = candidateLimit;
-    for (const slice of buildCandidateSlices(manager, scope)) {
-      if (remainingRows === 0) break;
-      const sliceLimit = Math.min(
-        remainingRows,
-        Math.max(1, Math.floor(candidateLimit * slice.weight)),
-      );
-      const rows = await this.findCandidateIds(
-        manager,
-        combineIssueFilters(candidateWhere(publicIssueIds, seenIds), slice.where),
-        sliceLimit,
-      );
-      for (const issueId of rows) {
-        if (seenIds.has(issueId)) continue;
-        seenIds.add(issueId);
-        issueIds.push(issueId);
-        remainingRows -= 1;
-        if (remainingRows === 0) break;
-      }
-    }
-    if (remainingRows > 0) {
-      const rows = await this.findCandidateIds(
-        manager,
-        candidateWhere(publicIssueIds, seenIds),
-        remainingRows,
-      );
-      for (const issueId of rows) {
-        if (seenIds.has(issueId)) continue;
-        seenIds.add(issueId);
-        issueIds.push(issueId);
-        remainingRows -= 1;
-        if (remainingRows === 0) break;
-      }
-    }
-    const issues = await this.loadIssueRecords(new Set(issueIds), 'feed', issueIds);
-    return issues.filter(isPublicIssue).slice(0, candidateLimit);
+    return {
+      context: {
+        userId: persistedUserId,
+        selectedCategoryCodes: sortedStringArray(
+          row?.selected_category_codes ?? row?.selectedCategoryCodes,
+        ),
+        selectedEntityIds: sortedStringArray(row?.selected_entity_ids ?? row?.selectedEntityIds),
+        preferredRegionCodes: sortedStringArray(
+          row?.preferred_region_codes ?? row?.preferredRegionCodes,
+        ),
+        ageGroup: ageGroupValue(row?.age_group ?? row?.ageGroup),
+      },
+      actedCategoryCodes: sortedStringArray(row?.acted_category_codes ?? row?.actedCategoryCodes),
+    };
+  }
+
+  async findActedCategoryCodes(userId: string): Promise<string[]> {
+    const manager = this.currentSqlEntityManager();
+    const interactionIssueIds = manager
+      .createQueryBuilder(IssueQueryInteractionEntity, 'event')
+      .select('event.issueId')
+      .where({ userId });
+    const rows = await manager.find(
+      IssueQueryIssueEntity,
+      {
+        id: { $in: interactionIssueIds },
+      },
+      {
+        fields: ['id', 'categoryCode'],
+      },
+    );
+    return uniqueStrings(rows.map((row) => row.categoryCode)).sort((left, right) =>
+      left.localeCompare(right),
+    );
+  }
+
+  async findConnectedIssueIds(seedIssueIds: ReadonlySet<string>): Promise<string[]> {
+    if (seedIssueIds.size === 0) return [];
+    const manager = this.currentEntityManager();
+    const relations = await manager.find(
+      IssueQueryRelationEntity,
+      {
+        fromIssueId: { $in: [...seedIssueIds] },
+        relationType: 'FOLLOW_UP',
+      },
+      {
+        fields: ['fromIssueId', 'toIssueId', 'relationType', 'verifiedAt'],
+      },
+    );
+    if (relations.length === 0) return [];
+    const issueIds = new Set(
+      relations.flatMap((relation) => [relation.fromIssueId, relation.toIssueId]),
+    );
+    const issues = await manager.find(
+      IssueQueryIssueEntity,
+      { id: { $in: [...issueIds] } },
+      { fields: ['id', 'eventAt'] },
+    );
+    const eventAtById = new Map(
+      issues.map((issue) => [issue.id, nullableDate(issue.eventAt)?.getTime() ?? null]),
+    );
+    return uniqueStrings(
+      relations
+        .filter(
+          (relation) =>
+            relation.verifiedAt !== null &&
+            relation.verifiedAt !== undefined &&
+            (eventAtById.get(relation.fromIssueId) ?? null) !== null &&
+            (eventAtById.get(relation.toIssueId) ?? null) !== null &&
+            (eventAtById.get(relation.toIssueId) as number) >
+              (eventAtById.get(relation.fromIssueId) as number),
+        )
+        .map((relation) => relation.toIssueId),
+    );
   }
 
   async findIssue(id: string): Promise<IssueRecord | null> {
@@ -320,23 +448,29 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
 
   async findUserContext(userId: string): Promise<UserRecommendationContext | null> {
     const manager = this.currentEntityManager();
-    const user = await manager.findOne(UserSchema, { id: userId });
+    const user = await manager.findOne(UserSchema, { id: userId }, { fields: ['id', 'ageGroup'] });
     if (user === null) return null;
     const [categoryPreferences, entityPreferences, regionPreferences] = await Promise.all([
       manager.find(
         UserCategoryPreferenceSchema,
         { userId, weight: { $gt: 0 } },
-        { orderBy: { categoryCode: 'ASC' } },
+        {
+          fields: ['userCategoryPreferencesId', 'userId', 'categoryCode', 'weight'],
+          orderBy: { categoryCode: 'ASC' },
+        },
       ),
       manager.find(
         UserEntityPreferenceSchema,
         { userId, weight: { $gt: 0 } },
-        { orderBy: { entityId: 'ASC' } },
+        {
+          fields: ['userEntityPreferenceId', 'userId', 'entityId', 'weight'],
+          orderBy: { entityId: 'ASC' },
+        },
       ),
       manager.find(
         UserRegionPreferenceSchema,
         { userId, weight: { $gt: 0 } },
-        { orderBy: { regionCode: 'ASC' } },
+        { fields: ['id', 'userId', 'regionCode', 'weight'], orderBy: { regionCode: 'ASC' } },
       ),
     ]);
     return {
@@ -390,30 +524,126 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       }));
   }
 
+  private async findCandidateIssueIds(
+    manager: PostgreSqlEntityManager,
+    excludedIssueIds: ReadonlySet<string>,
+    limit: number | undefined,
+    scope: IssueCandidateScope | undefined,
+  ): Promise<CandidateIssueSelection> {
+    const candidateLimit = limit === undefined ? undefined : normalizeLimit(limit);
+    if (candidateLimit === 0) return emptyCandidateIssueSelection();
+
+    const publicIssueIds = publicIssueDetailIds(manager);
+    const baseWhere = candidateWhere(publicIssueIds, excludedIssueIds);
+    if (scope === undefined || candidateLimit === undefined) {
+      return toCandidateIssueSelection(
+        await this.findCandidateIds(manager, baseWhere, candidateLimit, scope?.memberUserId),
+      );
+    }
+
+    const issueIds: string[] = [];
+    const connectedIssueIds = new Set<string>();
+    const seenIds = new Set(excludedIssueIds);
+    let remainingRows = candidateLimit;
+    const memberUserId = scope?.memberUserId;
+    for (const slice of buildCandidateSlices(manager, scope)) {
+      if (remainingRows === 0) break;
+      const sliceLimit = Math.min(
+        remainingRows,
+        Math.max(1, Math.floor(candidateLimit * slice.weight)),
+      );
+      const rows = await this.findCandidateIds(
+        manager,
+        combineIssueFilters(candidateWhere(publicIssueIds, seenIds), slice.where),
+        sliceLimit,
+        memberUserId,
+        slice.connectedUserId,
+      );
+      for (const row of rows) {
+        if (seenIds.has(row.id)) continue;
+        seenIds.add(row.id);
+        issueIds.push(row.id);
+        if (row.connected) connectedIssueIds.add(row.id);
+        remainingRows -= 1;
+        if (remainingRows === 0) break;
+      }
+    }
+    if (remainingRows > 0) {
+      const rows = await this.findCandidateIds(
+        manager,
+        candidateWhere(publicIssueIds, seenIds),
+        remainingRows,
+        memberUserId,
+      );
+      for (const row of rows) {
+        if (seenIds.has(row.id)) continue;
+        seenIds.add(row.id);
+        issueIds.push(row.id);
+        if (row.connected) connectedIssueIds.add(row.id);
+        remainingRows -= 1;
+        if (remainingRows === 0) break;
+      }
+    }
+    return { issueIds, connectedIssueIds };
+  }
+
   private async findCandidateIds(
     manager: PostgreSqlEntityManager,
     where: IssueFilter,
     limit?: number,
-  ): Promise<string[]> {
-    const query = manager
-      .createQueryBuilder(IssueQueryIssueEntity, 'issue')
-      .select('issue.id')
-      .where(where as unknown as QBFilterQuery<IssueQueryIssuePersistenceEntity, 'issue'>)
-      .orderBy(ISSUE_ORDER_BY);
+    memberUserId?: string,
+    connectedUserId?: string,
+  ): Promise<CandidateIssueIdRow[]> {
+    const query = manager.createQueryBuilder(IssueQueryIssueEntity, 'issue');
+    const connectionUserId = connectedUserId ?? memberUserId;
+    if (connectionUserId === undefined) {
+      query.select('issue.id');
+    } else {
+      const connectedIssueIds = connectedIssueIdsQuery(manager, connectionUserId);
+      const join =
+        connectedUserId === undefined ? query.leftJoin.bind(query) : query.innerJoin.bind(query);
+      join(connectedIssueIds, 'connectedIssue', {
+        'issue.id': sql.ref('connectedIssue.connectedIssueId'),
+      });
+      query.select(['issue.id', 'connectedIssue.connectedIssueId as connectedIssueId'] as never);
+    }
+    query.where(where as unknown as QBFilterQuery<IssueQueryIssuePersistenceEntity, 'issue'>);
+    if (memberUserId !== undefined) {
+      const interactedIssueIds = manager
+        .createQueryBuilder(IssueQueryInteractionEntity, 'interaction')
+        .select('interaction.issueId')
+        .where({ userId: memberUserId });
+      query.andWhere({ id: { $nin: interactedIssueIds } });
+    }
+    query.orderBy(ISSUE_ORDER_BY);
     const maybeLimit = (query as unknown as { limit?: unknown }).limit;
+    const hasConnection =
+      typeof (manager as PostgreSqlEntityManager & { getConnection?: unknown }).getConnection ===
+      'function';
     if (limit !== undefined && typeof maybeLimit === 'function') {
       (maybeLimit as (value: number) => unknown).call(query, limit);
     }
     const maybeExecute = (query as unknown as { execute?: unknown }).execute;
     if (
-      typeof maybeExecute !== 'function' ||
-      (limit !== undefined && typeof maybeLimit !== 'function')
+      process.env.NODE_ENV === 'test' &&
+      !hasConnection &&
+      memberUserId === undefined &&
+      connectedUserId === undefined &&
+      (typeof maybeExecute !== 'function' || typeof maybeLimit !== 'function')
     ) {
+      // Lightweight repository doubles do not expose a SQL connection. Their
+      // ORM find path is an explicit test-only compatibility boundary.
       const rows = await manager.find(IssueQueryIssueEntity, where, {
         orderBy: ISSUE_ORDER_BY,
         ...(limit === undefined ? {} : { limit }),
       });
-      return rows.map((row) => row.id);
+      return rows.map((row) => ({ id: row.id, connected: false }));
+    }
+    if (
+      typeof maybeExecute !== 'function' ||
+      (limit !== undefined && typeof maybeLimit !== 'function')
+    ) {
+      throw new Error('candidate id projection query builder is unavailable');
     }
     const rows = (await query.execute('all', false)) as Array<Record<string, unknown>>;
     return rows.map((row, index) => {
@@ -424,8 +654,123 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
       if (typeof id !== 'string') {
         throw new Error(`candidate id projection returned an invalid id at index ${index}`);
       }
-      return id;
+      const connectedId = row.connectedIssueId ?? row.connected_issue_id;
+      return {
+        id,
+        connected:
+          row.connected === undefined
+            ? connectedId !== null && connectedId !== undefined
+            : booleanValue(row.connected),
+      };
     });
+  }
+
+  private async loadFeedRecommendationIssues(
+    issueIds: ReadonlySet<string>,
+    orderedIssueIds: readonly string[],
+    connectedIssueIds: ReadonlySet<string>,
+  ): Promise<FeedRecommendationIssue[]> {
+    if (issueIds.size === 0) return [];
+    const manager = this.currentEntityManager();
+    const [issueRows, impacts, entityLinks] = await Promise.all([
+      manager.find(
+        IssueQueryIssueEntity,
+        { id: { $in: [...issueIds] } },
+        {
+          fields: [
+            'id',
+            'categoryCode',
+            'mainTopic',
+            'representativeEntityId',
+            'eventAt',
+            'publicationStatus',
+            'freshnessScore',
+            'importanceScore',
+          ],
+        },
+      ),
+      manager.find(
+        IssueQueryImpactEntity,
+        { issueId: { $in: [...issueIds] } },
+        { fields: ['id', 'issueId', 'targetType', 'targetValue'] },
+      ),
+      manager.find(
+        IssueQueryEntityLinkEntity,
+        { issueId: { $in: [...issueIds] } },
+        { fields: ['issueEntitiesId', 'issueId', 'entityId'] },
+      ),
+    ]);
+    const impactsByIssue = groupBy(impacts, (row) => row.issueId);
+    const entityIdsByIssue = groupBy(entityLinks, (row) => row.issueId);
+    const issuesById = new Map(
+      issueRows.map((row) => {
+        const issueImpacts = impactsByIssue.get(row.id) ?? [];
+        return [
+          row.id,
+          toFeedRecommendationIssue(
+            row,
+            issueImpacts,
+            entityIdsByIssue.get(row.id) ?? [],
+            connectedIssueIds.has(row.id),
+          ),
+        ];
+      }),
+    );
+    return orderedIssueIds.flatMap((issueId) => {
+      const issue = issuesById.get(issueId);
+      return issue === undefined || !isUsableFeedRecommendationIssue(issue) ? [] : [issue];
+    });
+  }
+
+  private async loadFeedCardProjections(
+    issueIds: ReadonlySet<string>,
+  ): Promise<FeedCardProjection[]> {
+    if (issueIds.size === 0) return [];
+    const manager = this.currentEntityManager();
+    const issueRows = await manager.find(
+      IssueQueryIssueEntity,
+      { id: { $in: [...issueIds] } },
+      {
+        fields: [
+          'id',
+          'title',
+          'categoryCode',
+          'eventAt',
+          'publishedAt',
+          'publicationStatus',
+          'freshnessScore',
+          'importanceScore',
+        ],
+      },
+    );
+    if (issueRows.length === 0) return [];
+    const selectedIssueIds = new Set(issueRows.map((row) => row.id));
+    const categoryCodes = [...new Set(issueRows.map((row) => row.categoryCode))];
+    const [categories, details, articleCounts] = await Promise.all([
+      manager.find(
+        IssueCategorySchema,
+        { code: { $in: categoryCodes } },
+        { fields: ['code', 'displayName'] },
+      ),
+      manager.find(
+        IssueQueryDetailEntity,
+        { issueId: { $in: [...selectedIssueIds] } },
+        { fields: ['id', 'issueId', 'integratedSummary', 'summaryLines'] },
+      ),
+      this.loadAvailableArticleCounts(manager, selectedIssueIds),
+    ]);
+    const categoryByCode = new Map(
+      categories.map((category) => [String(category.code), String(category.displayName)]),
+    );
+    const detailsByIssue = new Map(details.map((detail) => [detail.issueId, detail]));
+    return issueRows.map((row) =>
+      toFeedCardProjection(
+        row,
+        categoryByCode.get(row.categoryCode) ?? row.categoryCode,
+        detailsByIssue.get(row.id),
+        articleCounts.get(row.id) ?? 0,
+      ),
+    );
   }
 
   private async loadIssueRecords(
@@ -626,12 +971,38 @@ export class IssueCardQueryRepository implements IssueQueryRepository {
   }
 }
 
+interface FeedMemberInputsRow {
+  user_id?: unknown;
+  userId?: unknown;
+  age_group?: unknown;
+  ageGroup?: unknown;
+  selected_category_codes?: unknown;
+  selectedCategoryCodes?: unknown;
+  selected_entity_ids?: unknown;
+  selectedEntityIds?: unknown;
+  preferred_region_codes?: unknown;
+  preferredRegionCodes?: unknown;
+  acted_category_codes?: unknown;
+  actedCategoryCodes?: unknown;
+}
+
 type IssueRecordLoadMode = 'feed' | 'detail';
 type IssueFilter = FilterQuery<IssueQueryIssuePersistenceEntity>;
+
+interface CandidateIssueIdRow {
+  id: string;
+  connected: boolean;
+}
+
+interface CandidateIssueSelection {
+  issueIds: string[];
+  connectedIssueIds: Set<string>;
+}
 
 interface CandidateSlice {
   where: IssueFilter;
   weight: number;
+  connectedUserId?: string;
 }
 
 const ISSUE_ORDER_BY = {
@@ -640,6 +1011,17 @@ const ISSUE_ORDER_BY = {
   eventAt: 'DESC',
   id: 'ASC',
 } as const;
+
+function emptyCandidateIssueSelection(): CandidateIssueSelection {
+  return { issueIds: [], connectedIssueIds: new Set() };
+}
+
+function toCandidateIssueSelection(rows: readonly CandidateIssueIdRow[]): CandidateIssueSelection {
+  return {
+    issueIds: rows.map((row) => row.id),
+    connectedIssueIds: new Set(rows.filter((row) => row.connected).map((row) => row.id)),
+  };
+}
 
 function buildCandidateSlices(
   manager: PostgreSqlEntityManager,
@@ -656,7 +1038,9 @@ function buildCandidateSlices(
   slices.push({ where: major, weight: 0.2 });
 
   const connectedIds = uniqueStrings(scope.connectedIssueIds);
-  if (connectedIds.length > 0) {
+  if (scope.memberUserId !== undefined) {
+    slices.push({ where: {}, weight: 0.15, connectedUserId: scope.memberUserId });
+  } else if (connectedIds.length > 0) {
     slices.push({ where: { id: { $in: connectedIds } }, weight: 0.15 });
   }
 
@@ -688,6 +1072,51 @@ function candidateWhere(
       id: { $in: publicIssueIds },
     },
     excludedIssueIds.size === 0 ? undefined : { id: { $nin: [...excludedIssueIds] } },
+  );
+}
+
+/**
+ * Builds the connected issue set as a MikroORM QueryBuilder subquery.
+ *
+ * The latest interaction is reduced before the relation joins so the
+ * source-first plan remains available without embedding a standalone SQL
+ * predicate in the candidate query.
+ */
+function connectedIssueIdsQuery(manager: PostgreSqlEntityManager, userId: string) {
+  const latestInteractions = manager
+    .createQueryBuilder(IssueQueryInteractionEntity, 'interaction')
+    .select([
+      'interaction.issueId as latestIssueId',
+      'interaction.eventType as latestEventType',
+    ] as never)
+    .where({ userId })
+    .distinctOn('interaction.issueId')
+    .orderBy({ issueId: QueryOrder.ASC, acceptedOrder: QueryOrder.DESC, id: QueryOrder.DESC });
+  return (
+    manager
+      .createQueryBuilder(IssueQueryRelationEntity, 'relation')
+      .select('relation.toIssueId as connectedIssueId' as never)
+      .distinct()
+      .innerJoin(latestInteractions, 'latestInteraction', {
+        'relation.fromIssueId': sql.ref('latestInteraction.latestIssueId'),
+      })
+      .innerJoin(sql.ref('issues'), 'sourceIssue', {
+        'relation.fromIssueId': sql.ref('sourceIssue.id'),
+      })
+      .innerJoin(sql.ref('issues'), 'targetIssue', {
+        'relation.toIssueId': sql.ref('targetIssue.id'),
+      })
+      .where({
+        'latestInteraction.latestEventType': 'LIKE',
+        'relation.relationType': 'FOLLOW_UP',
+        'relation.verifiedAt': { $ne: null },
+      } as never)
+      // Table-reference joins do not carry entity metadata into the outer
+      // filter, so use explicit snake_case identifiers while keeping the
+      // predicate inside the QueryBuilder.
+      .andWhere(sql`${sql.ref('sourceIssue.event_at')} is not null`)
+      .andWhere(sql`${sql.ref('targetIssue.event_at')} is not null`)
+      .andWhere(sql`${sql.ref('targetIssue.event_at')} > ${sql.ref('sourceIssue.event_at')}`)
   );
 }
 
@@ -838,6 +1267,96 @@ function toIssue(
   };
 }
 
+type FeedRecommendationIssueRow = Pick<
+  IssueQueryIssuePersistenceEntity,
+  | 'id'
+  | 'categoryCode'
+  | 'mainTopic'
+  | 'representativeEntityId'
+  | 'eventAt'
+  | 'publicationStatus'
+  | 'freshnessScore'
+  | 'importanceScore'
+>;
+
+type FeedRecommendationImpactRow = Pick<
+  IssueQueryImpactPersistenceEntity,
+  'id' | 'issueId' | 'targetType' | 'targetValue'
+>;
+
+type FeedRecommendationEntityLinkRow = Pick<
+  IssueQueryEntityLinkPersistenceEntity,
+  'issueEntitiesId' | 'issueId' | 'entityId'
+>;
+
+type FeedCardIssueRow = Pick<
+  IssueQueryIssuePersistenceEntity,
+  | 'id'
+  | 'title'
+  | 'categoryCode'
+  | 'eventAt'
+  | 'publishedAt'
+  | 'publicationStatus'
+  | 'freshnessScore'
+  | 'importanceScore'
+>;
+
+type FeedCardDetailRow = Pick<
+  IssueQueryDetailPersistenceEntity,
+  'id' | 'issueId' | 'integratedSummary' | 'summaryLines'
+>;
+
+function toFeedRecommendationIssue(
+  row: FeedRecommendationIssueRow,
+  impacts: FeedRecommendationImpactRow[],
+  entityLinks: FeedRecommendationEntityLinkRow[],
+  connected: boolean,
+): FeedRecommendationIssue {
+  return {
+    id: row.id,
+    categoryCode: row.categoryCode,
+    mainTopic: nullableString(row.mainTopic),
+    representativeEntityId: nullableString(row.representativeEntityId),
+    entityIds: uniqueStrings(entityLinks.map((link) => link.entityId)),
+    regionCodes: uniqueStrings(
+      impacts
+        .filter((impact) => impact.targetType === 'REGION')
+        .map((impact) => impact.targetValue),
+    ),
+    ageGroups: impacts
+      .filter((impact) => impact.targetType === 'AGE_GROUP')
+      .map((impact) => impact.targetValue)
+      .filter(isAgeGroup),
+    eventAt: nullableDate(row.eventAt),
+    publicationStatus: publicationStatusValue(row.publicationStatus),
+    freshnessScore: numberValue(row.freshnessScore),
+    importanceScore: numberValue(row.importanceScore),
+    connected,
+  };
+}
+
+function toFeedCardProjection(
+  row: FeedCardIssueRow,
+  categoryName: string,
+  detail: FeedCardDetailRow | undefined,
+  articleCount: number,
+): FeedCardProjection {
+  return {
+    id: row.id,
+    title: row.title,
+    categoryCode: row.categoryCode,
+    categoryName,
+    eventAt: nullableDate(row.eventAt),
+    publishedAt: nullableDate(row.publishedAt),
+    integratedSummary: detail?.integratedSummary ?? null,
+    summaryLines: stringArray(detail?.summaryLines),
+    publicationStatus: publicationStatusValue(row.publicationStatus),
+    freshnessScore: numberValue(row.freshnessScore),
+    importanceScore: numberValue(row.importanceScore),
+    articleCount,
+  };
+}
+
 function toSession(row: FeedSessionPersistenceEntity, owner: FeedOwner): FeedSessionRecord {
   return {
     id: row.id,
@@ -904,6 +1423,18 @@ function isPublicIssue(issue: IssueRecord): boolean {
   );
 }
 
+function isUsableFeedRecommendationIssue(issue: FeedRecommendationIssue): boolean {
+  return (
+    issue.publicationStatus === 'PUBLISHED' &&
+    Number.isFinite(issue.freshnessScore) &&
+    issue.freshnessScore >= 0 &&
+    issue.freshnessScore <= 1 &&
+    Number.isFinite(issue.importanceScore) &&
+    issue.importanceScore >= 0 &&
+    issue.importanceScore <= 1
+  );
+}
+
 function groupBy<T>(rows: readonly T[], keyOf: (row: T) => string): Map<string, T[]> {
   const grouped = new Map<string, T[]>();
   for (const row of rows) {
@@ -926,6 +1457,10 @@ function activePreferenceValues(rows: readonly unknown[], property: string): str
       .filter((row) => numberValue(row.weight) > 0)
       .map((row) => stringValue(row[property])),
   ).sort((left, right) => left.localeCompare(right));
+}
+
+function sortedStringArray(value: unknown): string[] {
+  return uniqueStrings(stringArray(value)).sort((left, right) => left.localeCompare(right));
 }
 
 function normalizeLimit(value: number): number {
@@ -951,6 +1486,10 @@ function nullableString(value: unknown): string | null {
 function numberValue(value: unknown): number {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true || value === 'true' || value === 1 || value === '1';
 }
 
 function dateValue(value: unknown): Date {

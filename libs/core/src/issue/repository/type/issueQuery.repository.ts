@@ -62,12 +62,53 @@ export interface IssueRecord {
   impacts: IssueImpactRecord[];
 }
 
+/**
+ * The bounded read model consumed by the feed recommender. It intentionally
+ * excludes article/detail payloads and can materialize the connection signal
+ * on the candidate row before recommendation scoring.
+ */
+export interface FeedRecommendationIssue {
+  id: string;
+  categoryCode: string;
+  mainTopic: string | null;
+  representativeEntityId: string | null;
+  entityIds: string[];
+  regionCodes: string[];
+  ageGroups: AgeGroup[];
+  eventAt: Date | null;
+  publicationStatus: IssuePublicationStatus;
+  freshnessScore: number;
+  importanceScore: number;
+  connected?: boolean;
+}
+
+/** Card-only projection used after a feed batch has been canonically stored. */
+export interface FeedCardProjection {
+  id: string;
+  title: string;
+  categoryCode: string;
+  categoryName: string;
+  eventAt: Date | null;
+  publishedAt: Date | null;
+  integratedSummary: string | null;
+  summaryLines: string[];
+  publicationStatus: IssuePublicationStatus;
+  freshnessScore: number;
+  importanceScore: number;
+  articleCount: number;
+}
+
 export interface UserRecommendationContext {
   userId: string;
   selectedCategoryCodes: string[];
   selectedEntityIds: string[];
   preferredRegionCodes: string[];
   ageGroup: AgeGroup | null;
+}
+
+export interface FeedMemberInputs {
+  context: UserRecommendationContext | null;
+  actedCategoryCodes: string[];
 }
 
 export interface UserInteractionRecord {
@@ -91,6 +132,8 @@ export interface IssueRelationRecord {
  * a rare selection type is not hidden behind a global top-N query.
  */
 export interface IssueCandidateScope {
+  /** Member-only feed input used for DB-side interaction/connection predicates. */
+  memberUserId?: string;
   highScoreThreshold: number;
   selectedCategoryCodes: string[];
   selectedEntityIds: string[];
@@ -113,7 +156,7 @@ export interface GuestFeedOwner {
 export type FeedOwner = MemberFeedOwner | GuestFeedOwner;
 
 export interface FeedAlgorithmSnapshot {
-  /** Frozen on session creation; omitted by legacy callers defaults to v1. */
+  /** Frozen on session creation; omitted by legacy callers defaults to the current v2. */
   algorithmVersion?: string;
   candidateBudget: number;
   highScoreThreshold: number;
@@ -154,6 +197,12 @@ export interface FeedBatchRecord {
 
 export type FeedBatchSaveResult = 'SAVED' | 'EXISTING';
 
+export interface FeedBatchSaveOutcome {
+  status: FeedBatchSaveResult;
+  /** The winner selected while holding the session row lock. */
+  batch: FeedBatchRecord;
+}
+
 export interface IssueQueryRepository {
   createFeedSession(
     owner: FeedOwner,
@@ -163,18 +212,27 @@ export interface IssueQueryRepository {
   findFeedSession(id: string, owner: FeedOwner, now: Date): Promise<FeedSessionRecord | null>;
   findFeedBatch(sessionId: string, batchNo: number): Promise<FeedBatchRecord | null>;
   findFeedBatches(sessionId: string): Promise<FeedBatchRecord[]>;
-  saveFeedBatch(session: FeedSessionRecord, batch: FeedBatchRecord): Promise<FeedBatchSaveResult>;
+  saveFeedBatch(session: FeedSessionRecord, batch: FeedBatchRecord): Promise<FeedBatchSaveOutcome>;
   findCandidates(
     excludedIssueIds: ReadonlySet<string>,
     limit?: number,
     scope?: IssueCandidateScope,
   ): Promise<IssueRecord[]>;
+  findFeedCandidates(
+    excludedIssueIds: ReadonlySet<string>,
+    limit: number,
+    scope?: IssueCandidateScope,
+  ): Promise<FeedRecommendationIssue[]>;
+  findFeedCards(ids: ReadonlySet<string>): Promise<FeedCardProjection[]>;
   findIssue(id: string): Promise<IssueRecord | null>;
   /** Loads the public issue fields needed to resolve a stored card batch. */
   readonly findIssuesByIds?: (ids: ReadonlySet<string>) => Promise<IssueRecord[]>;
   findUserContext(userId: string): Promise<UserRecommendationContext | null>;
+  findFeedMemberInputs(userId: string): Promise<FeedMemberInputs>;
   findLatestInteractions(userId: string): Promise<UserInteractionRecord[]>;
   findFollowUps(issueIds: ReadonlySet<string>): Promise<IssueRelationRecord[]>;
+  findActedCategoryCodes(userId: string): Promise<string[]>;
+  findConnectedIssueIds(seedIssueIds: ReadonlySet<string>): Promise<string[]>;
 }
 
 export const ISSUE_QUERY_REPOSITORY = Symbol('ISSUE_QUERY_REPOSITORY');

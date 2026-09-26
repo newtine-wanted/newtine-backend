@@ -192,6 +192,17 @@ async function seedIssueData() {
     'INSERT INTO user_interaction_events (id, user_id, issue_id, session_id, event_type, created_at) VALUES (?, ?, ?, ?, ?, ?)',
     [secondInteractionId, userId, issueIds[1], randomUUID(), 'LIKE', interactionTimestamp],
   );
+  await execute(
+    'INSERT INTO issue_relations (from_issue_id, to_issue_id, relation_type, reason, evidence_refs, verified_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [
+      issueIds[1],
+      issueIds[2],
+      'FOLLOW_UP',
+      'smoke relation',
+      JSON.stringify([]),
+      interactionTimestamp,
+    ],
+  );
   expectedLatestInteractions.set(issueIds[0], { id: higherInteractionId, eventType: 'SKIP' });
   expectedLatestInteractions.set(issueIds[1], { id: secondInteractionId, eventType: 'LIKE' });
 
@@ -301,6 +312,11 @@ try {
   assert.equal(
     new Set([...memberFirstBody.items, ...memberSecondBody.items].map((item) => item.issueId)).size,
     12,
+  );
+  assert.ok(
+    [...memberFirstBody.items, ...memberSecondBody.items].some(
+      (item) => item.issueId === issueIds[2] && item.reasonCodes.includes('FOLLOW_UP_LIKE'),
+    ),
   );
   const memberReplay = await request(`/feed?cursor=${encodeURIComponent(memberCursor)}`, {
     headers: authorization,
